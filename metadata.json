@@ -1,0 +1,20 @@
+{
+  "name": "eth_wallet_ui",
+  "display_name": "Ethereum Wallet",
+  "version": "0.1.0",
+  "type": "ui_qml",
+  "interface": "universal",
+  "category": "wallet",
+  "description": "Send ether on one Ethereum network at a time, with the full set of fee controls. Holds no key material.",
+  "author": "Logos Core Team",
+  "main": "eth_wallet_ui_plugin",
+  "icon": "src/icons/eth_wallet.png",
+  "view": "qml/EthWalletView.qml",
+  "dependencies": ["eth_wallet_backend"],
+  "codegen": { "rep": "src/eth_wallet_ui.rep" },
+  "nix": {
+    "external_libraries": [],
+    "packages": { "build": [], "runtime": ["qt6.qtdeclarative"] },
+    "cmake": { "find_packages": [], "extra_sources": [], "extra_include_dirs": [], "extra_link_libraries": [] }
+  }
+}

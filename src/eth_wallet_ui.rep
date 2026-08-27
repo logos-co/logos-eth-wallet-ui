@@ -1,0 +1,59 @@
+// QtRO view contract for the Ethereum wallet.
+//
+// There is deliberately NO password parameter anywhere below, and there never may be. This
+// UI requests signatures and reads which accounts exist; the vault password is taken only by
+// signer_ui, and key material only ever reaches keystore_ui. CI asserts the absence.
+//
+// Everything crosses as a JSON string rather than a typed record, matching the backend's own
+// contract — the UI is a renderer, and inventing a second schema here would be a second place
+// for the two to disagree.
+class EthWalletUi
+{
+    PROP(QString statusText="Starting" READONLY)
+    PROP(QString lastError="" READONLY)
+    // True while a backend call is in flight, so the view can disable its actions.
+    PROP(bool busy=false READONLY)
+
+    // { chainId, key, name, nativeSymbol, testnet, explorer, rpcUrl, verifiedProxyMode }
+    PROP(QString activeNetworkJson="{}" READONLY)
+    PROP(QString networksJson="[]" READONLY)
+
+    PROP(QString accountsJson="[]" READONLY)
+    PROP(QString selectedAccount="" READONLY)
+
+    // Balances for the selected account on the active network. EMPTY means "not read yet",
+    // which the view must render as an em-dash — never as a zero, and never as the previous
+    // network's number.
+    PROP(QString balancesJson="" READONLY)
+    PROP(QString tokensJson="[]" READONLY)
+    PROP(QString historyJson="[]" READONLY)
+
+    // { baseFeePerGas, source, tiers: { slow, normal, fast } }. `source` distinguishes a real
+    // EIP-1559 suggestion from the legacy gasPrice fallback and is shown to the user, because
+    // a wallet silently pricing off gasPrice is how an overpayment goes unnoticed.
+    PROP(QString feeTiersJson="{}" READONLY)
+
+    // The last prepare_send result: the quote the Send screen renders.
+    PROP(QString quoteJson="{}" READONLY)
+
+    // The send awaiting a human, and its latest status. Empty when nothing is in flight.
+    PROP(QString pendingRequestId="" READONLY)
+    PROP(QString sendStatusJson="{}" READONLY)
+
+    SLOT(void refresh())
+    SLOT(void selectAccount(QString address))
+
+    // Refused by the backend while a send is awaiting approval; the error names the network
+    // the pending request was built for.
+    SLOT(void setActiveChain(int chainId))
+    SLOT(void setRpcUrl(int chainId, QString url))
+    SLOT(void setVerifiedProxyMode(int chainId, QString mode))
+
+    // Price a send without side effects — safe to call on every edit.
+    SLOT(void quote(QString requestJson))
+    // Ask a human to approve. Returns nothing signed; poll with pollSend().
+    SLOT(void submitSend(QString requestJson))
+    SLOT(void pollSend())
+    SLOT(void cancelSend())
+    SLOT(void refreshTxStatus(QString hashHex))
+}
