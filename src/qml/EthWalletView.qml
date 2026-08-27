@@ -19,6 +19,9 @@ import Logos.Theme
 // render as markup.
 Item {
     id: root
+    // Addressable by the headless harness, which drives tabs through selectTab() below —
+    // qt-mcp cannot click a LogosTabButton, and StackLayout exposes no invokable setter.
+    objectName: "ethWalletRoot"
     anchors.fill: parent
 
     // Paint the surface. Without this the QQuickWidget's white clear colour shows through and
@@ -136,7 +139,7 @@ Item {
             // Backend-authored; may contain anything.
             textFormat: Text.PlainText
             wrapMode: Text.WordWrap
-            color: Theme.palette.danger
+            color: Theme.palette.error
             text: root.ready ? root.backend.lastError : ""
         }
 
