@@ -9,24 +9,94 @@
 // for the two to disagree.
 class EthWalletUi
 {
-    PROP(QString statusText="Starting" READONLY)
     PROP(QString lastError="" READONLY)
-    // True while a backend call is in flight, so the view can disable its actions.
-    PROP(bool busy=false READONLY)
 
-    // { chainId, key, name, nativeSymbol, testnet, explorer, rpcUrl, verifiedProxyMode }
+    // Whether the account-and-chain-scoped values below were read under the selection also
+    // published here. False the moment either moves, and true again only once a read made
+    // under the new one lands: the view renders no scoped figure while it is false.
+    PROP(bool scopedDataFresh=false READONLY)
+    // A balances+history read is outstanding. The view spins only where a value is BOTH
+    // unknown and being read — a read that failed falls back to an em-dash, never to a
+    // spinner that never stops.
+    PROP(bool dataLoading=false READONLY)
+    PROP(bool quoteLoading=false READONLY)
+
+    // { chainId, key, name, nativeSymbol, testnet, rpcUrl, verifiedProxyMode, verifiedProxy }.
+    // `rpcUrl` is READ-ONLY here: eth_rpc owns the device-wide endpoint and the Ethereum RPC
+    // app is the only writer.
     PROP(QString activeNetworkJson="{}" READONLY)
     PROP(QString networksJson="[]" READONLY)
 
+    // eth_rpc's verdict for the active chain, via the backend:
+    // { ok, chainId, mode, state, usable, blocking, message, action, detail }.
+    // `blocking` true means this view is deliberately showing no chain data.
+    PROP(QString verifiedProxyJson="{}" READONLY)
+
     PROP(QString accountsJson="[]" READONLY)
     PROP(QString selectedAccount="" READONLY)
+    // Account names from the keystore, { "<lowercase hex, no 0x>": "<name>" }. An account with
+    // no entry is shown by address — never by an invented "Account 2", which RENUMBERS when an
+    // account is added or removed.
+    PROP(QString accountLabelsJson="{}" READONLY)
 
     // Balances for the selected account on the active network. EMPTY means "not read yet",
     // which the view must render as an em-dash — never as a zero, and never as the previous
     // network's number.
     PROP(QString balancesJson="" READONLY)
-    PROP(QString tokensJson="[]" READONLY)
-    PROP(QString historyJson="[]" READONLY)
+    // eth_rpc's own label for the read behind those balances: "verified" (proof-backed),
+    // "proxied" / "direct" (forwarded on trust) or "unknown". Only "verified" may be badged
+    // as verified — a receipt or a fee estimate never can. Empty means the label says
+    // nothing about what is on screen: nothing was read, or the verdict moved under it.
+    PROP(QString balancesRoute="" READONLY)
+    // Tokens on the active network. EMPTY means "not read yet" — a blank list is a claim
+    // that this network has none, and the previous network's symbols are not an answer.
+    PROP(QString tokensJson="" READONLY)
+    // The persisted token order, "alpha" or "balance". Device-wide rather than scoped: it
+    // rides back on every listing call, so it is republished by whichever answers last.
+    PROP(QString tokenSort="alpha" READONLY)
+    // The last list_available_tokens answer, VERBATIM: { ok, chainId, total, shown, listed,
+    // tokens, listError? }. Empty means "not searched yet". It carries the chain it is about,
+    // and the Manage tokens screen renders it only while that is still the active one — the
+    // previous network's catalogue is not an answer about this one.
+    PROP(QString availableTokensJson="" READONLY)
+    PROP(bool availableTokensLoading=false READONLY)
+    // A token is being enabled or disabled. Its OWN flag, not the search spinner above: two
+    // writers of one spinner is a spinner taken down while the other call is still running.
+    PROP(bool tokenToggleBusy=false READONLY)
+    // The last toggle's refusal, in the backend's own words. Disabling a builtin is refused,
+    // and the call answers nothing else — no event, no changed listing — so a refusal written
+    // to lastError would be a row springing back with its reason a screen away, cleared by the
+    // next refresh. Empty means the last write was not refused.
+    PROP(QString tokenToggleError="" READONLY)
+    // Rows carry their receipt numbers (feeWei, totalWei, blockNumber, nonce, …) only when
+    // the backend recorded them. A row written by an earlier build has none, and an absent
+    // field is an em-dash on the transaction screen — never a zero.
+    //
+    // EMPTY means "not read yet", exactly as balancesJson above: "[]" is the answer "this
+    // account has never sent anything", which a failed or unmade read may not give.
+    PROP(QString historyJson="" READONLY)
+    // Chains whose blocking verified proxy froze pending rows during the last sweep:
+    // [{ chainId, network, count, hashes, message, action, verifiedProxy }]. Includes chains
+    // this view is not showing, where a row frozen at "pending" is explained nowhere else —
+    // so empty is, like sweepingReceipts below, an answer a failed read may NOT give.
+    PROP(QString blockedChainsJson="" READONLY)
+    // True while the receipt sweep is still scheduled. False once no recorded transaction
+    // can move again — which is also the answer a failed read must NOT be allowed to give.
+    PROP(bool sweepingReceipts=false READONLY)
+
+    // Extra detail for ONE transaction, fetched on demand: { ok, hash, chainId, route,
+    // fetchedAt, gasPriceUnit, block?, transaction?, blockError?, transactionError? }.
+    //
+    // It CARRIES the hash it is about, and the screen renders it only for that hash — open one
+    // transaction, fetch, go back, open another, and the second must not show the first's
+    // mined time. Scoped like every other figure, so it is withdrawn with them.
+    PROP(QString txDetailsJson="" READONLY)
+    // A fetch is outstanding. The rows it will fill keep their em-dashes: one spinner on the
+    // control the user pressed says the same thing as four spinners spread over the card.
+    PROP(bool txDetailsLoading=false READONLY)
+    // A receipt re-read is outstanding. Its call runs the verified gate and then polls the
+    // chain, so it is asynchronous and the button that started it has to say it is running.
+    PROP(bool txStatusLoading=false READONLY)
 
     // { baseFeePerGas, source, tiers: { slow, normal, fast } }. `source` distinguishes a real
     // EIP-1559 suggestion from the legacy gasPrice fallback and is shown to the user, because
@@ -35,10 +105,21 @@ class EthWalletUi
 
     // The last prepare_send result: the quote the Send screen renders.
     PROP(QString quoteJson="{}" READONLY)
+    // The request those figures priced. The Send screen renders them only while this still
+    // equals the request the form describes: a quote for another request is not stale, it is
+    // about a form that is no longer on screen. Empty means nothing priced is standing.
+    PROP(QString quoteRequestJson="" READONLY)
+    // Errors from the Send path only. Separate from lastError because the Send dialog is
+    // modal: a message written to lastError renders behind the scrim, where nobody is looking.
+    PROP(QString sendError="" READONLY)
+    // True when the last automatic fee refresh failed. The previous quote stays on screen —
+    // the send is re-priced by the backend at submit time regardless — but the view says so.
+    PROP(bool quoteStale=false READONLY)
 
-    // The send awaiting a human, and its latest status. Empty when nothing is in flight.
+    // The send awaiting a human. Empty when nothing is in flight. Deliberately NOT withdrawn
+    // by a selection change: it is a request sitting in the signer, not a figure on screen,
+    // and forgetting it here would orphan an approval the user still has to answer.
     PROP(QString pendingRequestId="" READONLY)
-    PROP(QString sendStatusJson="{}" READONLY)
 
     SLOT(void refresh())
     SLOT(void selectAccount(QString address))
@@ -46,14 +127,32 @@ class EthWalletUi
     // Refused by the backend while a send is awaiting approval; the error names the network
     // the pending request was built for.
     SLOT(void setActiveChain(int chainId))
-    SLOT(void setRpcUrl(int chainId, QString url))
-    SLOT(void setVerifiedProxyMode(int chainId, QString mode))
 
     // Price a send without side effects — safe to call on every edit.
     SLOT(void quote(QString requestJson))
+    // Re-price the open Send dialog on a timer. Off while the dialog is closed.
+    SLOT(void setQuoteAutoRefresh(bool on))
     // Ask a human to approve. Returns nothing signed; poll with pollSend().
     SLOT(void submitSend(QString requestJson))
     SLOT(void pollSend())
     SLOT(void cancelSend())
     SLOT(void refreshTxStatus(QString hashHex))
+    // Read the block and transaction fields no receipt carries, for one recorded transaction.
+    SLOT(void fetchTxDetails(QString hashHex))
+    // Re-read the verdict alone. Deliberately not a full refresh: the chip polls it.
+    SLOT(void refreshVerifiedProxy())
+    // Sweep this account's still-pending transactions for receipts.
+    SLOT(void refreshPending())
+
+    // Persist the token order. Named apart from the `tokenSort` property it moves: the
+    // generated setter for a PROP already owns setTokenSort(), and a SLOT may not collide
+    // with it. Answered by a tokenSort change, not by an event.
+    SLOT(void chooseTokenSort(QString order))
+    // Search the catalogue offered on the active chain. The query goes to the BACKEND: the
+    // embedded Uniswap list is thousands of rows and may not be pulled into the view to be
+    // filtered there.
+    SLOT(void searchTokens(QString query))
+    // Enable or disable one token for the active chain, then re-read the balances — the
+    // backend call emits no event, so nothing else would move the Tokens tab.
+    SLOT(void setTokenEnabled(QString address, bool enabled))
 }
