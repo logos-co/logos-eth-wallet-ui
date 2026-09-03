@@ -19,16 +19,21 @@ else
     [ -n "$QT" ] || { echo "no Qt6Core: set QT_DIR to a qtbase prefix"; exit 2; }
 fi
 
+# Includes and link flags are kept apart because GNU ld resolves left to right:
+# a -lQt6Core sitting before the translation unit that needs it contributes
+# nothing, and the whole of QtCore comes back undefined at link. Apple's linker
+# does not care, so one list works everywhere until it reaches Linux.
 if [ -n "$QT" ]; then
     if [ -d "$QT/lib/QtCore.framework" ]; then
-        QTFLAGS=(-I"$QT/lib/QtCore.framework/Headers" -F"$QT/lib" -framework QtCore
-                 -Wl,-rpath,"$QT/lib")
+        QTINC=(-I"$QT/lib/QtCore.framework/Headers" -F"$QT/lib")
+        QTLIB=(-F"$QT/lib" -framework QtCore -Wl,-rpath,"$QT/lib")
     else
-        QTFLAGS=(-I"$QT/include" -I"$QT/include/QtCore" -L"$QT/lib" -lQt6Core
-                 -Wl,-rpath,"$QT/lib")
+        QTINC=(-I"$QT/include" -I"$QT/include/QtCore")
+        QTLIB=(-L"$QT/lib" -lQt6Core -Wl,-rpath,"$QT/lib")
     fi
 else
-    read -r -a QTFLAGS <<< "$(pkg-config --cflags --libs Qt6Core)"
+    read -r -a QTINC <<< "$(pkg-config --cflags Qt6Core)"
+    read -r -a QTLIB <<< "$(pkg-config --libs Qt6Core)"
 fi
 
 OUT=$(mktemp -d)
@@ -36,7 +41,7 @@ rc=0
 # Compiled in parallel: five independent translation units, and each one parses the whole of
 # QtCore.
 for t in test_*.cpp; do
-    ( c++ -std=c++17 -fPIC -I../src "${QTFLAGS[@]}" "$t" -o "$OUT/${t%.cpp}" \
+    ( c++ -std=c++17 -fPIC -I../src "${QTINC[@]}" "$t" "${QTLIB[@]}" -o "$OUT/${t%.cpp}" \
         2>"$OUT/${t%.cpp}.log" || touch "$OUT/${t%.cpp}.bad" ) &
 done
 wait
