@@ -88,6 +88,14 @@ jobs:
         env:
           QT_DIR: ${{ runner.temp }}/qt
           LOGOS_DESIGN_SYSTEM_QML: ${{ github.workspace }}/.design-system/src/qml
+          # nixpkgs builds Qt with -DQT_FEATURE_journald=ON, and Qt then routes
+          # every message to journald whenever stderr is not a tty — which on a
+          # runner it never is. The first green run of this job printed four
+          # probe headers and nothing between them: the probes had asserted
+          # 250 things into a journal nobody reads. Their exit codes still
+          # decided the job, so it was not lying about the result, but it was
+          # showing none of it, and the count below could not have been checked.
+          QT_LOGGING_TO_CONSOLE: "1"
         run: |
           set -euo pipefail
           # The probe half is the one that can go quiet: it exits 0 with a SKIP
@@ -105,3 +113,10 @@ jobs:
             grep -q -- "--- $p.qml" /tmp/tables.log \
               || { echo "::error::probe never ran: $p"; exit 1; }
           done
+          # Seven tables and four probes each sign off with one RESULT line, and
+          # a probe that reaches its last phase is the only thing that prints
+          # one. A header with silence under it counts here and passes nothing.
+          n=$(grep -c "RESULT: ALL PASS" /tmp/tables.log)
+          echo "sections that reported: $n"; [ "$n" -ge 11 ]
+          n=$(grep -c "  PASS  " /tmp/tables.log)
+          echo "assertions: $n"; [ "$n" -ge 500 ]
