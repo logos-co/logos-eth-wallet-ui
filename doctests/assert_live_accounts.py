@@ -93,6 +93,18 @@ def until(pred, window=WINDOW):
 
 print("0) the view is up, and the custodian fixture is the one that may write")
 check("the wallet view is loaded", oid("ethWalletRoot") is not None, True)
+# The role is the keystore's own state, not a file to stage: name the fixture through the
+# ungated `configure`. That document is TOTAL — a role it does not name is held by nobody —
+# so the approver is restated at its default rather than left out. Then read the name back
+# rather than trusting the reply.
+ROLES = {"approver": "signer_ui", "custodian": "keystore_custodian"}
+named = unwrap(call("evaluate", {"expression":
+    'logos.callModule("keystore_module","configure",%s)'
+    % json.dumps([json.dumps(ROLES)])}).get("result"))
+check("the keystore accepted the roles", named.get("ok"), True)
+check("and emptied neither, which a partial document would have",
+      (named.get("approver"), named.get("custodian")),
+      (ROLES["approver"], ROLES["custodian"]))
 who = custodian("identity", [])
 check("keystore_custodian holds the custodian role",
       who.get("identity") and who.get("identity") == who.get("custodian"), True)

@@ -285,8 +285,11 @@ invocation.
 account in the keystore and the wallet must stop showing the old name **without being
 reopened**. It never calls `refresh()` — that absence is the assertion, and section 4 fails the
 run if one creeps in. It needs `keystore_custodian` (the fixture in `keystore-module/doctests/
-custodian-probe`) staged and named as the custodian in `keystore.json`, because `set_label`
-refuses every other caller, this view included. Stage the plugin and its modules, then:
+custodian-probe`) staged, because `set_label` refuses every other caller, this view included.
+There is no config file to name it in: the harness names it itself, with a `configure` call on
+the keystore module — a total document, so it restates the approver at its default rather than
+emptying it — and section 0 fails the run if the names did not take. Stage the plugin and its
+modules, then:
 
 ```bash
 QT_QPA_PLATFORM=offscreen QML_INSPECTOR_PORT=3769 logos-standalone-app \
