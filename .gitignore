@@ -1,3 +1,4 @@
-result
+/result
 result-*
-/target
+/build
+__pycache__/

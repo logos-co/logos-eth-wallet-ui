@@ -1,0 +1,136 @@
+name: CI
+
+# The offline half of this view's suite — the half that needs no app.
+#
+# What runs: the seven C++ tables over the pure headers in src/, the four QML
+# probes that load the real view against a fabricated backend, and the source
+# assertions in assert_ui.py --grep-only.
+#
+# What does NOT run, and why: sections 1 and up of assert_ui.py, and
+# assert_live_accounts.py. Both drive a live logos-standalone-app over the QML
+# inspector on port 3768, and everything from their setup block down WRITES REAL
+# STATE — they import an account, switch the network and configure verified-proxy
+# mode. That needs all seven modules staged as -dev variants and a funded sepolia
+# key, so a PR runner cannot stand it up and this workflow does not pretend to.
+#
+# The two halves below use different Qt builds on purpose. The tables COMPILE, so
+# they take the distro's Qt and the distro's g++: linking a nix-built libQt6Core
+# into a binary the system toolchain produced puts two libstdc++ SONAMEs and two
+# glibcs in one process. The probes only RUN a prebuilt binary, so they take
+# nixpkgs' Qt, which is the newer one and the one the design system is developed
+# against. Every Qt symbol the tables touch (QString, QJson*, QRegularExpression,
+# QDeadlineTimer) predates Qt 6.0, so the older Qt costs no coverage.
+
+on:
+  pull_request:
+    branches: [master, main]
+  push:
+    branches: [master, main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  source-assertions:
+    name: assert_ui.py --grep-only
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Section 0 — the claims a source file can answer for
+        # Opens no socket: the live sections sit below the --grep-only exit.
+        run: python3 doctests/assert_ui.py --grep-only
+
+  tables:
+    environment: ${{ (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main') && 'public-cache' || '' }}
+    name: C++ tables + QML view probes
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Not a flake input: the design system is static-linked into the host
+      # binary, so this plugin declares nothing. Its SOURCE is still what the
+      # probes need to resolve Logos.* — checked out here rather than added to
+      # the lock for a test's sake.
+      - uses: actions/checkout@v4
+        with:
+          repository: logos-co/logos-design-system
+          path: .design-system
+
+      - name: Qt for the compiler
+        run: sudo apt-get update && sudo apt-get install -y qt6-base-dev
+
+      - name: Point run_tables.sh at it
+        # The script wants one prefix with include/ and lib/ under it; Debian
+        # splits Qt6 across the multiarch include and lib dirs, so compose one.
+        # Located by search rather than by a hardcoded triplet, and loud when
+        # it finds nothing — a prefix that is quietly wrong ends as a wall of
+        # "QString: No such file".
+        run: |
+          set -euo pipefail
+          # -print -quit rather than a pipe into head: under pipefail a find
+          # that outruns its reader dies of SIGPIPE and takes the step with it.
+          qtcore=$(find /usr/include -type d -name QtCore -path '*qt6*' -print -quit)
+          qtlib=$(find /usr/lib -name libQt6Core.so -print -quit)
+          if [ -z "$qtcore" ] || [ -z "$qtlib" ]; then
+            echo "::error::no Qt6 headers or libQt6Core.so under /usr"; exit 1
+          fi
+          mkdir -p "$RUNNER_TEMP/qt"
+          ln -sfn "$(dirname "$qtcore")" "$RUNNER_TEMP/qt/include"
+          ln -sfn "$(dirname "$qtlib")" "$RUNNER_TEMP/qt/lib"
+          test -f "$RUNNER_TEMP/qt/include/QtCore/QString"
+
+      - name: Install Nix and set up the shared cache
+        uses: logos-co/setup-nix-cache-action@v1
+        with:
+          attic-token-ci: ${{ secrets.ATTIC_TOKEN_CI }}
+          attic-token-public: ${{ secrets.ATTIC_TOKEN_PUBLIC }}
+          # Keep READING the old Cachix while the Attic caches fill up. The
+          # rust crate derivations this build needs are in Cachix and in no
+          # other cache -- so dropping it outright did not just cost cache
+          # hits, it turned "substitute a prebuilt path" into "build it from
+          # source", which fails. Credential-free: the cache is public, and
+          # nothing publishes here any more. Remove once Attic has the paths.
+          extra-nix-config: |
+            extra-substituters = https://logos-co.cachix.org
+            extra-trusted-public-keys = logos-co.cachix.org-1:12K8609ho1pCt0erUQrOrs/KmOuhWq/EhVwhzQRb35E=
+
+      - name: doctests/run_tables.sh
+        shell: bash
+        env:
+          QT_DIR: ${{ runner.temp }}/qt
+          LOGOS_DESIGN_SYSTEM_QML: ${{ github.workspace }}/.design-system/src/qml
+          # nixpkgs builds Qt with -DQT_FEATURE_journald=ON, and Qt then routes
+          # every message to journald whenever stderr is not a tty — which on a
+          # runner it never is. The first green run of this job printed four
+          # probe headers and nothing between them: the probes had asserted
+          # 250 things into a journal nobody reads. Their exit codes still
+          # decided the job, so it was not lying about the result, but it was
+          # showing none of it, and the count below could not have been checked.
+          QT_LOGGING_TO_CONSOLE: "1"
+        run: |
+          set -euo pipefail
+          # The probe half is the one that can go quiet: it exits 0 with a SKIP
+          # when it finds no Qt Quick runtime, which is the right default for a
+          # developer and the wrong one here. Both paths are handed over
+          # explicitly, and the log is checked for having taken them.
+          nix shell nixpkgs#qt6.qtdeclarative -c bash -c '
+            d=$(dirname $(dirname $(readlink -f $(command -v qml))))
+            QML_BIN="$d/bin/qml" QT_QML_DIR="$d/lib/qt-6/qml" \
+              ./doctests/run_tables.sh' 2>&1 | tee /tmp/tables.log
+          if grep -q "SKIP" /tmp/tables.log; then
+            echo "::error::the view probes skipped instead of running"; exit 1
+          fi
+          for p in probe_manage_tokens probe_token_identity probe_tokens_sort probe_tx_detail; do
+            grep -q -- "--- $p.qml" /tmp/tables.log \
+              || { echo "::error::probe never ran: $p"; exit 1; }
+          done
+          # Seven tables and four probes each sign off with one RESULT line, and
+          # a probe that reaches its last phase is the only thing that prints
+          # one. A header with silence under it counts here and passes nothing.
+          n=$(grep -c "RESULT: ALL PASS" /tmp/tables.log)
+          echo "sections that reported: $n"; [ "$n" -ge 11 ]
+          n=$(grep -c "  PASS  " /tmp/tables.log)
+          echo "assertions: $n"; [ "$n" -ge 500 ]
