@@ -121,6 +121,18 @@ class EthWalletUi
     // and forgetting it here would orphan an approval the user still has to answer.
     PROP(QString pendingRequestId="" READONLY)
 
+    // The KEYSTORE's name for the same request. Carried separately rather than sliced off
+    // `pendingRequestId`: string surgery on an opaque id would make the backend's format
+    // this view's business, and what a signer must be handed is the keystore's word, not
+    // ours. Empty exactly when `pendingRequestId` is.
+    PROP(QString pendingApprovalHandle="" READONLY)
+
+    // How the last send ended: `{ status, hash?, reason? }`, or empty before the first one.
+    // Set as `pendingRequestId` clears, because that is the instant the waiting dialog
+    // disappears — and the shell may be returning the user here at exactly that moment, so
+    // something has to be left on screen that explains the trip.
+    PROP(QString lastSendOutcomeJson="" READONLY)
+
     SLOT(void refresh())
     SLOT(void selectAccount(QString address))
 

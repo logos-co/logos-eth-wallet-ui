@@ -253,9 +253,14 @@ int main()
     std::printf("events inline and the selection can move inside it\n");
     {
         ScopedState s = screen();
-        const SendApplied a = applySend(s, q(R"({"ok":true,"requestId":"r-1"})"), true);
+        const SendApplied a =
+            applySend(s, q(R"({"ok":true,"requestId":"r-1","handle":"h-1"})"), true);
         expect("the backend took the request", "and a poll for its approval starts",
                a.accepted && a.requestId == QLatin1String("r-1"));
+        // The keystore's own name for the same request, carried so a signer can be pointed
+        // at it. Sliced off requestId instead, this view would own the backend's id format.
+        expect("...and the approval handle came with it", "h-1",
+               a.handle == QLatin1String("h-1"));
         expect("...and says nothing in the modal", "nothing was refused", s.sendError.isEmpty());
     }
     {

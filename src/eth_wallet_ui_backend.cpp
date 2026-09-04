@@ -575,6 +575,10 @@ void EthWalletUiBackend::submitSend(QString requestJson)
     if (!sent.accepted)
         return;
 
+    // The outcome of the LAST send goes as this one starts: leaving it up would put a
+    // receipt beside a request that has not been answered yet.
+    setLastSendOutcomeJson(QString());
+    setPendingApprovalHandle(sent.handle);
     setPendingRequestId(sent.requestId);
     m_sendPoll.start();
 }
@@ -588,20 +592,33 @@ void EthWalletUiBackend::pollSend()
     const QString reply = modules().eth_wallet_backend.send_status(pendingRequestId());
     if (failed(reply, QStringLiteral("send"))) {
         m_sendPoll.stop();
+        setPendingApprovalHandle(QString());
         setPendingRequestId(QString());
         return;
     }
-    const QString status = parseObject(reply).value(QStringLiteral("status")).toString();
+    const QJsonObject settled = parseObject(reply);
+    const QString status = settled.value(QStringLiteral("status")).toString();
     if (status == QLatin1String("awaitingApproval"))
         return;
 
     m_sendPoll.stop();
+    // Published BEFORE the pending id clears, so the waiting dialog is never replaced by
+    // nothing. The shell returns the user here the moment the signer answers, and a screen
+    // that goes blank on arrival makes the trip look like it happened for no reason.
+    QJsonObject outcome{{QStringLiteral("status"), status}};
+    for (const auto &key : {QStringLiteral("hash"), QStringLiteral("reason")}) {
+        const QString v = settled.value(key).toString();
+        if (!v.isEmpty())
+            outcome.insert(key, v);
+    }
+    setLastSendOutcomeJson(QString::fromUtf8(QJsonDocument(outcome).toJson(QJsonDocument::Compact)));
+    setPendingApprovalHandle(QString());
     setPendingRequestId(QString());
     refresh();
     // AFTER refresh, which clears lastError on entry. Onto the wallet's own error line rather
     // than sendError: clearing pendingRequestId above closes both dialogs in the same turn, so
     // this is the only surface left standing to explain a send that did not go out.
-    const QString reason = parseObject(reply).value(QStringLiteral("reason")).toString();
+    const QString reason = settled.value(QStringLiteral("reason")).toString();
     if (status != QLatin1String("broadcast") && !reason.isEmpty())
         setLastError(QStringLiteral("send %1: %2").arg(status, reason));
 }
@@ -612,6 +629,8 @@ void EthWalletUiBackend::cancelSend()
         return;
     modules().eth_wallet_backend.cancel_send(pendingRequestId());
     m_sendPoll.stop();
+    setLastSendOutcomeJson(QStringLiteral("{\"status\":\"cancelled\"}"));
+    setPendingApprovalHandle(QString());
     setPendingRequestId(QString());
 }
 

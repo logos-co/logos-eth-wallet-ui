@@ -51,9 +51,66 @@ Item {
     // the backend refused must stay on screen with its reason, which is the whole point of
     // moving the error inside the modal. At root scope because a Connections declared inside a
     // Popup that also sets contentItem is reparented into that contentItem.
+    // What came back from asking another app to do something, when it is worth saying.
+    // Empty is the normal state: a request that reached a provider hands the user over to
+    // it, so this screen is not the one they are reading.
+    property string approvalNote: ""
+    property string intentNote: ""
+    // The outcome the user has already seen. Reset whenever a new send clears the backend's,
+    // so two identical outcomes in a row still each get a receipt.
+    property string dismissedOutcome: ""
+
+    readonly property var sendOutcome: root.ready ? j(backend.lastSendOutcomeJson, "{}") : ({})
+    readonly property bool showOutcome: root.ready && !root.sendPending
+        && backend.lastSendOutcomeJson !== ""
+        && backend.lastSendOutcomeJson !== root.dismissedOutcome
+
+    // Ask whoever provides a capability to take over. Used for the three hops that are pure
+    // navigation: the provider declares them `handoff`, so the user stays there and this
+    // callback only ever runs to report that nobody went.
+    function askFor(intent, whenUnavailable) {
+        root.intentNote = ""
+        logos.request(intent, ({}), function (res) {
+            if (res.ok || res.error === "cancelled") return
+            root.intentNote = res.error === "unavailable"
+                ? whenUnavailable
+                : "That request did not go through (" + res.error + ")."
+        })
+    }
+
+    // Point a signer at the send now waiting on a human.
+    //
+    // The result is ADVISORY. `send_status` is what settles a send, and it has to be: the
+    // shell reports `timeout` after ten minutes while the keystore record is still alive and
+    // still approvable, the user can approve from the Signer app by hand with no intent in
+    // flight at all, and a host with no intent router answers `unavailable` locally. So this
+    // callback never moves the send — it only explains a trip that did not happen.
+    function askToApprove() {
+        var handle = root.ready ? root.backend.pendingApprovalHandle : ""
+        if (handle === "") return
+        root.approvalNote = ""
+        logos.request("evm.signing.approve", ({ handle: handle }), function (res) {
+            if (res.ok || res.error === "cancelled") return
+            root.approvalNote = res.error === "unavailable"
+                ? "Approve this transaction in the Signer app to send it."
+                : "Could not reach a signer (" + res.error + ")."
+        })
+    }
+
     Connections {
         target: root.ready ? root.backend : null
         function onPendingRequestIdChanged() { if (root.sendPending) sendDialog.close() }
+
+        // The handle arrives with the request id, and asking is the whole point of having it.
+        function onPendingApprovalHandleChanged() {
+            if (root.backend.pendingApprovalHandle !== "") root.askToApprove()
+        }
+
+        // Cleared at the start of every send, which is also when a receipt already read
+        // stops counting as read.
+        function onLastSendOutcomeJsonChanged() {
+            if (root.backend.lastSendOutcomeJson === "") root.dismissedOutcome = ""
+        }
     }
 
     // The picker follows the backend's selection, including the re-select loadAccounts makes
@@ -912,6 +969,17 @@ Item {
                 onModelChanged: syncIndex()
             }
 
+            // This picker only ever READS the account set — creating, importing and deleting
+            // belong to whoever holds the keystore's custodian role. Asking for the
+            // capability is how a wallet that holds no keys sends the user somewhere it
+            // cannot go itself.
+            LogosButton {
+                objectName: "manageAccountsButton"
+                text: "Accounts"
+                onClicked: root.askFor("evm.accounts.manage",
+                                       "No app on this device manages accounts.")
+            }
+
             // The one identifier a user hands out, so it is copyable wherever it appears.
             LogosSelectableText {
                 objectName: "addressLabel"
@@ -984,6 +1052,25 @@ Item {
                     wrapMode: Text.WordWrap
                     color: Theme.palette.textSecondary
                     text: root.actionHint(root.vp.action)
+                }
+                LogosButton {
+                    objectName: "openVerifiedProxyButton"
+                    // `wait` is the one action with nothing to go and do: the proxy is
+                    // running and catching up on its own.
+                    visible: root.vp.action !== undefined && root.vp.action.length > 0
+                             && root.vp.action !== "wait"
+                    text: "Open Verified Proxy"
+                    onClicked: root.askFor("evm.verified_routing.operate",
+                                           "Nothing on this device offers to do that — follow the note above.")
+                }
+                LogosText {
+                    objectName: "intentNote"
+                    Layout.fillWidth: true
+                    visible: root.intentNote.length > 0
+                    textFormat: Text.PlainText
+                    wrapMode: Text.WordWrap
+                    color: Theme.palette.textSecondary
+                    text: root.intentNote
                 }
             }
         }
@@ -2906,12 +2993,59 @@ Item {
             LogosText {
                 objectName: "pendingLabel"
                 textFormat: Text.PlainText
-                text: "Approve this transaction in the signer to send it."
+                wrapMode: Text.WordWrap
+                // The note only appears when nobody was taken there — the normal path hands
+                // the user to the signer, so this dialog is behind them while they decide.
+                text: root.approvalNote.length > 0
+                      ? root.approvalNote
+                      : "Waiting for this transaction to be approved."
             }
             LogosButton {
                 objectName: "cancelSendButton"
                 text: "Cancel send"
                 onClicked: root.backend.cancelSend()
+            }
+        }
+    }
+
+    // ── what the last send came to ────────────────────────────────────────────────
+    //
+    // Not decoration. Answering an intent returns the user to this app, and the waiting
+    // dialog closes in the same turn — without something taking its place the shell appears
+    // to have moved them for no reason. This is the one part of the round trip the shell
+    // cannot do: it knows the request finished, not what finishing meant here.
+    LogosDialog {
+        objectName: "sendOutcomeDialog"
+        title: root.sendOutcome.status === "broadcast" ? "Sent" : "Not sent"
+        anchors.centerIn: parent
+        visible: root.showOutcome
+        contentItem: ColumnLayout {
+            LogosText {
+                objectName: "sendOutcomeLabel"
+                Layout.maximumWidth: 420
+                textFormat: Text.PlainText
+                wrapMode: Text.WordWrap
+                text: {
+                    var o = root.sendOutcome
+                    if (o.status === "broadcast") return "Sent to the network."
+                    if (o.status === "rejected")  return "The signer rejected this transaction."
+                    if (o.status === "cancelled") return "This send was cancelled."
+                    if (o.reason !== undefined && o.reason.length) return o.reason
+                    return "This send did not go out."
+                }
+            }
+            // The hash is the receipt. Copyable wherever it appears, like the address.
+            LogosSelectableText {
+                objectName: "sendOutcomeHash"
+                visible: root.sendOutcome.hash !== undefined && root.sendOutcome.hash.length > 0
+                text: root.sendOutcome.hash !== undefined ? root.shortHash(root.sendOutcome.hash) : ""
+                color: Theme.palette.textSecondary
+                font.family: Theme.typography.mono
+            }
+            LogosButton {
+                objectName: "sendOutcomeDismiss"
+                text: "Done"
+                onClicked: root.dismissedOutcome = root.backend.lastSendOutcomeJson
             }
         }
     }
@@ -2927,10 +3061,10 @@ Item {
         contentItem: ColumnLayout {
             spacing: Theme.spacing.small
 
-            // Read-only, and text rather than a button: eth_rpc's chains.json is device-wide
-            // and shared with every Logos wallet here, so the wallet reports it and the
-            // Ethereum RPC app owns it. A sandboxed view has no cross-plugin navigation, so a
-            // button pointing at that app would be dead.
+            // Read-only here: eth_rpc's chains.json is device-wide and shared with every
+            // Logos wallet, so the wallet reports it and the Ethereum RPC app owns it. The
+            // button below asks for that app by capability rather than by name, so a second
+            // implementation of it would serve this just as well.
             LogosText {
                 objectName: "rpcSettingsNote"
                 Layout.fillWidth: true
@@ -2939,8 +3073,25 @@ Item {
                 color: Theme.palette.textSecondary
                 text: "Endpoint: " + (root.net.rpcUrl && root.net.rpcUrl.length ? root.net.rpcUrl : "not set")
                       + "\nVerified routing: " + (root.vp.mode !== undefined ? root.vp.mode : "unknown")
-                      + "\n\nThese are shared with every Logos wallet on this device. Change "
-                      + "them in the Ethereum RPC app."
+                      + "\n\nThese are shared with every Logos wallet on this device."
+            }
+            LogosButton {
+                objectName: "openRpcSettingsButton"
+                text: "Change these"
+                onClicked: {
+                    settingsDialog.close()
+                    root.askFor("evm.rpc.configure",
+                                "Nothing on this device offers to change them.")
+                }
+            }
+            LogosText {
+                objectName: "settingsIntentNote"
+                Layout.fillWidth: true
+                visible: root.intentNote.length > 0
+                textFormat: Text.PlainText
+                wrapMode: Text.WordWrap
+                color: Theme.palette.textSecondary
+                text: root.intentNote
             }
 
             // A screen, not a section: the catalogue is a searchable list of thousands, and

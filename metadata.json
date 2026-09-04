@@ -11,6 +11,12 @@
   "icon": "src/icons/eth_wallet.png",
   "view": "qml/EthWalletView.qml",
   "dependencies": ["eth_wallet_backend"],
+  "uses": [
+    { "intent": "evm.signing.approve", "cardinality": "single" },
+    { "intent": "evm.accounts.manage", "cardinality": "single" },
+    { "intent": "evm.rpc.configure", "cardinality": "single" },
+    { "intent": "evm.verified_routing.operate", "cardinality": "single" }
+  ],
   "codegen": { "rep": "src/eth_wallet_ui.rep" },
   "nix": {
     "external_libraries": [],
