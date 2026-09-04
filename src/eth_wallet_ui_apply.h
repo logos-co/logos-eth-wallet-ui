@@ -226,6 +226,8 @@ struct SendApplied {
     /// The backend took the request; a poll for its approval starts.
     bool accepted = false;
     QString requestId;
+    /// The keystore's name for the approval record, for pointing a signer at this request.
+    QString handle;
     /// Whether the refusal reached the modal the user is standing in front of.
     bool surfaced = false;
 };
@@ -236,12 +238,15 @@ struct SendApplied {
 /// put it under the account that replaced it.
 inline SendApplied applySend(ScopedState &s, const QString &reply, bool selectionHeld)
 {
-    if (replyOk(reply))
-        return {true, parseObject(reply).value(QStringLiteral("requestId")).toString(), false};
+    if (replyOk(reply)) {
+        const QJsonObject o = parseObject(reply);
+        return {true, o.value(QStringLiteral("requestId")).toString(),
+                o.value(QStringLiteral("handle")).toString(), false};
+    }
     if (!selectionHeld)
         return {};
     s.sendError = replyError(reply);
-    return {false, QString(), true};
+    return {false, QString(), QString(), true};
 }
 
 /// What the network read may do. Its write IS `shown()`, the selection every other check is

@@ -6,9 +6,7 @@
     # Every dependency builds against THIS module-builder. Without the follows each drags
     # its own, and a skewed generated ABI segfaults the module inside provider init.
     eth_wallet_backend = {
-      # Pinned to the branch until logos-eth-wallet-backend#1 merges; `main` is still the
-      # seed commit and carries no flake.nix. Move this to the bare URL on merge.
-      url = "github:logos-co/logos-eth-wallet-backend/feat/scaffold";
+      url = "github:logos-co/logos-eth-wallet-backend";
       inputs.logos-module-builder.follows = "logos-module-builder";
     };
   };
