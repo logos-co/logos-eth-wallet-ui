@@ -996,6 +996,34 @@ check("the slow timer is armed by the busy state and disarmed with it",
       in_order(" ".join(qml_item("manageTokensPage")), "managePage.searchSlow = false",
                "slowSearch.restart()", "slowSearch.stop()"), True)
 
+print()
+print("every intent this view asks for is declared in `uses`. An UNDECLARED one fails")
+print("`not_declared` at the broker's first gate, before anything is resolved, and nothing")
+print("says so where a developer looks — so comparing the two files is the only way to")
+print("catch a name that drifted. The broker matches byte-exactly: no case folding, no")
+print("normalisation, because a name is a contract between separately shipped apps.")
+META = json.loads((Path(__file__).resolve().parent.parent / "metadata.json").read_text())
+declared = sorted(e["intent"] for e in META.get("uses", []) if isinstance(e, dict))
+# Both call shapes: the signing hop calls the bridge directly, the three navigation hops go
+# through `askFor`, which is this view's own wrapper around it. Naming the wrapper couples
+# this to it deliberately — renaming it fails here loudly rather than quietly measuring less.
+requested = sorted(set(re.findall(r'(?:logos\.request|askFor)\(\s*"([^"]+)"',
+                                  VIEW.read_text())))
+check("every intent asked for is declared", [i for i in requested if i not in declared], [])
+check("...and every intent declared is asked for", [i for i in declared if i not in requested], [])
+check("the four hops are the whole list", declared,
+      ["evm.accounts.manage", "evm.rpc.configure", "evm.signing.approve",
+       "evm.verified_routing.operate"])
+
+print()
+print("`uses` entries are OBJECTS. A bare string array parses, declares nothing, and every")
+print("request then fails `not_declared` with no obvious cause — so this asserts the shape")
+print("rather than the count.")
+check("no entry is a bare string",
+      [e for e in META.get("uses", []) if not isinstance(e, dict)], [])
+check("...and each names a single provider",
+      sorted({e.get("cardinality") for e in META.get("uses", [])}), ["single"])
+
 if "--grep-only" in sys.argv:
     print()
     print("RESULT:", "ALL PASS" if not FAIL else f"{len(FAIL)} FAILED -> {FAIL}")
