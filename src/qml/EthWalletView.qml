@@ -85,6 +85,21 @@ Item {
     // still approvable, the user can approve from the Signer app by hand with no intent in
     // flight at all, and a host with no intent router answers `unavailable` locally. So this
     // callback never moves the send — it only explains a trip that did not happen.
+    // Codes that mean the intent path is CLOSED and no human is looking at the record. The
+    // keystore cannot tell "nobody is coming" from "someone is coming, slowly" — with a
+    // dispatch in flight the signer is often not even loaded yet, so early silence and
+    // absence look identical from there. This side knows, because the dispatch completed.
+    // Cancelling here is what lets the keystore's own timer be garbage collection for a dead
+    // requester rather than a clock racing a human.
+    //
+    // `unavailable` and `cancelled` are deliberately NOT on this list. `unavailable` may mean
+    // the signer is merely unreachable by intent while still openable by hand, and that
+    // manual path is the fallback this whole design rests on; `cancelled` is the signer's
+    // Back button, which leaves the request queued on purpose.
+    function intentPathIsClosed(error) {
+        return error === "bad_request" || error === "not_declared" || error === "timeout"
+    }
+
     function askToApprove() {
         var handle = root.ready ? root.backend.pendingApprovalHandle : ""
         if (handle === "") return
@@ -94,6 +109,11 @@ Item {
             root.approvalNote = res.error === "unavailable"
                 ? "Approve this transaction in the Signer app to send it."
                 : "Could not reach a signer (" + res.error + ")."
+            // Withdraw the approval rather than leaving it to expire. The send is settled by
+            // `send_status` either way — this only decides whether the record dies now or
+            // sits until the keystore collects it.
+            if (root.intentPathIsClosed(res.error))
+                root.backend.cancelSend()
         })
     }
 
