@@ -159,7 +159,10 @@ Item {
         property string pendingApprovalHandle: ""
         property string lastSendOutcomeJson: ""
 
-        function cancelSend() {}
+        // Counted, because withdrawing a record the user may still approve by hand is the
+        // one way this callback can do real damage.
+        property int cancelCalls: 0
+        function cancelSend() { fake.cancelCalls++ }
         function selectAccount(a) {}
         function chooseTokenSort(o) {}
     }
@@ -230,6 +233,48 @@ Item {
             check("  " + code + " is named on screen", inDialog("pendingDialog", "pendingLabel").text,
                   "Could not reach a signer (" + code + ").")
         }
+    }
+
+    function assertAClosedPathWithdrawsTheRecord() {
+        console.log("")
+        console.log("the codes that mean the intent path is CLOSED. The keystore cannot tell")
+        console.log("'nobody is coming' from 'someone is coming, slowly' — with a dispatch in")
+        console.log("flight the signer is often not loaded yet, so silence and absence look")
+        console.log("identical there. This side knows, so it withdraws the record instead of")
+        console.log("leaving a clock to race a human")
+        for (var i = 0; i < 3; ++i) {
+            var code = ["bad_request", "not_declared", "timeout"][i]
+            var before = fake.cancelCalls
+            fake.pendingApprovalHandle = ""
+            fake.pendingApprovalHandle = probe.handle
+            probe.answer({ ok: false, data: undefined, error: code })
+            check("  " + code + " withdraws it", fake.cancelCalls - before, 1)
+        }
+    }
+
+    function assertTheFallbackCodesLeaveItAlone() {
+        console.log("")
+        console.log("...and the two that must NOT. `unavailable` may mean the signer is merely")
+        console.log("unreachable BY INTENT while still openable by hand, and that manual path")
+        console.log("is the fallback the whole design rests on — withdrawing here would delete")
+        console.log("the record the user was just told to go and approve. `cancelled` is the")
+        console.log("signer's own Back button, which leaves the request queued on purpose")
+        for (var i = 0; i < 2; ++i) {
+            var code = ["unavailable", "cancelled"][i]
+            var before = fake.cancelCalls
+            fake.pendingApprovalHandle = ""
+            fake.pendingApprovalHandle = probe.handle
+            probe.answer({ ok: false, data: undefined, error: code })
+            check("  " + code + " leaves the record standing", fake.cancelCalls - before, 0)
+        }
+        console.log("")
+        console.log("nor does success: the send is settled by send_status, and withdrawing an")
+        console.log("approval the human just granted would be the worst outcome of all")
+        var b = fake.cancelCalls
+        fake.pendingApprovalHandle = ""
+        fake.pendingApprovalHandle = probe.handle
+        probe.answer({ ok: true, data: {}, error: "" })
+        check("  ok leaves it standing", fake.cancelCalls - b, 0)
     }
 
     function assertNoHandleAsksNothing() {
@@ -375,6 +420,8 @@ Item {
             probe.assertSilenceIsTheNormalOutcome()
             probe.assertUnavailableRestoresTheOldInstruction()
             probe.assertEveryOtherCodeNamesItself()
+            probe.assertAClosedPathWithdrawsTheRecord()
+            probe.assertTheFallbackCodesLeaveItAlone()
             probe.assertNoHandleAsksNothing()
             probe.assertTheOutcomeExplainsTheTrip()
             probe.assertTheReceiptCanBeReadAndDismissed()
