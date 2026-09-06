@@ -45,6 +45,13 @@ class EthWalletUi
     // them, and it is the derivation index rather than a position, so it never renumbers.
     PROP(QString accountWalletsJson="{}" READONLY)
 
+    // The address book: `[{ address, name }]`, already ordered by the backend so a picker
+    // shows it as it comes. COUNTERPARTIES, not accounts this wallet holds keys for.
+    PROP(QString contactsJson="[]" READONLY)
+    // A refusal from the last save or forget, on its own line rather than the wallet's:
+    // a rejected nickname must not blank the error explaining a send that did not go out.
+    PROP(QString contactsError="" READONLY)
+
     // Balances for the selected account on the active network. EMPTY means "not read yet",
     // which the view must render as an em-dash — never as a zero, and never as the previous
     // network's number.
@@ -166,6 +173,11 @@ class EthWalletUi
     // generated setter for a PROP already owns setTokenSort(), and a SLOT may not collide
     // with it. Answered by a tokenSort change, not by an event.
     SLOT(void chooseTokenSort(QString order))
+
+    // Add or rename. An empty name is allowed — saving an address before naming its owner is
+    // the common case from a send form.
+    SLOT(void saveContact(QString address, QString name))
+    SLOT(void forgetContact(QString address))
     // Search the catalogue offered on the active chain. The query goes to the BACKEND: the
     // embedded Uniswap list is thousands of rows and may not be pulled into the view to be
     // filtered there.

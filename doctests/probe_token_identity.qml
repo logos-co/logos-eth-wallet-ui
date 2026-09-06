@@ -163,7 +163,7 @@ Item {
         function setTokenEnabled(address, on) {}
     }
 
-    property var logos: ({ module: function (n) { return fake } })
+    property var logos: ({ module: function (n) { return fake }, isViewModuleReady: function (n) { return true } })
 
     // ── the list ──────────────────────────────────────────────────────────────────
     function assertTwoRows() {

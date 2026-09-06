@@ -361,6 +361,10 @@ void EthWalletUiBackend::loadAccounts()
     // drops back to bare addresses for one refresh is a picker whose rows change identity.
     if (replyOk(wallets))
         setAccountWalletsJson(member(wallets, "wallets"));
+    // The address book is neither scoped to an account nor to a chain, so it is read here
+    // with the roster rather than in loadBalancesAndHistory: it does not change when either
+    // moves, and re-reading it there would cost a call per selection.
+    loadContacts();
 
     const QJsonArray list = QJsonDocument::fromJson(accountsJson().toUtf8()).array();
     const bool stillThere = std::any_of(list.begin(), list.end(), [this](const QJsonValue &v) {
@@ -755,6 +759,39 @@ void EthWalletUiBackend::chooseTokenSort(QString order)
     if (failed(reply, QStringLiteral("token order")))
         return;
     setTokenSort(order);
+}
+
+// Both writers re-read the book rather than editing the published copy: the backend orders
+// it, and a view that inserted a row itself would show an order the next read undoes.
+void EthWalletUiBackend::saveContact(QString address, QString name)
+{
+    const QString reply = modules().eth_wallet_backend.save_contact(address, name);
+    if (!replyOk(reply)) {
+        setContactsError(replyError(reply));
+        return;
+    }
+    setContactsError(QString());
+    loadContacts();
+}
+
+void EthWalletUiBackend::forgetContact(QString address)
+{
+    const QString reply = modules().eth_wallet_backend.forget_contact(address);
+    if (!replyOk(reply)) {
+        setContactsError(replyError(reply));
+        return;
+    }
+    setContactsError(QString());
+    loadContacts();
+}
+
+void EthWalletUiBackend::loadContacts()
+{
+    const QString reply = modules().eth_wallet_backend.list_contacts();
+    // A failed read KEEPS the book that is on screen, exactly as the account names do: an
+    // empty picker tab is indistinguishable from "you have no contacts", and it is not that.
+    if (replyOk(reply))
+        setContactsJson(member(reply, "contacts"));
 }
 
 void EthWalletUiBackend::searchTokens(QString query)

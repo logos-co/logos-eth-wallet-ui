@@ -164,7 +164,7 @@ Item {
     })
 
     property var fake: ({})
-    property var logos: ({ module: function (n) { return probe.fake } })
+    property var logos: ({ module: function (n) { return probe.fake }, isViewModuleReady: function (n) { return true } })
 
     Component.onCompleted: {
         probe.fake = {
