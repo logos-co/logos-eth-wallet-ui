@@ -61,6 +61,12 @@ Item {
     property string dismissedOutcome: ""
 
     readonly property var sendOutcome: root.ready ? j(backend.lastSendOutcomeJson, "{}") : ({})
+    // The whole hash, never the shortened one: it is what goes on the clipboard and what
+    // addresses the detail screen.
+    readonly property string outcomeHash: root.sendOutcome.hash !== undefined
+                                          ? String(root.sendOutcome.hash) : ""
+
+    function dismissOutcome() { root.dismissedOutcome = root.backend.lastSendOutcomeJson }
     readonly property bool showOutcome: root.ready && !root.sendPending
         && backend.lastSendOutcomeJson !== ""
         && backend.lastSendOutcomeJson !== root.dismissedOutcome
@@ -3054,18 +3060,51 @@ Item {
                     return "This send did not go out."
                 }
             }
-            // The hash is the receipt. Copyable wherever it appears, like the address.
-            LogosSelectableText {
-                objectName: "sendOutcomeHash"
-                visible: root.sendOutcome.hash !== undefined && root.sendOutcome.hash.length > 0
-                text: root.sendOutcome.hash !== undefined ? root.shortHash(root.sendOutcome.hash) : ""
-                color: Theme.palette.textSecondary
-                font.family: Theme.typography.mono
+            // The hash is the receipt, so it is copyable here exactly as the address is in
+            // the header: shortened for reading, whole on the clipboard. A truncated hash a
+            // user retypes is worse than none.
+            RowLayout {
+                objectName: "sendOutcomeHashRow"
+                visible: root.outcomeHash.length > 0
+                spacing: Theme.spacing.small
+                LogosSelectableText {
+                    objectName: "sendOutcomeHash"
+                    text: root.shortHash(root.outcomeHash)
+                    color: Theme.palette.textSecondary
+                    font.family: Theme.typography.mono
+                }
+                LogosCopyButton {
+                    objectName: "sendOutcomeCopyButton"
+                    value: root.outcomeHash
+                    onCopied: function (v) { root.lastCopiedValue = v }
+                }
             }
-            LogosButton {
-                objectName: "sendOutcomeDismiss"
-                text: "Done"
-                onClicked: root.dismissedOutcome = root.backend.lastSendOutcomeJson
+
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: Theme.spacing.small
+
+                LogosButton {
+                    objectName: "sendOutcomeDismiss"
+                    text: "Done"
+                    onClicked: root.dismissOutcome()
+                }
+                Item { Layout.fillWidth: true }
+                // Only once the row is actually in history. `openTxDetail` refuses a hash it
+                // cannot find and refuses it SILENTLY, so an always-enabled button would
+                // close the receipt and go nowhere — and this is the one moment the row is
+                // still arriving, because the send settled a beat ago.
+                LogosButton {
+                    objectName: "sendOutcomeViewTx"
+                    visible: root.outcomeHash.length > 0
+                    enabled: root.txByHash(root.outcomeHash) !== null
+                    text: "View transaction"
+                    onClicked: {
+                        var h = root.outcomeHash
+                        root.dismissOutcome()
+                        root.openTxDetail(h)
+                    }
+                }
             }
         }
     }
