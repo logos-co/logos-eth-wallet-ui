@@ -136,6 +136,7 @@ Item {
         property string accountsJson: JSON.stringify([probe.me])
         property string selectedAccount: probe.me
         property string accountLabelsJson: "{}"
+        property string accountWalletsJson: "{}"
         property string balancesJson: "[]"
         property string balancesRoute: "direct"
         property string tokensJson: "[]"
@@ -247,8 +248,8 @@ Item {
         console.log("flight the signer is often not loaded yet, so silence and absence look")
         console.log("identical there. This side knows, so it withdraws the record instead of")
         console.log("leaving a clock to race a human")
-        for (var i = 0; i < 3; ++i) {
-            var code = ["bad_request", "not_declared", "timeout"][i]
+        for (var i = 0; i < 4; ++i) {
+            var code = ["bad_request", "not_declared", "timeout", "cancelled"][i]
             var before = fake.cancelCalls
             fake.pendingApprovalHandle = ""
             fake.pendingApprovalHandle = probe.handle
@@ -259,19 +260,15 @@ Item {
 
     function assertTheFallbackCodesLeaveItAlone() {
         console.log("")
-        console.log("...and the two that must NOT. `unavailable` may mean the signer is merely")
+        console.log("...and the ONE that must not. `unavailable` may mean the signer is merely")
         console.log("unreachable BY INTENT while still openable by hand, and that manual path")
         console.log("is the fallback the whole design rests on — withdrawing here would delete")
-        console.log("the record the user was just told to go and approve. `cancelled` is the")
-        console.log("signer's own Back button, which leaves the request queued on purpose")
-        for (var i = 0; i < 2; ++i) {
-            var code = ["unavailable", "cancelled"][i]
-            var before = fake.cancelCalls
-            fake.pendingApprovalHandle = ""
-            fake.pendingApprovalHandle = probe.handle
-            probe.answer({ ok: false, data: undefined, error: code })
-            check("  " + code + " leaves the record standing", fake.cancelCalls - before, 0)
-        }
+        console.log("the record the user was just told to go and approve")
+        var before = fake.cancelCalls
+        fake.pendingApprovalHandle = ""
+        fake.pendingApprovalHandle = probe.handle
+        probe.answer({ ok: false, data: undefined, error: "unavailable" })
+        check("  unavailable leaves the record standing", fake.cancelCalls - before, 0)
         console.log("")
         console.log("nor does success: the send is settled by send_status, and withdrawing an")
         console.log("approval the human just granted would be the worst outcome of all")
@@ -330,6 +327,45 @@ Item {
         check("the receipt is gone", root().showOutcome, false)
         var nav = find(view.item, "nav")
         check("...and a detail screen was pushed", nav !== null && nav.depth > 1, true)
+    }
+
+    function assertTheSubmitWaitEndsBothWays() {
+        console.log("")
+        console.log("the gap between the click and the chooser is real work — pricing, a nonce")
+        console.log("reservation, the keystore record — with the dialog still up. Both ways out")
+        console.log("have to clear it: a refusal that left the flag set would leave the button")
+        console.log("dead with no way back except closing the dialog")
+        view.item.sendSubmitting = true
+        fake.pendingRequestId = "snd_x"
+        check("the backend taking it ends the wait", view.item.sendSubmitting, false)
+
+        view.item.sendSubmitting = true
+        fake.pendingRequestId = ""
+        fake.sendError = "insufficient funds"
+        check("...and so does it refusing", view.item.sendSubmitting, false)
+        fake.sendError = ""
+    }
+
+    function assertAnUnnamedAccountBorrowsItsWalletName() {
+        console.log("")
+        console.log("an account nobody named, in a wallet somebody did. `#index` is the")
+        console.log("DERIVATION index off the account's own path, not a position in this list —")
+        console.log("a position renumbers when an account is added or removed, and the label")
+        console.log("would then quietly come to mean a different account")
+        fake.accountWalletsJson = JSON.stringify({
+            "0x8626f6940E2eb28930eFb4CeF49B2d1F2C9C1199": { wallet: "Status Throwaway", index: 0 }
+        })
+        check("it borrows the wallet's name and says where in it",
+              view.item.accountDisplay(probe.me), "Status Throwaway #0")
+
+        console.log("")
+        console.log("...but its OWN name always wins, and an account in an unnamed wallet")
+        console.log("falls back to the address rather than inventing anything")
+        fake.accountLabelsJson = JSON.stringify({ "8626f6940e2eb28930efb4cef49b2d1f2c9c1199": "Payroll" })
+        check("its own name wins", view.item.accountDisplay(probe.me), "Payroll")
+        fake.accountLabelsJson = "{}"
+        fake.accountWalletsJson = "{}"
+        check("and with neither, the address", view.item.accountDisplay(probe.me).indexOf("0x"), 0)
     }
 
     function assertNoHandleAsksNothing() {
@@ -477,6 +513,8 @@ Item {
             probe.assertEveryOtherCodeNamesItself()
             probe.assertAClosedPathWithdrawsTheRecord()
             probe.assertTheFallbackCodesLeaveItAlone()
+            probe.assertTheSubmitWaitEndsBothWays()
+            probe.assertAnUnnamedAccountBorrowsItsWalletName()
             probe.assertNoHandleAsksNothing()
             probe.assertTheOutcomeExplainsTheTrip()
             probe.assertTheReceiptCanBeReadAndDismissed()
