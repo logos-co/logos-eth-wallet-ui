@@ -50,6 +50,8 @@ Item {
         return null
     }
 
+    function root() { return view.item }
+
     function node(name) {
         return find(view.item, name) || ({ text: "<missing>", visible: "<missing>" })
     }
@@ -141,6 +143,9 @@ Item {
         property bool availableTokensLoading: false
         property bool tokenToggleBusy: false
         property string tokenToggleError: ""
+        // Empty until the send settles, exactly as the real one is: `pollSend` refreshes
+        // history a beat AFTER publishing the outcome, which is the window the receipt's
+        // "View transaction" button has to survive.
         property string historyJson: "[]"
         property string blockedChainsJson: "[]"
         property bool sweepingReceipts: false
@@ -275,6 +280,56 @@ Item {
         fake.pendingApprovalHandle = probe.handle
         probe.answer({ ok: true, data: {}, error: "" })
         check("  ok leaves it standing", fake.cancelCalls - b, 0)
+    }
+
+    function assertTheReceiptCarriesTheWholeHash() {
+        console.log("")
+        console.log("the receipt offers the hash to copy. SHORTENED on screen, WHOLE on the")
+        console.log("clipboard — a truncated hash a user retypes is worse than no hash")
+        fake.pendingApprovalHandle = ""
+        fake.pendingRequestId = ""
+        fake.historyJson = "[]"
+        fake.lastSendOutcomeJson = JSON.stringify({ status: "broadcast", hash: probe.txHash })
+
+        check("shown short", inDialog("sendOutcomeDialog", "sendOutcomeHash").text,
+              "0x9a3c0000…00000001")
+        check("...but copied whole",
+              inDialog("sendOutcomeDialog", "sendOutcomeCopyButton").value, probe.txHash)
+        check("...and there is nothing to copy when there is no hash",
+              root().outcomeHash.length > 0, true)
+    }
+
+    function assertViewTransactionWaitsForTheRow() {
+        console.log("")
+        console.log("`openTxDetail` refuses a hash it cannot find, and refuses it SILENTLY. The")
+        console.log("row arrives a beat after the outcome does, so an always-enabled button")
+        console.log("would close the receipt and go nowhere in exactly the window it is used")
+        // Existence, not `visible` — see the header: a popup's visible reads false here
+        // whatever its binding says, so asserting it would pass for both answers.
+        check("the button is there, because there is a hash",
+              find(find(view.item, "sendOutcomeDialog").contentItem,
+                   "sendOutcomeViewTx") !== null, true)
+        check("...but not yet armed, because history has not caught up",
+              inDialog("sendOutcomeDialog", "sendOutcomeViewTx").enabled, false)
+
+        fake.historyJson = JSON.stringify([{
+            hash: probe.txHash, chainId: 11155111, from: probe.me,
+            to: "0x0adBc7B2D1A2b7C8E9F0A1b2c3d4e5f60718D3A7", value: "1000000000000000",
+            kind: "native", status: "pending", timestamp: 1756600000, nonce: 7
+        }])
+        check("...and it arms the moment the row lands",
+              inDialog("sendOutcomeDialog", "sendOutcomeViewTx").enabled, true)
+    }
+
+    function assertViewTransactionLandsOnTheRow() {
+        console.log("")
+        console.log("pressing it closes the receipt and opens that transaction. Both: leaving")
+        console.log("the dialog up over the screen it just opened is the obvious way to get")
+        console.log("this half right and still ship something unusable")
+        probe.pressInDialog("sendOutcomeDialog", "sendOutcomeViewTx")
+        check("the receipt is gone", root().showOutcome, false)
+        var nav = find(view.item, "nav")
+        check("...and a detail screen was pushed", nav !== null && nav.depth > 1, true)
     }
 
     function assertNoHandleAsksNothing() {
@@ -425,6 +480,9 @@ Item {
             probe.assertNoHandleAsksNothing()
             probe.assertTheOutcomeExplainsTheTrip()
             probe.assertTheReceiptCanBeReadAndDismissed()
+            probe.assertTheReceiptCarriesTheWholeHash()
+            probe.assertViewTransactionWaitsForTheRow()
+            probe.assertViewTransactionLandsOnTheRow()
             probe.assertNavigationHopsNameCapabilities()
             probe.assertRpcSettingsHop()
 
