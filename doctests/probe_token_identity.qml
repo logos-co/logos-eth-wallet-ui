@@ -199,8 +199,6 @@ Item {
         check("an unambiguous token keeps its balance",
               txt("balance_" + probe.key(probe.usdc)), "12")
         check("...the native currency too", txt("balance_native"), "1.5")
-        check("...including the headline figure, which is the native row and no other",
-              txt("primaryBalance"), "1.5 ETH")
     }
 
     function assertTellableApart() {

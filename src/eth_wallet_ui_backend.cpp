@@ -348,6 +348,7 @@ void EthWalletUiBackend::loadAccounts()
     // account that just left the keystore is on screen with nothing selected beside it.
     const QString reply = modules().eth_wallet_backend.list_accounts();
     const QString labels = modules().eth_wallet_backend.get_account_labels();
+    const QString wallets = modules().eth_wallet_backend.get_account_wallets();
     if (failed(reply, QStringLiteral("accounts")))
         return;
     setAccountsJson(member(reply, "accounts"));
@@ -356,6 +357,10 @@ void EthWalletUiBackend::loadAccounts()
     // is cosmetic, and flickering an account's identity is worse than showing a stale one.
     if (replyOk(labels))
         setAccountLabelsJson(member(labels, "labels"));
+    // Same rule as the names above: a failed read keeps what was on screen. A picker that
+    // drops back to bare addresses for one refresh is a picker whose rows change identity.
+    if (replyOk(wallets))
+        setAccountWalletsJson(member(wallets, "wallets"));
 
     const QJsonArray list = QJsonDocument::fromJson(accountsJson().toUtf8()).array();
     const bool stillThere = std::any_of(list.begin(), list.end(), [this](const QJsonValue &v) {

@@ -40,6 +40,14 @@ Item {
     // 1.5s and never names the value, so a test cannot assert on it without racing.
     property string lastCopiedValue: ""
 
+    // Seeded as well as fed. The signal is the only thing that MOVES `ready`, but a view
+    // built after ui-host handed over never sees one — and with no seed it latches false for
+    // the life of the tab: every control disabled, every list empty, nothing to retry.
+    // `isViewModuleReady` is a function call, so it cannot be a binding; SignerView carries
+    // the same two lines for the same reason.
+    Component.onCompleted: root.ready = root.backend !== null
+                                        && logos.isViewModuleReady("eth_wallet_ui")
+
     Connections {
         target: logos
         function onViewModuleReadyChanged(moduleName, isReady) {
@@ -54,6 +62,12 @@ Item {
     // What came back from asking another app to do something, when it is worth saying.
     // Empty is the normal state: a request that reached a provider hands the user over to
     // it, so this screen is not the one they are reading.
+    // True from the click until the backend has either taken the send or refused it. The
+    // gap is real work — pricing, a nonce reservation and the keystore's approval record —
+    // and it happens with the dialog still up and nothing moving, so a user cannot tell a
+    // slow send from a click that missed. Cleared by both outcomes below.
+    property bool sendSubmitting: false
+
     property string approvalNote: ""
     property string intentNote: ""
     // The outcome the user has already seen. Reset whenever a new send clears the backend's,
@@ -98,12 +112,19 @@ Item {
     // Cancelling here is what lets the keystore's own timer be garbage collection for a dead
     // requester rather than a clock racing a human.
     //
-    // `unavailable` and `cancelled` are deliberately NOT on this list. `unavailable` may mean
-    // the signer is merely unreachable by intent while still openable by hand, and that
-    // manual path is the fallback this whole design rests on; `cancelled` is the signer's
-    // Back button, which leaves the request queued on purpose.
+    // `cancelled` is on this list, and that is a decision rather than an omission. It means
+    // the user dismissed the chooser or walked away from the signer — they declined to route
+    // it. Leaving the record standing put them in front of a "Waiting for approval" dialog
+    // whose only button was "Cancel send": asked to say no a second time, with no other
+    // option on offer.
+    //
+    // `unavailable` is NOT, and must not be. It may mean the signer is merely unreachable BY
+    // INTENT while still openable by hand, and that manual path is the fallback this whole
+    // design rests on — withdrawing there would delete the record the user was just told to
+    // go and approve.
     function intentPathIsClosed(error) {
-        return error === "bad_request" || error === "not_declared" || error === "timeout"
+        return error === "bad_request" || error === "not_declared"
+            || error === "timeout" || error === "cancelled"
     }
 
     function askToApprove() {
@@ -111,7 +132,9 @@ Item {
         if (handle === "") return
         root.approvalNote = ""
         logos.request("evm.signing.approve", ({ handle: handle }), function (res) {
-            if (res.ok || res.error === "cancelled") return
+            if (res.ok) return
+            // Declining is not a fault to report back at them; it is just the end of it.
+            if (res.error === "cancelled") { root.backend.cancelSend(); return }
             root.approvalNote = res.error === "unavailable"
                 ? "Approve this transaction in the Signer app to send it."
                 : "Could not reach a signer (" + res.error + ")."
@@ -125,7 +148,15 @@ Item {
 
     Connections {
         target: root.ready ? root.backend : null
-        function onPendingRequestIdChanged() { if (root.sendPending) sendDialog.close() }
+        // Either outcome ends the wait: the backend took it (a request id appears) or
+        // refused it (an error does). Both have to clear, or a refusal leaves the button
+        // dead and the only way out is closing the dialog.
+        function onPendingRequestIdChanged() {
+            if (root.sendPending) { root.sendSubmitting = false; sendDialog.close() }
+        }
+        function onSendErrorChanged() {
+            if (root.backend.sendError.length > 0) root.sendSubmitting = false
+        }
 
         // The handle arrives with the request id, and asking is the whole point of having it.
         function onPendingApprovalHandleChanged() {
@@ -153,6 +184,7 @@ Item {
     readonly property var accounts: ready ? j(backend.accountsJson, "[]") : []
     // { "<lowercase hex, no 0x>": "<name>" }, relayed from the keystore.
     readonly property var accountLabels: ready ? j(backend.accountLabelsJson, "{}") : ({})
+    readonly property var accountWallets: ready ? j(backend.accountWalletsJson, "{}") : ({})
     readonly property var fees: ready ? j(backend.feeTiersJson, "{}") : ({})
 
     // eth_rpc's verdict for the active chain, relayed by the backend. `blocking` true means
@@ -590,7 +622,27 @@ Item {
     // The name when there is one, the short address otherwise. Never an invented "Account 2":
     // a positional name RENUMBERS when an account is added or removed, which in an account
     // picker means the label silently comes to mean a different account.
-    function accountDisplay(a) { var n = accountLabel(a); return n.length ? n : shortAddr(a) }
+    function accountWallet(a) {
+        if (!a) return null
+        for (var key in accountWallets) if (sameHex(key, a)) return accountWallets[key]
+        return null
+    }
+
+    // The account's own name first. Failing that, the WALLET's name and where in it — a user
+    // who named the wallet and not each account still recognises "Status Throwaway #0".
+    //
+    // `#index` is the DERIVATION index, off the account's own path, and it is stable for the
+    // life of the account. A position in this list would not be: it renumbers when an account
+    // is added or removed, so the label would silently come to mean a different account —
+    // which is the whole reason nothing here invents "Account 2".
+    function accountDisplay(a) {
+        var n = accountLabel(a)
+        if (n.length) return n
+        var w = accountWallet(a)
+        if (w && w.wallet)
+            return w.index !== undefined ? w.wallet + " #" + w.index : w.wallet
+        return shortAddr(a)
+    }
 
     // "Treasury · 0x7099…79C8" when the address has a name, the short address alone otherwise.
     function namedAddr(a) {
@@ -1153,29 +1205,11 @@ Item {
                     anchors.fill: parent
                     spacing: Theme.spacing.small
 
-                    // ── balance + the one action ──
-                    RowLayout {
-                        Layout.alignment: Qt.AlignHCenter
-                        spacing: Theme.spacing.small
-                        LogosText {
-                            objectName: "primaryBalance"
-                            textFormat: Text.PlainText
-                            font.pixelSize: 34
-                            text: root.balanceDisplay(root.nativeToken)
-                                  + (root.nativeSymbol.length ? " " + root.nativeSymbol : "")
-                        }
-                        // Beside the em-dash, never instead of it: a bare dash at 34px reads as
-                        // breakage, and a spinner outliving its read reads as a hang.
-                        LogosSpinner {
-                            objectName: "balanceSpinner"
-                            Layout.alignment: Qt.AlignVCenter
-                            implicitWidth: 20
-                            implicitHeight: 20
-                            visible: !root.balancesKnown && root.dataLoading
-                            running: visible
-                            ringColor: Theme.palette.textSecondary
-                        }
-                    }
+                    // NO headline figure. A wallet's hero number is a PORTFOLIO total, and
+                    // this build has no prices and will not fetch any — so the only honest
+                    // candidate was one asset's balance at 34px, which reads as a total and
+                    // is not one. The same number is a row in the table below, under its own
+                    // symbol, where it means what it says.
 
                     LogosButton {
                         objectName: "openSendButton"
@@ -2999,11 +3033,24 @@ Item {
                 // Names the network, so the last click before a signature says where it lands.
                 // No close() here: the dialog closes on pendingRequestId, so a refusal stays
                 // on screen with its reason instead of vanishing behind the wallet.
+                LogosSpinner {
+                    objectName: "sendSubmitSpinner"
+                    Layout.alignment: Qt.AlignVCenter
+                    implicitWidth: 18
+                    implicitHeight: 18
+                    visible: root.sendSubmitting
+                    running: visible
+                    ringColor: Theme.palette.textSecondary
+                }
                 LogosButton {
                     objectName: "sendSubmitButton"
                     text: root.netKnown ? "Send on " + root.networkLabel() : "Send"
-                    enabled: root.ready && !root.sendPending && sendForm.q.ok === true
-                    onClicked: root.backend.submitSend(sendForm.formRequest)
+                    enabled: root.ready && !root.sendPending && !root.sendSubmitting
+                             && sendForm.q.ok === true
+                    onClicked: {
+                        root.sendSubmitting = true
+                        root.backend.submitSend(sendForm.formRequest)
+                    }
                 }
             }
         }

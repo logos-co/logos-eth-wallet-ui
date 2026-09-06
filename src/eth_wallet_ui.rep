@@ -39,6 +39,12 @@ class EthWalletUi
     // account is added or removed.
     PROP(QString accountLabelsJson="{}" READONLY)
 
+    // `{ "<address>": { wallet, index? } }` — the WALLET an account was derived under, so a
+    // picker can name an account its owner never named. Kept apart from the labels above
+    // because a wallet name is shared by every account under it; `index` is what separates
+    // them, and it is the derivation index rather than a position, so it never renumbers.
+    PROP(QString accountWalletsJson="{}" READONLY)
+
     // Balances for the selected account on the active network. EMPTY means "not read yet",
     // which the view must render as an em-dash — never as a zero, and never as the previous
     // network's number.

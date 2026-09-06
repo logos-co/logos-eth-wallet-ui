@@ -350,9 +350,13 @@ print("   (the verdict can have moved since the last quote, so an open re-prices
 sites = [l.strip() for l in dialog.splitlines()
          if "reprice" in l and not l.strip().startswith("//")]
 check("the re-price hangs off the request and the open, nowhere else", len(sites), 3)
-check("and Submit is armed by a quote that priced THIS form",
+# `sendSubmitting` JOINED this binding rather than replacing anything in it: the gap between
+# the click and the shell's chooser is real work with the dialog still up, and a second click
+# in it would price and reserve a nonce twice.
+check("and Submit is armed by a quote that priced THIS form, and disarmed by a click in flight",
       qml_binding("sendSubmitButton", "enabled"),
-      "enabled: root.ready && !root.sendPending && sendForm.q.ok === true")
+      "enabled: root.ready && !root.sendPending && !root.sendSubmitting "
+      "&& sendForm.q.ok === true")
 print("   the token picker answers with the field beside it, as accountPicker already did:")
 print("   ComboBox resets currentIndex when its model is re-read, and sendDialog.token did not")
 print("   asserted against syncIndex's OWN body: onActivated three lines up carries the same")
@@ -645,6 +649,9 @@ STILL_SYNC = {
     "list_tokens": "refresh()",
     "list_accounts": "refresh(), with the labels read that must land in the same turn",
     "get_account_labels": "refresh()",
+    "get_account_wallets": "refresh(), beside the labels: an account nobody named borrows "
+                           "its wallet's, and the two have to land in the same turn or the "
+                           "picker renames itself between them",
     "suggest_fees": "refresh()",
     "set_active_chain": "a chain switch, which re-reads everything behind it anyway",
     "send": "the send path, whose ordering witness is taken around the call",
@@ -655,7 +662,7 @@ STILL_SYNC = {
 called = set(re.findall(r"modules\(\)\.eth_wallet_backend\.(\w+)\(", code))
 sync = sorted(n for n in called
               if not n.endswith("AsyncResult") and not re.match(r"on[A-Z]", n))
-check("every synchronous backend call is one of the eleven inventoried here",
+check("every synchronous backend call is one of the twelve inventoried here",
       sync, sorted(STILL_SYNC))
 check("...and the receipt re-read is no longer one of them", "refresh_tx_status" in sync, False)
 check("refreshTxStatus: claim, call, own the reply, re-read, lower the spinner",
