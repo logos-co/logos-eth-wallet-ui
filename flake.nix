@@ -6,7 +6,12 @@
     # Every dependency builds against THIS module-builder. Without the follows each drags
     # its own, and a skewed generated ABI segfaults the module inside provider init.
     eth_wallet_backend = {
-      url = "github:logos-co/logos-eth-wallet-backend";
+      # TEMPORARY, and it must not outlive the merge: this view calls
+      # `get_account_wallets`, which exists only on the backend branch below
+      # (logos-eth-wallet-backend#5). Move back to the bare URL and relock in the SAME
+      # commit that lands on a main carrying it — a pin whose revert note outlives it is
+      # how this repo's main stopped compiling last time.
+      url = "github:logos-co/logos-eth-wallet-backend/feat/intents-handle";
       inputs.logos-module-builder.follows = "logos-module-builder";
     };
   };

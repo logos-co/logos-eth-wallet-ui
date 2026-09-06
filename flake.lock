@@ -207,15 +207,16 @@
         "token_list_module": "token_list_module"
       },
       "locked": {
-        "lastModified": 1788475526,
-        "narHash": "sha256-1cF5mEndsmHs2pk0if9mHgpGrvZo9wZfo4jWfhdVXWA=",
+        "lastModified": 1788736154,
+        "narHash": "sha256-nC6M46I+YIj9wVQLK3ZECadEi+DKK2ShuubdcmBHKqM=",
         "owner": "logos-co",
         "repo": "logos-eth-wallet-backend",
-        "rev": "15dc8bc855a5890fa9f9c1842bbe6abe7a2ceaa5",
+        "rev": "aee46e1798b65e6b3962307dd6dff125c612584d",
         "type": "github"
       },
       "original": {
         "owner": "logos-co",
+        "ref": "feat/intents-handle",
         "repo": "logos-eth-wallet-backend",
         "type": "github"
       }
