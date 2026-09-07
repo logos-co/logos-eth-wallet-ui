@@ -1094,10 +1094,19 @@ check("...while its rows carry both, resolved per row rather than baked into the
       "model: addresses" in qml_body and "text: root.displayName(modelData)" in qml_body, True)
 print()
 print("the account chrome is HOME chrome: it is about the selected account, which a pushed")
-print("screen is not about — and an Address book button on the address book page is a button")
-print("offering to take you where you already are.")
-check("the address and the book button are hidden on a pushed screen",
-      qml_binding("addressLabel", "visible") == "" and "visible: nav.depth <= 1" in qml_body, True)
+print("screen is not about — and a button naming a screen you are already on is worse than")
+print("no button. The chain chip is the exception, and deliberately: a detail screen still")
+print("shows figures, and which chain they came from is not something to leave behind.")
+for name in ["addressBookButton", "networksButton", "manageTokensButton",
+             "addressLabel", "addressCopyButton"]:
+    check(f"  {name} is home only",
+          qml_binding(name, "visible"), "visible: nav.depth <= 1")
+check("...while the chain chip follows you", qml_binding("chainChip", "visible"), "")
+check("there is no Settings popup left to hold links to any of them",
+      "settingsDialog" in qml_body, False)
+check("...and each button opens a screen rather than a dialog",
+      all(f"root.open{n}()" in qml_body for n in ["AddressBook", "Networks", "ManageTokens"]),
+      True)
 
 print()
 print("overriding a design-system delegate replaces its background too, so a row that looks")
@@ -1479,7 +1488,9 @@ print("24) the eth_rpc controls are GONE from Settings, replaced by a read-only 
 for n in ["rpcUrlField","saveRpcButton","verifiedProxySwitch","verifiedModeUnknown",
           "verifiedTestnetWarning","tokenListUrlField","saveTokenListButton","tokenListStatus"]:
     check(f"{n} removed", oid(n), None)
-call("callMethod",{"objectId":oid("settingsButton"),"method":"clicked","args":[]}); time.sleep(1)
+# A SCREEN now, not a dialog: Settings held nothing but links to other places, so the
+# places are the screens and the popup is gone.
+call("callMethod",{"objectId":oid("networksButton"),"method":"clicked","args":[]}); time.sleep(1)
 check("the note names the endpoint", props("rpcSettingsNote").get("text"), "Endpoint:", "contains")
 check("and says who owns it", props("rpcSettingsNote").get("text"), "Ethereum RPC app", "contains")
 print("   control: the network selector STAYS — that is wallet state, not eth_rpc config")
@@ -1493,7 +1504,7 @@ check("network selector still here", oid("network_sepolia") is not None, True)
 # ─────────────────────────────────────────────────────────────────────────────
 
 print("25) an ACCOUNT switch never leaves the previous account's figures on screen")
-call("callMethod",{"objectId":oid("settingsDialog"),"method":"close","args":[]}); time.sleep(0.6)
+call("callMethod",{"objectId":oid("networksBack"),"method":"clicked","args":[]}); time.sleep(0.6)
 settle()
 accts = ev("accounts") or []
 if len(accts) < 2:
