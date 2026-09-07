@@ -123,7 +123,7 @@ jobs:
           if grep -q "SKIP" /tmp/tables.log; then
             echo "::error::the view probes skipped instead of running"; exit 1
           fi
-          for p in probe_manage_tokens probe_token_identity probe_tokens_sort probe_tx_detail probe_intents probe_recipients; do
+          for p in probe_manage_tokens probe_token_identity probe_tokens_sort probe_tx_detail probe_intents probe_recipients probe_balances_states; do
             grep -q -- "--- $p.qml" /tmp/tables.log \
               || { echo "::error::probe never ran: $p"; exit 1; }
           done
@@ -131,6 +131,6 @@ jobs:
           # a probe that reaches its last phase is the only thing that prints
           # one. A header with silence under it counts here and passes nothing.
           n=$(grep -c "RESULT: ALL PASS" /tmp/tables.log)
-          echo "sections that reported: $n"; [ "$n" -ge 13 ]
+          echo "sections that reported: $n"; [ "$n" -ge 14 ]
           n=$(grep -c "  PASS  " /tmp/tables.log)
           echo "assertions: $n"; [ "$n" -ge 500 ]

@@ -19,7 +19,16 @@ class EthWalletUi
     // unknown and being read — a read that failed falls back to an em-dash, never to a
     // spinner that never stops.
     PROP(bool dataLoading=false READONLY)
+    // The BALANCES leg alone. `dataLoading` covers both legs of the same lane and stays up
+    // through the history call, so a spinner derived from it would keep spinning beside the
+    // error the balances read already produced. This one goes down the moment the amounts
+    // are answered, either way — a refusal is a finish.
+    PROP(bool balancesLoading=false READONLY)
     PROP(bool quoteLoading=false READONLY)
+    // The fee tiers. Its read used to be synchronous and untimed on the GUI thread, so a slow
+    // node froze the whole view for as long as the backend's own allowance — which grew when
+    // that read started seeding eth_rpc.
+    PROP(bool feeTiersLoading=false READONLY)
 
     // { chainId, key, name, nativeSymbol, testnet, rpcUrl, verifiedProxyMode, verifiedProxy }.
     // `rpcUrl` is READ-ONLY here: eth_rpc owns the device-wide endpoint and the Ethereum RPC

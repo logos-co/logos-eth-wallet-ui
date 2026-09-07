@@ -655,7 +655,6 @@ STILL_SYNC = {
                      "so the view re-reads rather than editing its published copy",
     "save_contact": "the address book, which reaches no chain and writes one small file",
     "forget_contact": "the address book",
-    "suggest_fees": "refresh()",
     "set_active_chain": "a chain switch, which re-reads everything behind it anyway",
     "send": "the send path, whose ordering witness is taken around the call",
     "send_status": "the send poll",
@@ -674,9 +673,39 @@ check("refreshTxStatus: claim, call, own the reply, re-read, lower the spinner",
                "setTxStatusLoading(false)"), True)
 print("   every bare claim goes through beginClaim, which arms the lapse that lowers its")
 print("   spinner — a third one written without it fails this")
-check("the three spinner-bearing claims",
+print()
+print("   THE BALANCES LEG. `dataLoading` covers both legs of one lane and is released in the")
+print("   HISTORY callback, so a spinner derived from it spins beside the error the balances")
+print("   read already produced — for as long as the history leg takes. The leg has its own")
+print("   flag, and both screens that spin on it read the same rule.")
+check("the pending rule is the leg, not the lane",
+      qml_decl("balancesPending").endswith("!balancesKnown && balancesLoading"), True)
+check("...the Tokens tab spins on it",
+      qml_binding("balanceSpinner_", "visible"), "root.balancesPending", "in")
+check("...and so does the token detail, from the same rule",
+      qml_binding("tokenDetailBalanceSpinner", "visible"), "visible: root.balancesPending")
+check("the amount and its spinner are never both on screen",
+      qml_binding("balance_", "visible"), "!root.balancesPending", "in")
+check("the leg is raised at the lane and lowered by its own reply",
+      in_order(fn_body("loadBalancesAndHistory"), "beginLane(m_dataLane",
+               "setBalancesLoading(true)", "owns(slot)", "setBalancesLoading(false)"), True)
+print("   and by the lane that lapses, or a reply that never lands leaves it spinning for ever")
+lane_lowers = re.search(r"m_dataLane\.setLoading\s*=.*?\n    \};", code, re.S)
+check("...the lane lowers it too",
+      bool(lane_lowers) and "setBalancesLoading(false)" in lane_lowers.group(0), True)
+
+print()
+print("   and a refusal has a way out. Nothing else in this view calls refresh(), the network")
+print("   retry covers a network read alone, and the receipt sweep cannot arm on a refusal —")
+print("   so without this button a failed first read is a wallet the user cannot re-read.")
+check("the banner carries a retry", qml_binding("errorRetryButton", "onClicked"),
+      "onClicked: root.backend.refresh()")
+check("...shown exactly when the banner is",
+      qml_binding("errorRetryButton", "visible"), qml_binding("errorLabel", "visible"))
+
+check("the four spinner-bearing claims",
       sorted(set(re.findall(r"beginClaim\((m_\w+)", code))),
-      ["m_detailsInFlight", "m_tokenToggleInFlight", "m_txStatusInFlight"])
+      ["m_detailsInFlight", "m_feesInFlight", "m_tokenToggleInFlight", "m_txStatusInFlight"])
 check("...and the button it drives says it is running",
       "!root.txStatusLoading" in qml_binding("txDetailRefresh", "enabled"), True)
 

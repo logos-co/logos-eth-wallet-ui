@@ -190,6 +190,9 @@ Item {
     readonly property var accountLabels: ready ? j(backend.accountLabelsJson, "{}") : ({})
     readonly property var accountWallets: ready ? j(backend.accountWalletsJson, "{}") : ({})
     readonly property var fees: ready ? j(backend.feeTiersJson, "{}") : ({})
+    readonly property bool feeTiersLoading: ready && backend.feeTiersLoading
+    // Same rule as the balances: unknown AND being read spins, unknown and idle does not.
+    readonly property bool feesPending: feeTiersLoading && root.fees.source === undefined
 
     // eth_rpc's verdict for the active chain, relayed by the backend. `blocking` true means
     // this view is deliberately showing no chain data at all.
@@ -203,9 +206,14 @@ Item {
     // throughout — an em-dash or a spinner, never a zero and never "none".
     readonly property bool scoped: ready && backend.scopedDataFresh
     readonly property bool dataLoading: ready && backend.dataLoading
+    readonly property bool balancesLoading: ready && backend.balancesLoading
     readonly property bool quoteLoading: ready && backend.quoteLoading
 
     readonly property bool balancesKnown: scoped && backend.balancesJson.length > 0
+    // Unknown AND being read is a spinner; unknown and not being read is an em-dash. The rep
+    // states that rule; the Tokens tab was the one screen that did not honour it. Gated on the
+    // balances leg, not the lane: the lane stays up through the history call that follows.
+    readonly property bool balancesPending: !balancesKnown && balancesLoading
     readonly property var balances: balancesKnown ? j(backend.balancesJson, "[]") : []
     // eth_rpc's label for the read behind the balances on screen — the ONLY thing here that
     // can be proof-backed. Withdrawn with them: a claim cannot outlive the figure it is about.
@@ -1440,15 +1448,34 @@ Item {
             }
         }
 
-        LogosText {
-            objectName: "errorLabel"
+        // The banner and the only way out of it. A failed first read otherwise left the
+        // wallet with no re-read a user could reach: nothing in this view calls `refresh`,
+        // the network retry covers a network read alone, and the receipt sweep cannot arm
+        // on a refusal.
+        RowLayout {
+            objectName: "errorRow"
             Layout.fillWidth: true
-            visible: root.ready && root.backend.lastError.length > 0
-            // Backend-authored; may contain anything.
-            textFormat: Text.PlainText
-            wrapMode: Text.WordWrap
-            color: Theme.palette.error
-            text: root.ready ? root.backend.lastError : ""
+            spacing: 8
+
+            LogosText {
+                objectName: "errorLabel"
+                Layout.fillWidth: true
+                visible: root.ready && root.backend.lastError.length > 0
+                // Backend-authored; may contain anything.
+                textFormat: Text.PlainText
+                wrapMode: Text.WordWrap
+                color: Theme.palette.error
+                text: root.ready ? root.backend.lastError : ""
+            }
+            LogosButton {
+                objectName: "errorRetryButton"
+                visible: root.ready && root.backend.lastError.length > 0
+                enabled: root.ready
+                text: "Retry"
+                // `refresh` clears lastError on entry, so the banner and this button leave
+                // together and a second failure brings both back.
+                onClicked: root.backend.refresh()
+            }
         }
 
         LogosStackView {
@@ -1605,8 +1632,18 @@ Item {
 
                                         Item { Layout.fillWidth: true }
 
+                                        LogosSpinner {
+                                            objectName: "balanceSpinner_" + root.tokenKey(modelData)
+                                            Layout.alignment: Qt.AlignVCenter
+                                            implicitWidth: 16
+                                            implicitHeight: 16
+                                            visible: root.balancesPending
+                                            running: visible
+                                            ringColor: Theme.palette.textSecondary
+                                        }
                                         LogosText {
                                             objectName: "balance_" + root.tokenKey(modelData)
+                                            visible: !root.balancesPending
                                             textFormat: Text.PlainText
                                             text: root.balanceDisplay(modelData)
                                         }
@@ -1882,7 +1919,7 @@ Item {
                         Layout.alignment: Qt.AlignVCenter
                         implicitWidth: 20
                         implicitHeight: 20
-                        visible: !root.balancesKnown && root.dataLoading
+                        visible: root.balancesPending
                         running: visible
                         ringColor: Theme.palette.textSecondary
                     }
@@ -3576,8 +3613,18 @@ Item {
 
             // Where the numbers came from. A wallet quietly pricing off legacy gasPrice is how
             // an overpayment goes unnoticed, so the source is on screen rather than in a log.
+            // The read is asynchronous now, so this line has a "reading" state of its own.
+            LogosSpinner {
+                objectName: "feeSourceSpinner"
+                implicitWidth: 14
+                implicitHeight: 14
+                visible: root.feesPending
+                running: visible
+                ringColor: Theme.palette.textSecondary
+            }
             LogosText {
                 objectName: "feeSourceLabel"
+                visible: !root.feesPending
                 textFormat: Text.PlainText
                 color: Theme.palette.textSecondary
                 // Gated on the FIGURES like everything else here: `root.fees` is read under no

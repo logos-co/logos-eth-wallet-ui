@@ -171,6 +171,7 @@ private:
     /// One enable/disable at a time. A bare claim: a second toggle should be ignored while the
     /// first is in flight, not queued behind it and applied to a row that has since moved.
     InFlight m_tokenToggleInFlight;
+    InFlight m_feesInFlight;
     /// Whether anything queued behind the live quote was a user edit. Carried separately, or a
     /// keystroke arriving behind a timer tick replays as a tick and its refusal is swallowed.
     bool m_quoteAgainInteractive = false;
