@@ -15,7 +15,8 @@
     { "intent": "evm.signing.approve", "cardinality": "single" },
     { "intent": "evm.accounts.manage", "cardinality": "single" },
     { "intent": "evm.rpc.configure", "cardinality": "single" },
-    { "intent": "evm.verified_routing.operate", "cardinality": "single" }
+    { "intent": "evm.verified_routing.operate", "cardinality": "single" },
+    { "intent": "evm.token_lists.configure", "cardinality": "single" }
   ],
   "codegen": { "rep": "src/eth_wallet_ui.rep" },
   "nix": {
