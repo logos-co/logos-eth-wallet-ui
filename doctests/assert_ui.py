@@ -557,8 +557,8 @@ print("   would be NOWHERE on the screen. It is rendered below instead, in the i
 print("   section, labelled as this wallet's own record rather than as chain data")
 check("the fallback wants an erc20 row with nothing decoded",
       qml_decl("recipientRecorded").endswith('"erc20" && txPage.transfers.length === 0'), True)
-check("...and what it shows is the recipient this wallet recorded",
-      qml_binding("txDetailRecordedToRow", "value"), "value: root.namedAddr(txPage.rec.to)")
+check("...and what it shows is the recipient this wallet recorded, in full",
+      qml_binding("txDetailRecordedToRow", "address"), 'address: txPage.rec.to || ""')
 check("...saying in as many words that no receipt has been read",
       "receipt has not been read yet" in qml_binding("txDetailRecordedNote", "text"), True)
 # A presence check is not a comparison: `txTo === undefined` asks whether a receipt was ever
@@ -603,13 +603,12 @@ check("...and an absent key is an empty list, not a claim",
 print("   once a receipt decodes a transfer the recorded-recipient card above goes away, so")
 print("   these rows are the ONLY rendering of the recipient left on a confirmed token send.")
 print("   The standing rule here is that every address is copyable, and that includes these")
+# The copy button is the component's now, keyed off the same address the row renders — so
+# what was two bindings that could disagree is one value, and the assertion follows it.
 for end in ["From", "To"]:
-    check(f"the transfer's {end} is a copyable row of its own",
-          qml_binding("txDetailTransfer%s_" % end, "copyValue"),
-          'copyValue: modelData.%s || ""' % end.lower())
-    check(f"...rendered by the same namer as every other address",
-          qml_binding("txDetailTransfer%s_" % end, "value"),
-          "value: root.namedAddr(modelData.%s)" % end.lower())
+    check(f"the transfer's {end} is a row of its own, carrying the whole address",
+          qml_binding("txDetailTransfer%s_" % end, "address"),
+          'address: modelData.%s || ""' % end.lower())
 
 print("   the ceiling appears beside a fee that was PAID. While pending the fee row already")
 print("   IS the ceiling, and one number under two labels explains nothing")
@@ -1086,9 +1085,31 @@ print("one rule for showing an address, and the name never replaces it: a name i
 print("wallet's own word for who that is and cannot be checked against what was signed.")
 check("namedAddr always carries the short address",
       qml_fn_body(qml_body, "namedAddr").count("shortAddr(a)"), 2)
-check("...and the account picker uses that one rule rather than a second convention",
-      qml_fn_body(qml_body, "accountDisplay").strip().endswith("return namedAddr(a) }")
-      or "return namedAddr(a)" in qml_fn_body(qml_body, "accountDisplay"), True)
+# The CLOSED picker is the one place a name stands without its address, and deliberately:
+# the selected account's address is rendered beside the control, and 220px holding both is
+# 220px that elides the address. The open list carries both, on two lines.
+check("...and the closed picker shows a name alone, falling back to the short address",
+      "return n.length ? n : shortAddr(a)" in qml_fn_body(qml_body, "accountDisplay"), True)
+check("...while its rows carry both, resolved per row rather than baked into the model",
+      "model: addresses" in qml_body and "text: root.displayName(modelData)" in qml_body, True)
+print()
+print("no address is elided TWICE. A mid-ellided address has already lost 30 characters, and")
+print("a container that trims it again leaves a prefix matching thousands of addresses. So")
+print("wherever a name and an address share a row they are on separate lines: the name may")
+print("elide, the address may not.")
+for comp, addr_line in [("AccountPicker", "accountRowAddress_"),
+                        ("PickableAddress", "Address")]:
+    body = qml_body[qml_body.index("component %s" % comp):]
+    body = body[:body.index("\n    component ")] if "\n    component " in body else body
+    check(f"  {comp}'s address line is never elided", "elide: Text.ElideNone" in body, True)
+check("a detail row's address wraps instead of eliding, and is the WHOLE address",
+      "wrapMode: Text.WrapAnywhere" in qml_body[qml_body.index("component NamedAddressRow"):
+                                                qml_body.index("component DetailRow")], True)
+check("...and it is the address itself, never a shortened copy",
+      "text: nrow.address" in qml_body, True)
+check("the address book screen shows the whole address too",
+      "text: bookRow.contact.address" in qml_body, True)
+
 check("...and it resolves accounts, wallets AND the address book",
       all(f in qml_fn_body(qml_body, "displayName")
           for f in ["accountLabel(a)", "accountWallet(a)", "contactName(a)"]), True)

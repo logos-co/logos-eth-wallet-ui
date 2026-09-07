@@ -357,10 +357,14 @@ Item {
         })
         check("it borrows the wallet's name and says where in it",
               view.item.displayName(probe.me), "Status Throwaway #0")
-        // The name never REPLACES the address: a name is this wallet's own word for who that
-        // is and cannot be checked against what was signed.
-        check("...and the address is shown with it, always",
-              view.item.accountDisplay(probe.me), "Status Throwaway #0 (0x8626…1199)")
+        // The name never REPLACES the address ANYWHERE it has room for both — that is
+        // `namedAddr`, the rule the activity list and every detail row use. The closed
+        // account picker is the one exception, and a deliberate one: it is 220px with an
+        // elide of its own, so both in it means the address is what gets cut.
+        check("...and the general rule carries the address with it",
+              view.item.namedAddr(probe.me), "Status Throwaway #0 (0x8626…1199)")
+        check("...while the closed picker shows the name alone, beside the address",
+              view.item.accountDisplay(probe.me), "Status Throwaway #0")
 
         console.log("")
         console.log("...but its OWN name always wins, and an account in an unnamed wallet")
