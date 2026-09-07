@@ -2639,34 +2639,108 @@ Item {
                         // plain array and a row's index moves when an earlier one is forgotten.
                         readonly property var contact: modelData
 
-                        // A frame, because the name is an editable BOX and the address is bare
-                        // text: without something holding them together the address reads as
-                        // orphaned rather than as the thing the name is for. It is also the
-                        // shape this app already uses to group a card's fields.
+                        // READ-ONLY until asked. A name that is always an open field is a name
+                        // one stray keystroke rewrites, and this list is what a user checks a
+                        // recipient against — so editing is a mode you enter, confirm or
+                        // abandon, and leaving the screen abandons it.
+                        property bool editing: false
+
+                        function beginEdit() {
+                            bookNameField.text = bookRow.contact.name
+                            bookRow.editing = true
+                            bookNameField.textInput.forceActiveFocus()
+                        }
+                        function confirmEdit() {
+                            var name = bookNameField.text.trim()
+                            bookRow.editing = false
+                            // Unchanged is not a write. The backend would accept it happily,
+                            // but a re-read that moves nothing still rebuilds this list under
+                            // the pointer.
+                            if (name !== bookRow.contact.name)
+                                root.backend.saveContact(bookRow.contact.address, name)
+                        }
+                        function cancelEdit() {
+                            bookNameField.text = bookRow.contact.name
+                            bookRow.editing = false
+                        }
+
+                        // A frame, because the name and the address are one thing: without it
+                        // the address reads as orphaned rather than as what the name is for.
                         contentItem: ColumnLayout {
                             spacing: 2
 
                             RowLayout {
                                 Layout.fillWidth: true
                                 spacing: Theme.spacing.tiny
-                                // Renaming writes through the same upsert an add does, so
-                                // there is one path into the book rather than two that can
-                                // disagree. Seeded, not bound: a binding fights the field
-                                // while it is being typed.
-                                LogosTextField {
-                                    id: bookNameField
+
+                                LogosText {
                                     objectName: "bookName_" + index
                                     Layout.fillWidth: true
-                                    text: modelData.name
-                                    placeholderText: "Unnamed"
+                                    visible: !bookRow.editing
+                                    textFormat: Text.PlainText
+                                    elide: Text.ElideRight
+                                    text: bookRow.contact.name.length > 0
+                                          ? bookRow.contact.name : "Unnamed"
+                                    // Dimmed when it is the placeholder rather than a name, so
+                                    // "Unnamed" cannot be mistaken for what someone called it.
+                                    color: bookRow.contact.name.length > 0
+                                           ? Theme.palette.text : Theme.palette.textTertiary
                                 }
+                                LogosTextField {
+                                    id: bookNameField
+                                    objectName: "bookNameField_" + index
+                                    Layout.fillWidth: true
+                                    visible: bookRow.editing
+                                    text: modelData.name
+                                    placeholderText: "Name"
+                                }
+
+                                LogosIconButton {
+                                    objectName: "bookEdit_" + index
+                                    visible: !bookRow.editing
+                                    size: 32
+                                    iconSize: 16
+                                    iconSource: Qt.resolvedUrl("assets/edit.svg")
+                                    ToolTip.text: "Rename"
+                                    ToolTip.visible: hovered
+                                    ToolTip.delay: 400
+                                    onClicked: bookRow.beginEdit()
+                                }
+                                LogosIconButton {
+                                    objectName: "bookConfirm_" + index
+                                    visible: bookRow.editing
+                                    size: 32
+                                    iconSize: 16
+                                    iconSource: LogosIcons.check
+                                    ToolTip.text: "Confirm"
+                                    ToolTip.visible: hovered
+                                    ToolTip.delay: 400
+                                    onClicked: bookRow.confirmEdit()
+                                }
+                                LogosIconButton {
+                                    objectName: "bookCancel_" + index
+                                    visible: bookRow.editing
+                                    size: 32
+                                    iconSize: 16
+                                    iconSource: LogosIcons.close
+                                    ToolTip.text: "Cancel"
+                                    ToolTip.visible: hovered
+                                    ToolTip.delay: 400
+                                    onClicked: bookRow.cancelEdit()
+                                }
+
+                                // Copying and forgetting are about the ADDRESS, which editing a
+                                // name does not touch — but they leave while a rename is open
+                                // so the row offers one decision at a time.
                                 LogosCopyButton {
                                     objectName: "bookCopy_" + index
+                                    visible: !bookRow.editing
                                     value: bookRow.contact.address
                                     onCopied: function (v) { root.lastCopiedValue = v }
                                 }
                                 LogosIconButton {
                                     objectName: "bookForget_" + index
+                                    visible: !bookRow.editing
                                     size: 32
                                     iconSize: 16
                                     iconSource: LogosIcons.trash
@@ -2676,18 +2750,15 @@ Item {
                                     onClicked: root.backend.forgetContact(bookRow.contact.address)
                                 }
                             }
-                            // LogosTextField exposes the inner TextInput but no
-                            // editingFinished of its own, so the rename hangs off that rather
-                            // than costing every row a second button whose only job is to say
-                            // "yes, that name".
+
+                            // Enter confirms and Escape abandons, because a field with two
+                            // buttons beside it is still a field people press Enter in.
                             Connections {
                                 target: bookNameField.textInput
-                                function onEditingFinished() {
-                                    var name = bookNameField.text.trim()
-                                    if (name !== bookRow.contact.name)
-                                        root.backend.saveContact(bookRow.contact.address, name)
-                                }
+                                function onAccepted() { bookRow.confirmEdit() }
                             }
+                            Keys.onEscapePressed: if (bookRow.editing) bookRow.cancelEdit()
+
                             // IN FULL, and indented to the field's own text rather than the
                             // frame's edge, so it sits under the name instead of beside it.
                             LogosSelectableText {

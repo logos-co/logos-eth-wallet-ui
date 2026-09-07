@@ -162,6 +162,16 @@ Item {
 
     function root_backend() { return view.item.backend }
 
+    // A pushed screen, not a popup: its delegates really are instantiated, so the address
+    // book's rows can be driven rather than merely read off their bindings.
+    function screen() {
+        var nav = find(view.item, "nav")
+        return nav ? nav.currentItem : null
+    }
+    function onScreen(name) {
+        return find(screen(), name) || ({ text: "<missing>", visible: "<missing>" })
+    }
+
     function openSend() { find(view.item, "openSendButton").clicked() }
 
     // ── what the form remembers ──────────────────────────────────────────────
@@ -251,6 +261,71 @@ Item {
               view.item.isContact(probe.me), false)
     }
 
+    function assertANameIsReadOnlyUntilAsked() {
+        console.log("")
+        console.log("a name in the book is READ-ONLY until asked. A field that is always open")
+        console.log("is a name one stray keystroke rewrites, and this list is what a user")
+        console.log("checks a recipient against before paying them")
+        fake.contactsJson = JSON.stringify([{ address: probe.friend, name: "Rorschach" }])
+        view.item.openAddressBook()
+
+        check("the name is shown, not offered for editing", onScreen("bookName_0").visible, true)
+        check("...and there is no field to type in", onScreen("bookNameField_0").visible, false)
+        check("...but there is a way in", onScreen("bookEdit_0").visible, true)
+        check("...and no Confirm standing by for an edit nobody started",
+              onScreen("bookConfirm_0").visible, false)
+
+        console.log("")
+        console.log("an unnamed contact says so in its own voice — dimmed, so \"Unnamed\"")
+        console.log("cannot be read as what somebody called it")
+        fake.contactsJson = JSON.stringify([{ address: probe.friend, name: "" }])
+        check("the placeholder is not a name", onScreen("bookName_0").text, "Unnamed")
+    }
+
+    function assertCancellingAnEditWritesNothing() {
+        console.log("")
+        console.log("entering the mode, changing the name, and abandoning it. The book must be")
+        console.log("exactly as it was: a rename a user backed out of is not a rename")
+        fake.contactsJson = JSON.stringify([{ address: probe.friend, name: "Rorschach" }])
+        var before = fake.saved.length
+        onScreen("bookEdit_0").clicked()
+        check("the field is open", onScreen("bookNameField_0").visible, true)
+        check("...seeded with the name it is editing", onScreen("bookNameField_0").text,
+              "Rorschach")
+        check("...and the read-only line stood down", onScreen("bookName_0").visible, false)
+
+        onScreen("bookNameField_0").text = "Something else"
+        onScreen("bookCancel_0").clicked()
+        check("nothing was written", fake.saved.length - before, 0)
+        check("...and the row is read-only again", onScreen("bookName_0").visible, true)
+        check("...still showing the name it always had", onScreen("bookName_0").text,
+              "Rorschach")
+    }
+
+    function assertConfirmingWritesOnceAndOnlyOnAChange() {
+        console.log("")
+        console.log("confirming writes, and writes what was typed")
+        var before = fake.saved.length
+        onScreen("bookEdit_0").clicked()
+        onScreen("bookNameField_0").text = "  Renamed  "
+        onScreen("bookConfirm_0").clicked()
+        check("one write", fake.saved.length - before, 1)
+        check("...of the trimmed name", fake.saved[fake.saved.length - 1].name, "Renamed")
+        check("...against that contact's address", fake.saved[fake.saved.length - 1].address,
+              probe.friend)
+        check("...and the mode closed", onScreen("bookNameField_0").visible, false)
+
+        console.log("")
+        console.log("...but confirming an UNCHANGED name writes nothing. The backend would")
+        console.log("take it happily; the cost is a re-read that rebuilds this list under the")
+        console.log("pointer for no reason")
+        before = fake.saved.length
+        onScreen("bookEdit_0").clicked()
+        onScreen("bookConfirm_0").clicked()
+        check("no write for a no-op", fake.saved.length - before, 0)
+        check("...and it still left the mode", onScreen("bookNameField_0").visible, false)
+    }
+
     function assertTheAddFormRefusesAnEmptyAddress() {
         console.log("")
         console.log("Add is armed by an address and nothing else. A name is optional — an")
@@ -279,6 +354,9 @@ Item {
             probe.assertTheFormIsEmptyEveryTime()
             probe.assertRecentsAreCounterpartiesNotContracts()
             probe.assertTheBookIsOfferedAndManaged()
+            probe.assertANameIsReadOnlyUntilAsked()
+            probe.assertCancellingAnEditWritesNothing()
+            probe.assertConfirmingWritesOnceAndOnlyOnAChange()
             probe.assertTheAddFormRefusesAnEmptyAddress()
 
             console.log("")
