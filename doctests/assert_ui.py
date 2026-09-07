@@ -1021,9 +1021,9 @@ requested = sorted(set(re.findall(r'(?:logos\.request|askFor)\(\s*"([^"]+)"',
                                   VIEW.read_text())))
 check("every intent asked for is declared", [i for i in requested if i not in declared], [])
 check("...and every intent declared is asked for", [i for i in declared if i not in requested], [])
-check("the four hops are the whole list", declared,
+check("the five hops are the whole list", declared,
       ["evm.accounts.manage", "evm.rpc.configure", "evm.signing.approve",
-       "evm.verified_routing.operate"])
+       "evm.token_lists.configure", "evm.verified_routing.operate"])
 
 print()
 print("`uses` entries are OBJECTS. A bare string array parses, declares nothing, and every")
@@ -1097,16 +1097,26 @@ print("the account chrome is HOME chrome: it is about the selected account, whic
 print("screen is not about — and a button naming a screen you are already on is worse than")
 print("no button. The chain chip is the exception, and deliberately: a detail screen still")
 print("shows figures, and which chain they came from is not something to leave behind.")
-for name in ["addressBookButton", "networksButton", "manageTokensButton",
-             "addressLabel", "addressCopyButton"]:
-    check(f"  {name} is home only",
-          qml_binding(name, "visible"), "visible: nav.depth <= 1")
-check("...while the chain chip follows you", qml_binding("chainChip", "visible"), "")
+# Gated as two ROWS on one reading rather than control by control: five `visible` bindings
+# saying the same thing are five that can come to disagree, and the chip was the one that
+# did — it followed the user onto a settings screen, over a page with its own title.
+check("the header is gated on one reading of what home is",
+      qml_body.count("visible: root.homeChrome"), 2)
+check("...and no control carries a second opinion about it",
+      "visible: nav.depth <= 1" in qml_body, False)
+check("...which is the StackView's depth, read once",
+      qml_decl("homeChrome").endswith("nav !== null && nav.depth <= 1"), True)
 check("there is no Settings popup left to hold links to any of them",
       "settingsDialog" in qml_body, False)
 check("...and each button opens a screen rather than a dialog",
       all(f"root.open{n}()" in qml_body for n in ["AddressBook", "Networks", "ManageTokens"]),
       True)
+print()
+print("what the Tokens screen turns on and off is which tokens this wallet SHOWS. Where they")
+print("come from is device-wide and owned elsewhere, exactly as the endpoint is — so it asks")
+print("for the capability rather than naming the app that has it.")
+check("the Tokens screen offers the way to the lists",
+      'root.askFor("evm.token_lists.configure"' in qml_body, True)
 
 print()
 print("overriding a design-system delegate replaces its background too, so a row that looks")

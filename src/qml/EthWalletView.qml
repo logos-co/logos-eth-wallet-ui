@@ -59,6 +59,10 @@ Item {
     // the backend refused must stay on screen with its reason, which is the whole point of
     // moving the error inside the modal. At root scope because a Connections declared inside a
     // Popup that also sets contentItem is reparented into that contentItem.
+    // The main wallet view, as opposed to any screen pushed over it. One reading, so the two
+    // header rows cannot come to disagree about what "home" is.
+    readonly property bool homeChrome: nav !== null && nav.depth <= 1
+
     // What came back from asking another app to do something, when it is worth saying.
     // Empty is the normal state: a request that reached a provider hands the user over to
     // it, so this screen is not the one they are reading.
@@ -1243,9 +1247,15 @@ Item {
         anchors.margins: Theme.spacing.medium
         spacing: Theme.spacing.small
 
-        // ── header: account, address, and the chain chip that is always on screen ──
+        // ── header: the main view's chrome, and only the main view's ──
+        //
+        // All of it: the account it is about, the address, the chain the figures came from,
+        // and the three buttons that leave. A pushed screen is a place of its own with its
+        // own title and its own way back, and this row over the top of one is the previous
+        // screen still talking.
         RowLayout {
             Layout.fillWidth: true
+            visible: root.homeChrome
             spacing: Theme.spacing.small
 
             AccountPicker {
@@ -1290,26 +1300,20 @@ Item {
             // The three screens this wallet has, as buttons rather than a Settings popup.
             // Each is a place with its own contents, and a dialog that only ever held links
             // to them was a click in front of every one of them.
-            //
-            // HOME ONLY, all three: each names a screen, and a button offering to take you
-            // where you already are is worse than no button.
             LogosButton {
                 objectName: "addressBookButton"
-                visible: nav.depth <= 1
                 text: "Address book"
                 enabled: root.ready
                 onClicked: root.openAddressBook()
             }
             LogosButton {
                 objectName: "networksButton"
-                visible: nav.depth <= 1
                 text: "Networks"
                 enabled: root.ready
                 onClicked: root.openNetworks()
             }
             LogosButton {
                 objectName: "manageTokensButton"
-                visible: nav.depth <= 1
                 text: "Tokens"
                 enabled: root.ready
                 onClicked: root.openManageTokens()
@@ -1321,29 +1325,24 @@ Item {
         // say where you already are.
         RowLayout {
             Layout.fillWidth: true
+            visible: root.homeChrome
             spacing: Theme.spacing.small
 
             // The one identifier a user hands out, so it is copyable wherever it appears.
-            // Home only — it is chrome about the selected account, and a pushed screen is
-            // not about that account.
             LogosSelectableText {
                 objectName: "addressLabel"
-                visible: nav.depth <= 1
                 text: root.shortAddr(root.selected)
                 color: Theme.palette.textSecondary
                 font.family: Theme.typography.mono
             }
             LogosCopyButton {
                 objectName: "addressCopyButton"
-                visible: nav.depth <= 1
                 value: root.selected
                 onCopied: function (v) { root.lastCopiedValue = v }
             }
 
             Item { Layout.fillWidth: true }
 
-            // On EVERY screen, unlike the rest of this chrome. A detail screen still shows
-            // figures, and which chain they are from is not something to leave behind.
             // Testnets are visually distinct so mainnet cannot be mistaken for one.
             LogosBadge {
                 objectName: "chainChip"
@@ -2936,6 +2935,25 @@ Item {
                         font.weight: Theme.typography.weightMedium
                     }
                     Item { Layout.fillWidth: true }
+                    // What THIS screen turns on and off is which tokens the wallet shows.
+                    // Where those tokens come from — the lists, their URLs, a custom one — is
+                    // DEVICE-WIDE and owned elsewhere, exactly as the endpoint is. So this
+                    // asks for that capability rather than naming the app that has it.
+                    LogosButton {
+                        objectName: "openTokenListsButton"
+                        text: "Token lists"
+                        onClicked: root.askFor("evm.token_lists.configure",
+                                               "Nothing on this device manages token lists.")
+                    }
+                    LogosText {
+                        objectName: "tokensIntentNote"
+                        Layout.maximumWidth: 260
+                        visible: root.intentNote.length > 0
+                        textFormat: Text.PlainText
+                        wrapMode: Text.WordWrap
+                        color: Theme.palette.textSecondary
+                        text: root.intentNote
+                    }
                     LogosSpinner {
                         objectName: "manageTokensSpinner"
                         implicitWidth: 20
