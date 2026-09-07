@@ -215,6 +215,15 @@ Item {
     // those files are shared with Basecamp and the package manager, where the darker weight
     // is what ships today. Delete these the day the design system normalises them.
     readonly property url iconArrowLeft: Qt.resolvedUrl("assets/arrow-left.svg")
+
+    // `flat` hides the background entirely, so a flat icon button has NO hover feedback at
+    // all unless its tint reacts — and a control that never changes under the cursor reads as
+    // decoration. The design system's own LogosCopyButton is the only one that does this, and
+    // it looked like the odd one out in a row of three; it is the one that was right.
+    component HoverIcon: LogosIconButton {
+        flat: true
+        iconColor: isActive ? Theme.palette.text : Theme.palette.textTertiary
+    }
     readonly property url iconList: Qt.resolvedUrl("assets/list.svg")
     readonly property url iconRefresh: Qt.resolvedUrl("assets/refresh.svg")
     readonly property url iconTrash: Qt.resolvedUrl("assets/trash.svg")
@@ -1004,6 +1013,11 @@ Item {
                 horizontalAlignment: Text.AlignRight
             }
             LogosCopyButton {
+                // Named like the two buttons beside it in the address book row, which had one
+                // each while this had none — the only unlabelled control in the group.
+                ToolTip.text: "Copy"
+                ToolTip.visible: hovered
+                ToolTip.delay: 400
                 objectName: nrow.objectName.length > 0 ? nrow.objectName + "Copy" : ""
                 value: nrow.address
                 onCopied: function (v) { nrow.copied(v) }
@@ -1148,6 +1162,11 @@ Item {
                 font.family: row.mono ? Theme.typography.mono : Theme.typography.publicSans
             }
             LogosCopyButton {
+                // Named like the two buttons beside it in the address book row, which had one
+                // each while this had none — the only unlabelled control in the group.
+                ToolTip.text: "Copy"
+                ToolTip.visible: hovered
+                ToolTip.delay: 400
                 id: copyButton
                 // Named after its row, so a probe can assert the copy branch is really on
                 // screen rather than merely declared.
@@ -1246,6 +1265,11 @@ Item {
                             text: "To: " + root.namedAddr(modelData.to)
                         }
                         LogosCopyButton {
+                            // Named like the two buttons beside it in the address book row, which had one
+                            // each while this had none — the only unlabelled control in the group.
+                            ToolTip.text: "Copy"
+                            ToolTip.visible: hovered
+                            ToolTip.delay: 400
                             objectName: "txToCopy_" + modelData.hash
                             value: modelData.to
                             onCopied: function (v) { root.lastCopiedValue = v }
@@ -1304,9 +1328,8 @@ Item {
             // address it names, where a word of chrome pushes the two apart. LogosIconButton
             // carries no text of its own, so the tooltip is the only thing naming it and is
             // not decoration.
-            LogosIconButton {
+            HoverIcon {
                 objectName: "manageAccountsButton"
-                flat: true
                 size: 32
                 iconSize: 16
                 iconSource: LogosIcons.grid
@@ -1358,6 +1381,11 @@ Item {
                 font.family: Theme.typography.mono
             }
             LogosCopyButton {
+                // Named like the two buttons beside it in the address book row, which had one
+                // each while this had none — the only unlabelled control in the group.
+                ToolTip.text: "Copy"
+                ToolTip.visible: hovered
+                ToolTip.delay: 400
                 objectName: "addressCopyButton"
                 value: root.selected
                 onCopied: function (v) { root.lastCopiedValue = v }
@@ -1573,10 +1601,9 @@ Item {
                                 }
                                 // `id`, not objectName alone: an objectName does not enter the
                                 // QML scope chain, so popupUnder() could not name it.
-                                LogosIconButton {
+                                HoverIcon {
                                     id: tokenSortButton
                                     objectName: "tokenSortButton"
-                                    flat: true
                                     size: 32
                                     iconSize: 16
                                     iconSource: root.iconList
@@ -1888,9 +1915,8 @@ Item {
 
                 RowLayout {
                     Layout.fillWidth: true
-                    LogosIconButton {
+                    HoverIcon {
                         objectName: "detailBackButton"
-                        flat: true
                         size: 32
                         iconSize: 20
                         iconSource: root.iconArrowLeft
@@ -2130,9 +2156,8 @@ Item {
 
                     RowLayout {
                         Layout.fillWidth: true
-                        LogosIconButton {
+                        HoverIcon {
                             objectName: "detailBackButton"
-                            flat: true
                             size: 32
                             iconSize: 20
                             iconSource: root.iconArrowLeft
@@ -2148,9 +2173,8 @@ Item {
                         Item { Layout.fillWidth: true }
                         // Also offered on a settled row with no fee recorded: the sweep never
                         // re-polls a settled row, so only this can backfill an older one.
-                        LogosIconButton {
+                        HoverIcon {
                             objectName: "txDetailRefresh"
-                            flat: true
                             size: 32
                             iconSize: 18
                             iconSource: root.iconRefresh
@@ -2314,6 +2338,11 @@ Item {
                                     }
                                     Item { Layout.fillWidth: true }
                                     LogosCopyButton {
+                                        // Named like the two buttons beside it in the address book row, which had one
+                                        // each while this had none — the only unlabelled control in the group.
+                                        ToolTip.text: "Copy"
+                                        ToolTip.visible: hovered
+                                        ToolTip.delay: 400
                                         objectName: "txDetailDataCopy"
                                         visible: txPage.txInput.length > 0
                                         value: txPage.txInput
@@ -2624,9 +2653,8 @@ Item {
 
                 RowLayout {
                     Layout.fillWidth: true
-                    LogosIconButton {
+                    HoverIcon {
                         objectName: "networksBack"
-                        flat: true
                         size: 32
                         iconSize: 20
                         iconSource: root.iconArrowLeft
@@ -2708,9 +2736,8 @@ Item {
 
                 RowLayout {
                     Layout.fillWidth: true
-                    LogosIconButton {
+                    HoverIcon {
                         objectName: "addressBookBack"
-                        flat: true
                         size: 32
                         iconSize: 20
                         iconSource: root.iconArrowLeft
@@ -2852,10 +2879,9 @@ Item {
                                     placeholderText: "Name"
                                 }
 
-                                LogosIconButton {
+                                HoverIcon {
                                     objectName: "bookEdit_" + index
                                     visible: !bookRow.editing
-                                    flat: true
                                     size: 32
                                     iconSize: 16
                                     iconSource: Qt.resolvedUrl("assets/edit.svg")
@@ -2864,10 +2890,9 @@ Item {
                                     ToolTip.delay: 400
                                     onClicked: bookRow.beginEdit()
                                 }
-                                LogosIconButton {
+                                HoverIcon {
                                     objectName: "bookConfirm_" + index
                                     visible: bookRow.editing
-                                    flat: true
                                     size: 32
                                     iconSize: 16
                                     iconSource: LogosIcons.check
@@ -2876,10 +2901,9 @@ Item {
                                     ToolTip.delay: 400
                                     onClicked: bookRow.confirmEdit()
                                 }
-                                LogosIconButton {
+                                HoverIcon {
                                     objectName: "bookCancel_" + index
                                     visible: bookRow.editing
-                                    flat: true
                                     size: 32
                                     iconSize: 16
                                     iconSource: LogosIcons.close
@@ -2893,15 +2917,19 @@ Item {
                                 // name does not touch — but they leave while a rename is open
                                 // so the row offers one decision at a time.
                                 LogosCopyButton {
+                                    // Named like the two buttons beside it in the address book row, which had one
+                                    // each while this had none — the only unlabelled control in the group.
+                                    ToolTip.text: "Copy"
+                                    ToolTip.visible: hovered
+                                    ToolTip.delay: 400
                                     objectName: "bookCopy_" + index
                                     visible: !bookRow.editing
                                     value: bookRow.contact.address
                                     onCopied: function (v) { root.lastCopiedValue = v }
                                 }
-                                LogosIconButton {
+                                HoverIcon {
                                     objectName: "bookForget_" + index
                                     visible: !bookRow.editing
-                                    flat: true
                                     size: 32
                                     iconSize: 16
                                     iconSource: root.iconTrash
@@ -2980,9 +3008,8 @@ Item {
 
                 RowLayout {
                     Layout.fillWidth: true
-                    LogosIconButton {
+                    HoverIcon {
                         objectName: "manageTokensBackButton"
-                        flat: true
                         size: 32
                         iconSize: 20
                         iconSource: root.iconArrowLeft
@@ -3473,10 +3500,9 @@ Item {
                 // `id`, not objectName alone: an objectName does not enter the QML scope
                 // chain, so `popupUnder(toAccountsButton)` below was a ReferenceError that
                 // aborted the handler before the menu was ever asked to open.
-                LogosIconButton {
+                HoverIcon {
                     id: toAccountsButton
                     objectName: "toAccountsButton"
-                    flat: true
                     size: 32
                     iconSize: 16
                     iconSource: root.iconTriangleDown
@@ -3893,6 +3919,11 @@ Item {
                     font.family: Theme.typography.mono
                 }
                 LogosCopyButton {
+                    // Named like the two buttons beside it in the address book row, which had one
+                    // each while this had none — the only unlabelled control in the group.
+                    ToolTip.text: "Copy"
+                    ToolTip.visible: hovered
+                    ToolTip.delay: 400
                     objectName: "sendOutcomeCopyButton"
                     value: root.outcomeHash
                     onCopied: function (v) { root.lastCopiedValue = v }

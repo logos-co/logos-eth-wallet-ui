@@ -726,10 +726,23 @@ print("   every icon button in this view is FLAT. Five shipped without it — th
 print("   button and the four address-book row buttons — and a chevron or a pencil sitting")
 print("   in a filled circle reads as a disabled control, which is what they were reported")
 print("   as. One rule over the whole file, so a sixth cannot drift in.")
-icon_buttons = re.findall(r"LogosIconButton \{(?:[^{}]|\{[^{}]*\})*?\}", qml, re.S)
-check("every icon button is flat",
-      [b for b in icon_buttons if "flat: true" not in b], [])
-check("...and there are as many as the view has icon buttons", len(icon_buttons), 13)
+icon_buttons = re.findall(r"HoverIcon \{(?:[^{}]|\{[^{}]*\})*?\}", qml, re.S)
+print("   and every one of them reacts to the cursor. `flat` hides the background outright,")
+print("   so a flat icon button has NO hover feedback unless its tint moves — the design")
+print("   system's own copy button was the only one that did, and it looked like the odd one")
+print("   out in a row of three. It was the one that was right.")
+check("no icon button is a bare LogosIconButton",
+      re.findall(r"^\s*LogosIconButton \{", qml, re.M), [])
+check("...they all come from the one hover-aware rule", len(icon_buttons), 13)
+check("...which is stated once", qml.count("component HoverIcon:"), 1)
+check("...and the tint follows the cursor",
+      qml_binding("HoverIcon", "iconColor") or
+      re.search(r"iconColor: isActive \? Theme\.palette\.text : Theme\.palette\.textTertiary", qml)
+      is not None, True)
+print("   and the copy button says what it is, like the two beside it did")
+check("every copy button carries a tooltip",
+      [b for b in re.findall(r"LogosCopyButton \{(?:[^{}]|\{[^{}]*\})*?\}", qml, re.S)
+       if "ToolTip.text" not in b], [])
 print("   and every back arrow is the same size, so leaving one screen looks like leaving")
 print("   any other")
 backs = [b for b in icon_buttons if "iconArrowLeft" in b]
