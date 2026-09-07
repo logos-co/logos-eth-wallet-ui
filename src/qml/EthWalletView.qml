@@ -693,9 +693,14 @@ Item {
         return n.length ? n + " (" + shortAddr(a) + ")" : shortAddr(a)
     }
 
-    // Kept as the picker's own name for the same rule, so a reader of that control is not
-    // sent looking for a second convention.
-    function accountDisplay(a) { return namedAddr(a) }
+    // What a CLOSED picker shows: the name, or the short address when there is none. Not
+    // both — the selected account's address is displayed beside the control, and a 220px box
+    // holding a name and an address elides, taking the address with it. The open list shows
+    // both, on two lines, which is what `AccountPicker` below is for.
+    function accountDisplay(a) {
+        var n = displayName(a)
+        return n.length ? n : shortAddr(a)
+    }
 
     // Both are still `pending` on disk. Blocked means the chain was never asked at all —
     // the proxy on the row's OWN network is refusing; stalled means we gave up asking.
@@ -916,6 +921,145 @@ Item {
     // Label left, value right. A non-empty copyValue swaps the value for a selectable one
     // with a copy button; the display string is pre-shortened because LogosSelectableText is
     // a TextEdit and clips rather than elides.
+    // A label, the name this wallet knows, and the address IN FULL underneath. Two lines,
+    // because one line holding both is a line something elides — and the name is ours to
+    // shorten while the address is not: 0xa1E2…247E already dropped 30 characters, and a
+    // container that trims it again leaves a string that identifies nothing.
+    //
+    // So the name elides and the address WRAPS. Used where there is room for the whole thing:
+    // a transaction's detail and the address book. A picker shows the short form instead, on
+    // its own line, where nothing further can cut it.
+    component NamedAddressRow: ColumnLayout {
+        id: nrow
+        property string label: ""
+        property string address: ""
+        signal copied(string value)
+
+        Layout.fillWidth: true
+        spacing: 2
+
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: Theme.spacing.medium
+            LogosText {
+                text: nrow.label
+                color: Theme.palette.textSecondary
+                font.pixelSize: Theme.typography.secondaryText
+                Layout.preferredWidth: 132
+            }
+            LogosText {
+                objectName: nrow.objectName.length > 0 ? nrow.objectName + "Name" : ""
+                Layout.fillWidth: true
+                visible: text.length > 0
+                textFormat: Text.PlainText
+                text: root.displayName(nrow.address)
+                horizontalAlignment: Text.AlignRight
+                elide: Text.ElideRight
+            }
+        }
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: Theme.spacing.small
+            Item { Layout.preferredWidth: 132 }
+            LogosSelectableText {
+                objectName: nrow.objectName.length > 0 ? nrow.objectName + "Address" : ""
+                Layout.fillWidth: true
+                text: nrow.address
+                color: Theme.palette.textSecondary
+                font.family: Theme.typography.mono
+                font.pixelSize: Theme.typography.secondaryText
+                // Wrapped, never elided. A detail screen has the room, and half an address is
+                // worse than an address on two lines.
+                wrapMode: Text.WrapAnywhere
+                horizontalAlignment: Text.AlignRight
+            }
+            LogosCopyButton {
+                objectName: nrow.objectName.length > 0 ? nrow.objectName + "Copy" : ""
+                value: nrow.address
+                onCopied: function (v) { nrow.copied(v) }
+            }
+        }
+    }
+
+    // An account picker whose ROWS carry both halves without either cutting the other.
+    //
+    // A LogosComboBox row is one elided line, so "Name (0xa1E2…247E)" in it loses the
+    // address — already shortened from 42 characters to 11, and then trimmed again into
+    // something that identifies nothing. Two lines fixes that rather than choosing between
+    // them: the name may elide, because it is this wallet's own word and a user can widen the
+    // window; the short address may not, because there is nothing left to take.
+    //
+    // The model is ADDRESSES, not display strings. Names are resolved per row, so a rename
+    // lands without rebuilding the model — and the closed control asks the same resolver.
+    component AccountPicker: LogosComboBox {
+        id: picker
+        property var addresses: []
+        readonly property string currentAddress:
+            currentIndex >= 0 && currentIndex < addresses.length ? addresses[currentIndex] : ""
+
+        model: addresses
+        displayText: root.accountDisplay(picker.currentAddress)
+
+        delegate: ItemDelegate {
+            width: picker.popupListView ? picker.popupListView.width : picker.width
+            objectName: "accountRow_" + index
+            contentItem: ColumnLayout {
+                spacing: 0
+                LogosText {
+                    Layout.fillWidth: true
+                    objectName: "accountRowName_" + index
+                    visible: text.length > 0
+                    textFormat: Text.PlainText
+                    text: root.displayName(modelData)
+                    elide: Text.ElideRight
+                }
+                LogosText {
+                    Layout.fillWidth: true
+                    objectName: "accountRowAddress_" + index
+                    textFormat: Text.PlainText
+                    text: root.shortAddr(modelData)
+                    color: Theme.palette.textSecondary
+                    font.family: Theme.typography.mono
+                    font.pixelSize: Theme.typography.secondaryText
+                    // Never elided. It is already the mid-ellided form; a second cut leaves a
+                    // prefix that matches thousands of addresses.
+                    elide: Text.ElideNone
+                }
+            }
+        }
+    }
+
+    // A pick-one row for the recipient lists. Same two-line shape as the account picker's,
+    // and for the same reason — one line carrying a name and an address is a line that
+    // elides the address. The name may go; the short address may not.
+    component PickableAddress: ItemDelegate {
+        id: pick
+        property string address: ""
+        property string rowName: ""
+
+        contentItem: ColumnLayout {
+            spacing: 0
+            LogosText {
+                Layout.fillWidth: true
+                objectName: pick.objectName.length > 0 ? pick.objectName + "Name" : ""
+                visible: text.length > 0
+                textFormat: Text.PlainText
+                text: pick.rowName.length > 0 ? pick.rowName : root.displayName(pick.address)
+                elide: Text.ElideRight
+            }
+            LogosText {
+                Layout.fillWidth: true
+                objectName: pick.objectName.length > 0 ? pick.objectName + "Address" : ""
+                textFormat: Text.PlainText
+                text: root.shortAddr(pick.address)
+                color: Theme.palette.textSecondary
+                font.family: Theme.typography.mono
+                font.pixelSize: Theme.typography.secondaryText
+                elide: Text.ElideNone
+            }
+        }
+    }
+
     component DetailRow: RowLayout {
         id: row
         property string label: ""
@@ -1077,12 +1221,11 @@ Item {
             Layout.fillWidth: true
             spacing: Theme.spacing.small
 
-            LogosComboBox {
+            AccountPicker {
                 id: accountPicker
                 objectName: "accountPicker"
                 Layout.preferredWidth: 220
-                // Named like the Keystore app; the address sits beside the picker, not in it.
-                model: root.accounts.map(function (a) { return root.accountDisplay(a) })
+                addresses: root.accounts
                 enabled: root.ready && root.accounts.length > 0
                 onActivated: if (root.ready) root.backend.selectAccount(root.accounts[currentIndex])
 
@@ -1091,7 +1234,7 @@ Item {
                 // different account from the address beside it is two answers to one question.
                 function syncIndex() { currentIndex = root.accountIndex(root.selected) }
                 Component.onCompleted: syncIndex()
-                onModelChanged: syncIndex()
+                onAddressesChanged: syncIndex()
             }
 
             // This picker only ever READS the account set — creating, importing and deleting
@@ -2016,12 +2159,10 @@ Item {
                                 value: root.txMined(txPage.det, txPage.rec)
                             }
                             RowDivider {}
-                            DetailRow {
+                            NamedAddressRow {
                                 objectName: "txDetailFromRow"
                                 label: "From"
-                                mono: true
-                                value: root.namedAddr(txPage.rec.from)
-                                copyValue: txPage.rec.from || ""
+                                address: txPage.rec.from || ""
                                 onCopied: function (v) { root.lastCopiedValue = v }
                             }
                             // This card carries RAW transaction fields and nothing interpreted, so
@@ -2160,20 +2301,16 @@ Item {
                                     // card below goes away and these are the ONLY rendering of
                                     // the recipient left — so they are copyable like every
                                     // other address here, not a truncated line.
-                                    DetailRow {
+                                    NamedAddressRow {
                                         objectName: "txDetailTransferFrom_" + index
                                         label: "From"
-                                        mono: true
-                                        value: root.namedAddr(modelData.from)
-                                        copyValue: modelData.from || ""
+                                        address: modelData.from || ""
                                         onCopied: function (v) { root.lastCopiedValue = v }
                                     }
-                                    DetailRow {
+                                    NamedAddressRow {
                                         objectName: "txDetailTransferTo_" + index
                                         label: "To"
-                                        mono: true
-                                        value: root.namedAddr(modelData.to)
-                                        copyValue: modelData.to || ""
+                                        address: modelData.to || ""
                                         onCopied: function (v) { root.lastCopiedValue = v }
                                     }
                                     LogosText {
@@ -2215,12 +2352,10 @@ Item {
                         contentItem: ColumnLayout {
                             spacing: Theme.spacing.tiny
 
-                            DetailRow {
+                            NamedAddressRow {
                                 objectName: "txDetailRecordedToRow"
                                 label: "Recorded recipient"
-                                mono: true
-                                value: root.namedAddr(txPage.rec.to)
-                                copyValue: txPage.rec.to || ""
+                                address: txPage.rec.to || ""
                                 onCopied: function (v) { root.lastCopiedValue = v }
                             }
                             LogosText {
@@ -2464,27 +2599,46 @@ Item {
                     Layout.fillHeight: true
                     clip: true
                     model: root.contacts
-                    delegate: RowLayout {
+                    delegate: ColumnLayout {
                         id: bookRow
                         width: ListView.view.width
-                        spacing: Theme.spacing.tiny
+                        spacing: 0
                         // Held, not read through `modelData` from a handler: the model is a
                         // plain array and a row's index moves when an earlier one is forgotten.
                         readonly property var contact: modelData
 
-                        // Renaming writes through the same upsert an add does, so there is
-                        // one path into the book rather than two that can disagree. Seeded,
-                        // not bound: a binding would fight the field while it is being typed.
-                        LogosTextField {
-                            id: bookNameField
-                            objectName: "bookName_" + index
-                            Layout.preferredWidth: 160
-                            text: modelData.name
-                            placeholderText: "Unnamed"
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: Theme.spacing.tiny
+                            // Renaming writes through the same upsert an add does, so there is
+                            // one path into the book rather than two that can disagree.
+                            // Seeded, not bound: a binding fights the field while it is typed.
+                            LogosTextField {
+                                id: bookNameField
+                                objectName: "bookName_" + index
+                                Layout.fillWidth: true
+                                text: modelData.name
+                                placeholderText: "Unnamed"
+                            }
+                            LogosCopyButton {
+                                objectName: "bookCopy_" + index
+                                value: bookRow.contact.address
+                                onCopied: function (v) { root.lastCopiedValue = v }
+                            }
+                            LogosIconButton {
+                                objectName: "bookForget_" + index
+                                size: 32
+                                iconSize: 16
+                                iconSource: LogosIcons.trash
+                                ToolTip.text: "Forget"
+                                ToolTip.visible: hovered
+                                ToolTip.delay: 400
+                                onClicked: root.backend.forgetContact(bookRow.contact.address)
+                            }
                         }
                         // LogosTextField exposes the inner TextInput but no editingFinished of
-                        // its own, so the rename hangs off that rather than costing every row
-                        // a second button whose only job is to say "yes, that name".
+                        // its own, so the rename hangs off that rather than costing every row a
+                        // second button whose only job is to say "yes, that name".
                         Connections {
                             target: bookNameField.textInput
                             function onEditingFinished() {
@@ -2493,27 +2647,19 @@ Item {
                                     root.backend.saveContact(bookRow.contact.address, name)
                             }
                         }
+                        // Under the name, and IN FULL. This screen exists to manage these
+                        // addresses; a shortened one cannot be checked against anything, and
+                        // it wraps rather than elides because half an address is worse than
+                        // two lines of one.
                         LogosSelectableText {
                             objectName: "bookAddress_" + index
                             Layout.fillWidth: true
-                            text: root.shortAddr(bookRow.contact.address)
+                            Layout.bottomMargin: Theme.spacing.small
+                            text: bookRow.contact.address
                             color: Theme.palette.textSecondary
                             font.family: Theme.typography.mono
-                        }
-                        LogosCopyButton {
-                            objectName: "bookCopy_" + index
-                            value: bookRow.contact.address
-                            onCopied: function (v) { root.lastCopiedValue = v }
-                        }
-                        LogosIconButton {
-                            objectName: "bookForget_" + index
-                            size: 32
-                            iconSize: 16
-                            iconSource: LogosIcons.trash
-                            ToolTip.text: "Forget"
-                            ToolTip.visible: hovered
-                            ToolTip.delay: 400
-                            onClicked: root.backend.forgetContact(bookRow.contact.address)
+                            font.pixelSize: Theme.typography.secondaryText
+                            wrapMode: Text.WrapAnywhere
                         }
                     }
                 }
@@ -3088,15 +3234,11 @@ Item {
                             objectName: "toRecentList"
                             clip: true
                             model: root.recentRecipients
-                            delegate: RowLayout {
+                            delegate: PickableAddress {
+                                objectName: "toRecent_" + index
                                 width: ListView.view.width
-                                LogosButton {
-                                    objectName: "toRecent_" + index
-                                    Layout.fillWidth: true
-                                    variant: LogosButton.Variant.Secondary
-                                    text: root.namedAddr(modelData)
-                                    onClicked: { toField.text = modelData; toAccountsMenu.close() }
-                                }
+                                address: modelData
+                                onClicked: { toField.text = modelData; toAccountsMenu.close() }
                             }
                         }
 
@@ -3112,11 +3254,10 @@ Item {
                                 Layout.fillHeight: true
                                 clip: true
                                 model: root.contacts
-                                delegate: LogosButton {
+                                delegate: PickableAddress {
                                     objectName: "toContact_" + index
                                     width: ListView.view.width
-                                    variant: LogosButton.Variant.Secondary
-                                    text: root.namedAddr(modelData.address)
+                                    address: modelData.address
                                     onClicked: {
                                         toField.text = modelData.address
                                         toAccountsMenu.close()
@@ -3139,11 +3280,10 @@ Item {
                             objectName: "toMineList"
                             clip: true
                             model: root.accounts
-                            delegate: LogosButton {
+                            delegate: PickableAddress {
                                 objectName: "toAccount_" + index
                                 width: ListView.view.width
-                                variant: LogosButton.Variant.Secondary
-                                text: root.namedAddr(modelData)
+                                address: modelData
                                 onClicked: { toField.text = modelData; toAccountsMenu.close() }
                             }
                         }
