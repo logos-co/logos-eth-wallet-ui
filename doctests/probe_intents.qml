@@ -356,13 +356,17 @@ Item {
             "0x8626f6940E2eb28930eFb4CeF49B2d1F2C9C1199": { wallet: "Status Throwaway", index: 0 }
         })
         check("it borrows the wallet's name and says where in it",
-              view.item.accountDisplay(probe.me), "Status Throwaway #0")
+              view.item.displayName(probe.me), "Status Throwaway #0")
+        // The name never REPLACES the address: a name is this wallet's own word for who that
+        // is and cannot be checked against what was signed.
+        check("...and the address is shown with it, always",
+              view.item.accountDisplay(probe.me), "Status Throwaway #0 (0x8626…1199)")
 
         console.log("")
         console.log("...but its OWN name always wins, and an account in an unnamed wallet")
         console.log("falls back to the address rather than inventing anything")
         fake.accountLabelsJson = JSON.stringify({ "8626f6940e2eb28930efb4cef49b2d1f2c9c1199": "Payroll" })
-        check("its own name wins", view.item.accountDisplay(probe.me), "Payroll")
+        check("its own name wins", view.item.displayName(probe.me), "Payroll")
         fake.accountLabelsJson = "{}"
         fake.accountWalletsJson = "{}"
         check("and with neither, the address", view.item.accountDisplay(probe.me).indexOf("0x"), 0)
