@@ -402,6 +402,11 @@ Item {
         if (nav.depth > 1) nav.popToIndex(0, StackView.Immediate)
         nav.pushItem(txDetailComponent, { hash: hash })
     }
+    function openNetworks() {
+        if (nav.depth > 1) nav.popToIndex(0, StackView.Immediate)
+        nav.pushItem(networksComponent)
+    }
+
     function openAddressBook() {
         if (nav.depth > 1) nav.popToIndex(0, StackView.Immediate)
         nav.pushItem(addressBookComponent)
@@ -1282,8 +1287,64 @@ Item {
 
             Item { Layout.fillWidth: true }
 
-            // The active network, on every tab. Testnets are visually distinct so mainnet
-            // cannot be mistaken for one.
+            // The three screens this wallet has, as buttons rather than a Settings popup.
+            // Each is a place with its own contents, and a dialog that only ever held links
+            // to them was a click in front of every one of them.
+            //
+            // HOME ONLY, all three: each names a screen, and a button offering to take you
+            // where you already are is worse than no button.
+            LogosButton {
+                objectName: "addressBookButton"
+                visible: nav.depth <= 1
+                text: "Address book"
+                enabled: root.ready
+                onClicked: root.openAddressBook()
+            }
+            LogosButton {
+                objectName: "networksButton"
+                visible: nav.depth <= 1
+                text: "Networks"
+                enabled: root.ready
+                onClicked: root.openNetworks()
+            }
+            LogosButton {
+                objectName: "manageTokensButton"
+                visible: nav.depth <= 1
+                text: "Tokens"
+                enabled: root.ready
+                onClicked: root.openManageTokens()
+            }
+        }
+
+        // The selected account's address, and what network the figures above it are on.
+        // Under the buttons rather than among them: the buttons go somewhere, and these two
+        // say where you already are.
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: Theme.spacing.small
+
+            // The one identifier a user hands out, so it is copyable wherever it appears.
+            // Home only — it is chrome about the selected account, and a pushed screen is
+            // not about that account.
+            LogosSelectableText {
+                objectName: "addressLabel"
+                visible: nav.depth <= 1
+                text: root.shortAddr(root.selected)
+                color: Theme.palette.textSecondary
+                font.family: Theme.typography.mono
+            }
+            LogosCopyButton {
+                objectName: "addressCopyButton"
+                visible: nav.depth <= 1
+                value: root.selected
+                onCopied: function (v) { root.lastCopiedValue = v }
+            }
+
+            Item { Layout.fillWidth: true }
+
+            // On EVERY screen, unlike the rest of this chrome. A detail screen still shows
+            // figures, and which chain they are from is not something to leave behind.
+            // Testnets are visually distinct so mainnet cannot be mistaken for one.
             LogosBadge {
                 objectName: "chainChip"
                 text: !root.netKnown ? "—"
@@ -1302,51 +1363,6 @@ Item {
                 visible: root.ready && chip !== "hidden"
                 text: root.chipText(chip)
                 color: root.chipColor(chip)
-            }
-
-            LogosButton {
-                objectName: "settingsButton"
-                text: "Settings"
-                onClicked: settingsDialog.open()
-            }
-        }
-
-        // Under the accounts row and beside nothing else: the book is about addresses that
-        // are NOT this wallet's, so it does not belong among the controls that name one that
-        // is. Managed on its own screen rather than inside the Send form — a picker that can
-        // also delete is a picker where a mis-tap during a send costs a saved address.
-        // Under the selector, not beside it. The picker names the account and this is the
-        // address it named — a second line rather than a fourth control competing for the
-        // same row, and the reason the closed picker can show a name alone at all.
-        //
-        // HOME ONLY. It is chrome about the selected account, which a pushed screen is not
-        // about — and "Address book" on the address book page is a button offering to take
-        // you where you are.
-        RowLayout {
-            Layout.fillWidth: true
-            visible: nav.depth <= 1
-            spacing: Theme.spacing.small
-
-            // The one identifier a user hands out, so it is copyable wherever it appears.
-            LogosSelectableText {
-                objectName: "addressLabel"
-                text: root.shortAddr(root.selected)
-                color: Theme.palette.textSecondary
-                font.family: Theme.typography.mono
-            }
-            LogosCopyButton {
-                objectName: "addressCopyButton"
-                value: root.selected
-                onCopied: function (v) { root.lastCopiedValue = v }
-            }
-
-            Item { Layout.fillWidth: true }
-
-            LogosButton {
-                objectName: "addressBookButton"
-                text: "Address book"
-                enabled: root.ready
-                onClicked: root.openAddressBook()
             }
         }
 
@@ -2536,6 +2552,91 @@ Item {
     }
 
     // ── manage tokens ─────────────────────────────────────────────────────────────
+    // Which network this wallet is on, and who owns the endpoint it talks to.
+    //
+    // This was a popup with three links in it. A dialog whose whole content is links to
+    // other places is a click in front of each of them, so the places are the screens now
+    // and the popup is gone.
+    Component {
+        id: networksComponent
+
+        Item {
+            objectName: "networksPage"
+
+            ColumnLayout {
+                anchors.fill: parent
+                anchors.margins: Theme.spacing.medium
+                spacing: Theme.spacing.small
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    LogosIconButton {
+                        objectName: "networksBack"
+                        size: 32
+                        iconSize: 16
+                        iconSource: LogosIcons.arrowLeft
+                        onClicked: root.back()
+                    }
+                    LogosText { text: "Networks"; font.pixelSize: 20 }
+                    Item { Layout.fillWidth: true }
+                }
+
+                // Read-only here: eth_rpc's chains.json is DEVICE-WIDE and shared with every
+                // Logos wallet, so this wallet reports it and the Ethereum RPC app owns it.
+                // The button below asks for that app by capability rather than by name, so a
+                // second implementation of it would serve this just as well.
+                LogosText {
+                    objectName: "rpcSettingsNote"
+                    Layout.fillWidth: true
+                    wrapMode: Text.WordWrap
+                    textFormat: Text.PlainText
+                    color: Theme.palette.textSecondary
+                    text: "Endpoint: " + (root.net.rpcUrl && root.net.rpcUrl.length
+                                          ? root.net.rpcUrl : "not set")
+                          + "\nVerified routing: "
+                          + (root.vp.mode !== undefined ? root.vp.mode : "unknown")
+                          + "\n\nThese are shared with every Logos wallet on this device, and "
+                          + "are changed in the Ethereum RPC app."
+                }
+                LogosButton {
+                    objectName: "openRpcSettingsButton"
+                    text: "Change these"
+                    onClicked: root.askFor("evm.rpc.configure",
+                                           "Nothing on this device offers to change them.")
+                }
+                LogosText {
+                    objectName: "settingsIntentNote"
+                    Layout.fillWidth: true
+                    visible: root.intentNote.length > 0
+                    textFormat: Text.PlainText
+                    wrapMode: Text.WordWrap
+                    color: Theme.palette.textSecondary
+                    text: root.intentNote
+                }
+
+                LogosText {
+                    text: "Active network"
+                    color: Theme.palette.textSecondary
+                    Layout.topMargin: Theme.spacing.small
+                }
+                // One at a time, and the one in force is disabled rather than hidden: a
+                // selector that drops the current choice is a selector that cannot say what
+                // it is.
+                Repeater {
+                    model: root.networks
+                    LogosButton {
+                        objectName: "network_" + modelData.key
+                        Layout.fillWidth: true
+                        text: modelData.name + (modelData.testnet ? " (testnet)" : "")
+                        enabled: root.ready && modelData.chainId !== root.net.chainId
+                        onClicked: root.backend.setActiveChain(modelData.chainId)
+                    }
+                }
+                Item { Layout.fillHeight: true }
+            }
+        }
+    }
+
     // The address book, and the ONE place it is edited. The Send picker offers these rows
     // and can do nothing else to them: a control that both selects a recipient and deletes
     // one is a control where a mis-tap during a transaction costs a saved address.
@@ -3738,70 +3839,4 @@ Item {
         }
     }
 
-    // ── Settings, where the network selector is deliberately buried ────────────────
-    LogosDialog {
-        id: settingsDialog
-        objectName: "settingsDialog"
-        title: "Settings"
-        anchors.centerIn: parent
-        width: Math.min(parent.width - 40, 520)
-
-        contentItem: ColumnLayout {
-            spacing: Theme.spacing.small
-
-            // Read-only here: eth_rpc's chains.json is device-wide and shared with every
-            // Logos wallet, so the wallet reports it and the Ethereum RPC app owns it. The
-            // button below asks for that app by capability rather than by name, so a second
-            // implementation of it would serve this just as well.
-            LogosText {
-                objectName: "rpcSettingsNote"
-                Layout.fillWidth: true
-                wrapMode: Text.WordWrap
-                textFormat: Text.PlainText
-                color: Theme.palette.textSecondary
-                text: "Endpoint: " + (root.net.rpcUrl && root.net.rpcUrl.length ? root.net.rpcUrl : "not set")
-                      + "\nVerified routing: " + (root.vp.mode !== undefined ? root.vp.mode : "unknown")
-                      + "\n\nThese are shared with every Logos wallet on this device."
-            }
-            LogosButton {
-                objectName: "openRpcSettingsButton"
-                text: "Change these"
-                onClicked: {
-                    settingsDialog.close()
-                    root.askFor("evm.rpc.configure",
-                                "Nothing on this device offers to change them.")
-                }
-            }
-            LogosText {
-                objectName: "settingsIntentNote"
-                Layout.fillWidth: true
-                visible: root.intentNote.length > 0
-                textFormat: Text.PlainText
-                wrapMode: Text.WordWrap
-                color: Theme.palette.textSecondary
-                text: root.intentNote
-            }
-
-            // A screen, not a section: the catalogue is a searchable list of thousands, and
-            // it does not fit inside a dialog that also holds the network selector.
-            LogosText { text: "Tokens"; color: Theme.palette.textSecondary }
-            LogosButton {
-                objectName: "manageTokensButton"
-                text: "Manage tokens"
-                enabled: root.ready
-                onClicked: { settingsDialog.close(); root.openManageTokens() }
-            }
-
-            LogosText { text: "Network"; color: Theme.palette.textSecondary }
-            Repeater {
-                model: root.networks
-                LogosButton {
-                    objectName: "network_" + modelData.key
-                    text: modelData.name + (modelData.testnet ? " (testnet)" : "")
-                    enabled: root.ready && modelData.chainId !== root.net.chainId
-                    onClicked: root.backend.setActiveChain(modelData.chainId)
-                }
-            }
-        }
-    }
 }

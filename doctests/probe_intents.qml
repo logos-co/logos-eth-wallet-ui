@@ -491,17 +491,31 @@ Item {
 
     function assertRpcSettingsHop() {
         console.log("")
-        console.log("the endpoint hop lives behind Settings, whose own comment used to")
-        console.log("explain why the button could not exist")
-        var dlg = find(view.item, "settingsDialog")
-        if (dlg && dlg.open)
-            dlg.open()
-        if (!probe.pressInDialog("settingsDialog", "openRpcSettingsButton"))
+        console.log("the endpoint hop lives on the Networks screen. It used to be behind a")
+        console.log("Settings popup whose whole content was links to other places — a click")
+        console.log("in front of each of them, and gone now")
+        view.item.openNetworks()
+        var nav = find(view.item, "nav")
+        var page = nav ? nav.currentItem : null
+        var btn = page ? find(page, "openRpcSettingsButton") : null
+        if (!btn) {
+            probe.failures++
+            console.log("  FAIL  openRpcSettingsButton is not on the Networks screen")
             return
+        }
+        // A pushed screen, not a popup: its children are really instantiated, so this is a
+        // press rather than an assertion about a binding.
+        btn.clicked()
         check("rpc endpoints", probe.lastRequest().intent, "evm.rpc.configure")
         check("...with no payload", JSON.stringify(probe.lastRequest().params), "{}")
         probe.answer({ ok: true, data: {}, error: "" })
+        check("...and the network selector is on that screen too, not in a dialog",
+              find(page, "network_sepolia") !== null || root_networksEmpty(), true)
     }
+
+    // The probe's fake publishes no network list, so the selector legitimately has no rows.
+    // Saying so beats an assertion that passes for the wrong reason.
+    function root_networksEmpty() { return view.item.networks.length === 0 }
 
     Loader {
         id: view
