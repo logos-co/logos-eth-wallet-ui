@@ -35,7 +35,13 @@ constexpr int kTokenSearchLimit = 200;
 EthWalletUiBackend::EthWalletUiBackend()
 {
     m_dataLane.budgetMs = kTwoCallBudgetMs;
-    m_dataLane.setLoading = [this](bool on) { setDataLoading(on); };
+    m_dataLane.setLoading = [this](bool on) {
+        setDataLoading(on);
+        // A lane going down without the balances reply having landed means that reply was
+        // lost. A spinner is not an answer, so the leg comes down with it.
+        if (!on)
+            setBalancesLoading(false);
+    };
     m_dataLane.rerun = [this] { loadBalancesAndHistory(); };
 
     m_quoteLane.budgetMs = kOneCallBudgetMs;
@@ -384,11 +390,13 @@ void EthWalletUiBackend::loadBalancesAndHistory()
         publishScope(s);
         setSweep(false);
         setDataLoading(false);
+        setBalancesLoading(false);
         return;
     }
     quint64 slot = 0;
     if (!beginLane(m_dataLane, &slot))
         return;
+    setBalancesLoading(true);
 
     const quint64 gen = m_dataGen;
     const quint64 sortGen = m_sortChoiceGen;
@@ -399,6 +407,9 @@ void EthWalletUiBackend::loadBalancesAndHistory()
         [this, gen, sortGen, who, slot](logos::AsyncResult<QString> bal) {
             if (!m_dataLane.owns(slot))
                 return;
+            // Unconditionally, and ahead of the generation check: a reply for a superseded
+            // selection still finishes this leg, and the history call goes out next.
+            setBalancesLoading(false);
             if (gen == m_dataGen) {
                 const QString reply = bal.ok() ? bal.value : QString();
                 // Not scope-gated: the order is one persisted setting, not a chain-scoped one,
@@ -449,10 +460,26 @@ void EthWalletUiBackend::setSweep(bool due)
 
 void EthWalletUiBackend::loadFeeTiers()
 {
-    const QString reply = modules().eth_wallet_backend.suggest_fees();
-    ScopedState s = scopeSnapshot();
-    applyFeeTiers(s, reply);
-    publishScope(s);
+    // ASYNC, and on its own claim rather than the data lane: this is a second cold handshake
+    // to the same node, in flight beside the balances read and unable to share its connection.
+    // Run last in every refresh() and synchronous, it froze the GUI thread for the backend's
+    // whole fees allowance. Not moved to the Send dialog's open path instead — that would
+    // relocate the same freeze onto a click.
+    quint64 slot = 0;
+    if (!beginClaim(m_feesInFlight, &slot, [this](bool on) { setFeeTiersLoading(on); }))
+        return;
+    const quint64 gen = m_dataGen;
+    modules().eth_wallet_backend.suggest_feesAsyncResult(
+        [this, gen, slot](logos::AsyncResult<QString> res) {
+            m_feesInFlight.release(slot);
+            if (!m_feesInFlight.isCurrent(slot) || gen != m_dataGen)
+                return;
+            ScopedState s = scopeSnapshot();
+            applyFeeTiers(s, res.ok() ? res.value : QString());
+            publishScope(s);
+            setFeeTiersLoading(false);
+        },
+        Timeout(kCallBudgetMs));
 }
 
 void EthWalletUiBackend::refresh()
