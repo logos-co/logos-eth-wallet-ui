@@ -1093,6 +1093,30 @@ check("...and the closed picker shows a name alone, falling back to the short ad
 check("...while its rows carry both, resolved per row rather than baked into the model",
       "model: addresses" in qml_body and "text: root.displayName(modelData)" in qml_body, True)
 print()
+print("the account chrome is HOME chrome: it is about the selected account, which a pushed")
+print("screen is not about — and an Address book button on the address book page is a button")
+print("offering to take you where you already are.")
+check("the address and the book button are hidden on a pushed screen",
+      qml_binding("addressLabel", "visible") == "" and "visible: nav.depth <= 1" in qml_body, True)
+
+print()
+print("overriding a design-system delegate replaces its background too, so a row that looks")
+print("inert is the default rather than the accident. Both custom rows draw their own.")
+picker_body = qml_body[qml_body.index("component AccountPicker"):
+                       qml_body.index("component PickableAddress")]
+pick_body = qml_body[qml_body.index("component PickableAddress"):
+                     qml_body.index("component DetailRow")]
+check("the account rows highlight with the combo's own highlighted index",
+      "highlighted: picker.highlightedIndex === index" in picker_body, True)
+check("...and draw a background for it",
+      "accountItem.highlighted ? Theme.palette.surface" in picker_body, True)
+check("the recipient rows highlight on hover, having no highlighted index to follow",
+      "pick.hovered ? Theme.palette.surface" in pick_body, True)
+check("...and both say they are clickable",
+      picker_body.count("PointingHandCursor") == 1 and pick_body.count("PointingHandCursor") == 1,
+      True)
+
+print()
 print("no address is elided TWICE. A mid-ellided address has already lost 30 characters, and")
 print("a container that trims it again leaves a prefix matching thousands of addresses. So")
 print("wherever a name and an address share a row they are on separate lines: the name may")
