@@ -1064,6 +1064,35 @@ check("the book is bound to the backend's, in the backend's order",
 check("saving and forgetting ASK the backend rather than editing the published copy",
       "root.backend.saveContact(" in qml_body and "root.backend.forgetContact(" in qml_body, True)
 
+print()
+print("and the Send picker only PICKS. A control that both chooses a recipient and deletes")
+print("one is a control where a mis-tap during a transaction costs a saved address, so every")
+print("write lives on the Address book screen and none of them is reachable from the form.")
+picker = qml_body[qml_body.index('objectName: "toAccountsMenu"'):
+                  qml_body.index('objectName: "selfSendWarning"')]
+book = qml_body[qml_body.index("id: addressBookComponent"):
+                qml_body.index("id: manageTokensComponent")]
+check("the picker writes nothing to the book",
+      "saveContact(" in picker or "forgetContact(" in picker, False)
+check("...and it offers all three sources",
+      all(t in picker for t in ["toTabRecent", "toTabBook", "toTabMine"]), True)
+check("the address book screen is where both writes live",
+      "saveContact(" in book and "forgetContact(" in book, True)
+check("...and renaming goes through the same upsert an add does, not a second path",
+      book.count("root.backend.saveContact("), 2)
+
+print()
+print("one rule for showing an address, and the name never replaces it: a name is this")
+print("wallet's own word for who that is and cannot be checked against what was signed.")
+check("namedAddr always carries the short address",
+      qml_fn_body(qml_body, "namedAddr").count("shortAddr(a)"), 2)
+check("...and the account picker uses that one rule rather than a second convention",
+      qml_fn_body(qml_body, "accountDisplay").strip().endswith("return namedAddr(a) }")
+      or "return namedAddr(a)" in qml_fn_body(qml_body, "accountDisplay"), True)
+check("...and it resolves accounts, wallets AND the address book",
+      all(f in qml_fn_body(qml_body, "displayName")
+          for f in ["accountLabel(a)", "accountWallet(a)", "contactName(a)"]), True)
+
 if "--grep-only" in sys.argv:
     print()
     print("RESULT:", "ALL PASS" if not FAIL else f"{len(FAIL)} FAILED -> {FAIL}")

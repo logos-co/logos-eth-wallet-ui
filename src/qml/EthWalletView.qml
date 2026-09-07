@@ -402,6 +402,11 @@ Item {
         if (nav.depth > 1) nav.popToIndex(0, StackView.Immediate)
         nav.pushItem(txDetailComponent, { hash: hash })
     }
+    function openAddressBook() {
+        if (nav.depth > 1) nav.popToIndex(0, StackView.Immediate)
+        nav.pushItem(addressBookComponent)
+    }
+
     function openManageTokens() {
         if (nav.depth > 1) nav.popToIndex(0, StackView.Immediate)
         nav.pushItem(manageTokensComponent)
@@ -662,27 +667,35 @@ Item {
         return null
     }
 
-    // The account's own name first. Failing that, the WALLET's name and where in it — a user
-    // who named the wallet and not each account still recognises "Status Throwaway #0".
+    // Every name this wallet knows for an address, in the order they answer for it: the
+    // account's own, then the WALLET it was derived under, then the address book. Empty when
+    // it knows none.
     //
     // `#index` is the DERIVATION index, off the account's own path, and it is stable for the
-    // life of the account. A position in this list would not be: it renumbers when an account
-    // is added or removed, so the label would silently come to mean a different account —
-    // which is the whole reason nothing here invents "Account 2".
-    function accountDisplay(a) {
+    // life of the account. A position in a list would not be: it renumbers when an account is
+    // added or removed, so the label would silently come to mean a different account — which
+    // is the whole reason nothing here invents "Account 2".
+    function displayName(a) {
         var n = accountLabel(a)
         if (n.length) return n
         var w = accountWallet(a)
         if (w && w.wallet)
             return w.index !== undefined ? w.wallet + " #" + w.index : w.wallet
-        return shortAddr(a)
+        return contactName(a)
     }
 
-    // "Treasury · 0x7099…79C8" when the address has a name, the short address alone otherwise.
+    // ONE rule for showing an address anywhere in this wallet, and the name never REPLACES
+    // the address. A name is this wallet's own word for who that is and cannot be checked
+    // against what was signed; the address is what the name existed to save the user reading.
+    // So both, whenever a name is known at all: "Treasury (0x7099…79C8)".
     function namedAddr(a) {
-        var n = accountLabel(a)
-        return (n.length ? n + " · " : "") + shortAddr(a)
+        var n = displayName(a)
+        return n.length ? n + " (" + shortAddr(a) + ")" : shortAddr(a)
     }
+
+    // Kept as the picker's own name for the same rule, so a reader of that control is not
+    // sent looking for a second convention.
+    function accountDisplay(a) { return namedAddr(a) }
 
     // Both are still `pending` on disk. Blocked means the chain was never asked at all —
     // the proxy on the row's OWN network is refusing; stalled means we gave up asking.
@@ -1034,7 +1047,7 @@ Item {
                         LogosText {
                             textFormat: Text.PlainText
                             color: Theme.palette.textSecondary
-                            text: "To: " + root.shortAddr(modelData.to)
+                            text: "To: " + root.namedAddr(modelData.to)
                         }
                         LogosCopyButton {
                             objectName: "txToCopy_" + modelData.hash
@@ -1085,9 +1098,19 @@ Item {
             // belong to whoever holds the keystore's custodian role. Asking for the
             // capability is how a wallet that holds no keys sends the user somewhere it
             // cannot go itself.
-            LogosButton {
+            //
+            // An icon, with the label moved to a tooltip: it sits between the picker and the
+            // address it names, where a word of chrome pushes the two apart. LogosIconButton
+            // carries no text of its own, so the tooltip is the only thing naming it and is
+            // not decoration.
+            LogosIconButton {
                 objectName: "manageAccountsButton"
-                text: "Accounts"
+                size: 32
+                iconSize: 16
+                iconSource: LogosIcons.grid
+                ToolTip.text: "Accounts"
+                ToolTip.visible: hovered
+                ToolTip.delay: 400
                 onClicked: root.askFor("evm.accounts.manage",
                                        "No app on this device manages accounts.")
             }
@@ -1134,6 +1157,21 @@ Item {
                 text: "Settings"
                 onClicked: settingsDialog.open()
             }
+        }
+
+        // Under the accounts row and beside nothing else: the book is about addresses that
+        // are NOT this wallet's, so it does not belong among the controls that name one that
+        // is. Managed on its own screen rather than inside the Send form — a picker that can
+        // also delete is a picker where a mis-tap during a send costs a saved address.
+        RowLayout {
+            Layout.fillWidth: true
+            LogosButton {
+                objectName: "addressBookButton"
+                text: "Address book"
+                enabled: root.ready
+                onClicked: root.openAddressBook()
+            }
+            Item { Layout.fillWidth: true }
         }
 
         // A badge cannot carry an instruction. When the wallet is showing nothing because the
@@ -2330,6 +2368,159 @@ Item {
     }
 
     // ── manage tokens ─────────────────────────────────────────────────────────────
+    // The address book, and the ONE place it is edited. The Send picker offers these rows
+    // and can do nothing else to them: a control that both selects a recipient and deletes
+    // one is a control where a mis-tap during a transaction costs a saved address.
+    Component {
+        id: addressBookComponent
+
+        Item {
+            objectName: "addressBookPage"
+
+            ColumnLayout {
+                anchors.fill: parent
+                anchors.margins: Theme.spacing.medium
+                spacing: Theme.spacing.small
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    LogosIconButton {
+                        objectName: "addressBookBack"
+                        size: 32
+                        iconSize: 16
+                        iconSource: LogosIcons.arrowLeft
+                        onClicked: root.back()
+                    }
+                    LogosText { text: "Address book"; font.pixelSize: 20 }
+                    Item { Layout.fillWidth: true }
+                }
+
+                // These are COUNTERPARTIES. Saying so is worth a line: a user who reads this
+                // as "my accounts" would look here for one and conclude it had been lost.
+                LogosText {
+                    objectName: "addressBookNote"
+                    Layout.fillWidth: true
+                    textFormat: Text.PlainText
+                    wrapMode: Text.WordWrap
+                    color: Theme.palette.textSecondary
+                    text: "Names for addresses you send to. Your own accounts are managed in "
+                          + "the Keystore app and are always offered alongside these."
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: Theme.spacing.tiny
+                    LogosTextField {
+                        id: bookNewName
+                        objectName: "bookNewName"
+                        Layout.preferredWidth: 160
+                        placeholderText: "Name (optional)"
+                    }
+                    LogosTextField {
+                        id: bookNewAddress
+                        objectName: "bookNewAddress"
+                        Layout.fillWidth: true
+                        placeholderText: "Address (0x…)"
+                    }
+                    // Armed by an address alone: a name is optional, because an address worth
+                    // remembering is worth remembering before its owner has one.
+                    LogosButton {
+                        objectName: "bookAdd"
+                        text: "Add"
+                        enabled: root.ready && bookNewAddress.text.trim().length > 0
+                        onClicked: {
+                            root.backend.saveContact(bookNewAddress.text.trim(),
+                                                     bookNewName.text.trim())
+                            bookNewAddress.text = ""
+                            bookNewName.text = ""
+                        }
+                    }
+                }
+
+                // The backend's own words. This view does not parse an address, so a refusal
+                // has to come from the party that does, and be shown as it was given.
+                LogosText {
+                    objectName: "bookError"
+                    Layout.fillWidth: true
+                    visible: root.ready && root.backend.contactsError.length > 0
+                    textFormat: Text.PlainText
+                    wrapMode: Text.WordWrap
+                    color: Theme.palette.error
+                    text: root.ready ? root.backend.contactsError : ""
+                }
+
+                LogosText {
+                    objectName: "bookEmpty"
+                    Layout.fillWidth: true
+                    visible: root.contacts.length === 0
+                    textFormat: Text.PlainText
+                    color: Theme.palette.textSecondary
+                    text: "No saved addresses yet."
+                }
+
+                LogosListView {
+                    objectName: "bookList"
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    clip: true
+                    model: root.contacts
+                    delegate: RowLayout {
+                        id: bookRow
+                        width: ListView.view.width
+                        spacing: Theme.spacing.tiny
+                        // Held, not read through `modelData` from a handler: the model is a
+                        // plain array and a row's index moves when an earlier one is forgotten.
+                        readonly property var contact: modelData
+
+                        // Renaming writes through the same upsert an add does, so there is
+                        // one path into the book rather than two that can disagree. Seeded,
+                        // not bound: a binding would fight the field while it is being typed.
+                        LogosTextField {
+                            id: bookNameField
+                            objectName: "bookName_" + index
+                            Layout.preferredWidth: 160
+                            text: modelData.name
+                            placeholderText: "Unnamed"
+                        }
+                        // LogosTextField exposes the inner TextInput but no editingFinished of
+                        // its own, so the rename hangs off that rather than costing every row
+                        // a second button whose only job is to say "yes, that name".
+                        Connections {
+                            target: bookNameField.textInput
+                            function onEditingFinished() {
+                                var name = bookNameField.text.trim()
+                                if (name !== bookRow.contact.name)
+                                    root.backend.saveContact(bookRow.contact.address, name)
+                            }
+                        }
+                        LogosSelectableText {
+                            objectName: "bookAddress_" + index
+                            Layout.fillWidth: true
+                            text: root.shortAddr(bookRow.contact.address)
+                            color: Theme.palette.textSecondary
+                            font.family: Theme.typography.mono
+                        }
+                        LogosCopyButton {
+                            objectName: "bookCopy_" + index
+                            value: bookRow.contact.address
+                            onCopied: function (v) { root.lastCopiedValue = v }
+                        }
+                        LogosIconButton {
+                            objectName: "bookForget_" + index
+                            size: 32
+                            iconSize: 16
+                            iconSource: LogosIcons.trash
+                            ToolTip.text: "Forget"
+                            ToolTip.visible: hovered
+                            ToolTip.delay: 400
+                            onClicked: root.backend.forgetContact(bookRow.contact.address)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     // Everything offered on the active chain, each row with a switch. The list is the
     // BACKEND's answer to a query — never the whole catalogue filtered here, because the
     // embedded Uniswap list is thousands of rows.
@@ -2906,18 +3097,14 @@ Item {
                                     text: root.namedAddr(modelData)
                                     onClicked: { toField.text = modelData; toAccountsMenu.close() }
                                 }
-                                // Remembering someone you have paid is the way most contacts
-                                // get in, so it is offered where the address already is.
-                                LogosButton {
-                                    objectName: "toRecentSave_" + index
-                                    visible: !root.isContact(modelData)
-                                    text: "Save"
-                                    onClicked: root.backend.saveContact(modelData, "")
-                                }
                             }
                         }
 
-                        // ── who you chose to remember, and where they are managed ──
+                        // ── who you chose to remember ──
+                        //
+                        // Read-only here. Managing the book from inside a send is a mis-tap
+                        // during a transaction costing a saved address, so this offers rows
+                        // and the Address book screen owns the rest.
                         ColumnLayout {
                             LogosListView {
                                 objectName: "toBookList"
@@ -2925,24 +3112,14 @@ Item {
                                 Layout.fillHeight: true
                                 clip: true
                                 model: root.contacts
-                                delegate: RowLayout {
+                                delegate: LogosButton {
+                                    objectName: "toContact_" + index
                                     width: ListView.view.width
-                                    LogosButton {
-                                        objectName: "toContact_" + index
-                                        Layout.fillWidth: true
-                                        variant: LogosButton.Variant.Secondary
-                                        text: (modelData.name && modelData.name.length
-                                               ? modelData.name + " · " : "")
-                                              + root.shortAddr(modelData.address)
-                                        onClicked: {
-                                            toField.text = modelData.address
-                                            toAccountsMenu.close()
-                                        }
-                                    }
-                                    LogosButton {
-                                        objectName: "toContactForget_" + index
-                                        text: "Forget"
-                                        onClicked: root.backend.forgetContact(modelData.address)
+                                    variant: LogosButton.Variant.Secondary
+                                    text: root.namedAddr(modelData.address)
+                                    onClicked: {
+                                        toField.text = modelData.address
+                                        toAccountsMenu.close()
                                     }
                                 }
                             }
@@ -2953,49 +3130,7 @@ Item {
                                 textFormat: Text.PlainText
                                 wrapMode: Text.WordWrap
                                 color: Theme.palette.textSecondary
-                                text: "No saved addresses yet. Save one from Recents, or add "
-                                      + "it below."
-                            }
-                            // Adding lives here rather than behind another dialog: this one is
-                            // already inside the send form, and a third layer of popup is a
-                            // layer a user cannot get out of by pressing Escape once.
-                            RowLayout {
-                                Layout.fillWidth: true
-                                spacing: Theme.spacing.tiny
-                                LogosTextField {
-                                    id: newContactName
-                                    objectName: "newContactName"
-                                    Layout.preferredWidth: 120
-                                    placeholderText: "Name"
-                                }
-                                LogosTextField {
-                                    id: newContactAddress
-                                    objectName: "newContactAddress"
-                                    Layout.fillWidth: true
-                                    placeholderText: "Address (0x…)"
-                                }
-                                LogosButton {
-                                    objectName: "newContactSave"
-                                    text: "Add"
-                                    enabled: newContactAddress.text.trim().length > 0
-                                    onClicked: {
-                                        root.backend.saveContact(newContactAddress.text.trim(),
-                                                                 newContactName.text.trim())
-                                        newContactAddress.text = ""
-                                        newContactName.text = ""
-                                    }
-                                }
-                            }
-                            // The backend's own words. A refused address is the one thing
-                            // here a user cannot diagnose from the row that did not appear.
-                            LogosText {
-                                objectName: "contactsError"
-                                Layout.fillWidth: true
-                                visible: root.ready && root.backend.contactsError.length > 0
-                                textFormat: Text.PlainText
-                                wrapMode: Text.WordWrap
-                                color: Theme.palette.error
-                                text: root.ready ? root.backend.contactsError : ""
+                                text: "No saved addresses yet. Add them from the Address book."
                             }
                         }
 
@@ -3008,8 +3143,7 @@ Item {
                                 objectName: "toAccount_" + index
                                 width: ListView.view.width
                                 variant: LogosButton.Variant.Secondary
-                                text: root.accountDisplay(modelData) + " — "
-                                      + root.shortAddr(modelData)
+                                text: root.namedAddr(modelData)
                                 onClicked: { toField.text = modelData; toAccountsMenu.close() }
                             }
                         }
