@@ -700,8 +700,42 @@ print("   retry covers a network read alone, and the receipt sweep cannot arm on
 print("   so without this button a failed first read is a wallet the user cannot re-read.")
 check("the banner carries a retry", qml_binding("errorRetryButton", "onClicked"),
       "onClicked: root.backend.refresh()")
-check("...shown exactly when the banner is",
-      qml_binding("errorRetryButton", "visible"), qml_binding("errorLabel", "visible"))
+print("   and the gate is on the ROW, so the two cannot drift apart — and so the row")
+print("   occupies nothing when there is no error. It is also pinned to fillHeight false:")
+print("   a Layout nested in a Layout defaults to filling, which took the whole view once.")
+check("...the row carries the gate",
+      qml_binding("errorRow", "visible"), "visible: root.ready && root.backend.lastError.length > 0")
+check("...and does not claim the height", qml_binding("errorRow", "Layout.fillHeight"),
+      "Layout.fillHeight: false")
+
+print()
+print()
+print("   and no icon comes from the design system unless it ships NEUTRAL artwork.")
+print("   LogosIconButton colorizes its source and colorization preserves luminance, so a")
+print("   #5C5C5C or #969696 SVG stays dark whatever iconColor asks for — which is what made")
+print("   the back chevron and the trash read as disabled. The five dark ones are vendored")
+print("   into assets/ as white copies; delete them when the design system normalises.")
+check("only the neutral design-system icons are used directly",
+      sorted(set(re.findall(r"LogosIcons\.(\w+)", qml))), ["check", "close", "grid"])
+check("...and the vendored copies are all neutral",
+      sorted({f for p in (VIEW.parent / "assets").glob("*.svg")
+              for f in re.findall(r'fill="([^"]+)"', p.read_text())}),
+      ["none", "white"])
+
+print("   every icon button in this view is FLAT. Five shipped without it — the accounts")
+print("   button and the four address-book row buttons — and a chevron or a pencil sitting")
+print("   in a filled circle reads as a disabled control, which is what they were reported")
+print("   as. One rule over the whole file, so a sixth cannot drift in.")
+icon_buttons = re.findall(r"LogosIconButton \{(?:[^{}]|\{[^{}]*\})*?\}", qml, re.S)
+check("every icon button is flat",
+      [b for b in icon_buttons if "flat: true" not in b], [])
+check("...and there are as many as the view has icon buttons", len(icon_buttons), 13)
+print("   and every back arrow is the same size, so leaving one screen looks like leaving")
+print("   any other")
+backs = [b for b in icon_buttons if "iconArrowLeft" in b]
+check("every back arrow is one size",
+      sorted({re.search(r"iconSize: (\d+)", b).group(1) for b in backs}), ["20"])
+check("...on every screen there is to leave", len(backs), 5)
 
 check("the four spinner-bearing claims",
       sorted(set(re.findall(r"beginClaim\((m_\w+)", code))),

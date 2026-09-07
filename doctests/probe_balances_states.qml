@@ -16,8 +16,8 @@ import QtQuick
 
 Item {
     id: probe
-    width: 900
-    height: 700
+    width: 1200
+    height: 1000
 
     readonly property string me: "0x8626f6940E2eb28930eFb4CeF49B2d1F2C9C1199"
     readonly property string weth: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"
@@ -25,6 +25,14 @@ Item {
     readonly property string usdc: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
 
     property int failures: 0
+    property real rowYWithNoBanner: -1
+
+    // Where the first balance row sits in the view. The geometry no other assertion here
+    // looks at, and the one the layout regression moved.
+    function tokenRowY() {
+        var r = probe.find(view.item, "tokenRow_native")
+        return r ? r.mapToItem(view.item, 0, 0).y : -1
+    }
 
     function check(label, got, want) {
         var ok = String(got) === String(want)
@@ -122,6 +130,22 @@ Item {
     property var logos: ({ module: function (n) { return fake },
                            isViewModuleReady: function (n) { return true } })
 
+    // Cheap sanity on where the rows sit. It does NOT catch the fillHeight regression that
+    // once pushed the balances off the bottom — MEASURED: removing the pin still passes here,
+    // because this probe's column has no spare height to hand out the way the real window
+    // does. What pins that is the source-shape check in assert_ui.py.
+    function assertAnAbsentBannerTakesNoSpace() {
+        console.log("")
+        console.log("no error, so the banner row occupies no height at all — and the rows")
+        console.log("below it are still on screen")
+        var row = probe.find(view.item, "errorRow")
+        check("the row is there", row !== null, true)
+        check("...but not shown", row ? row.visible : "<absent>", false)
+        probe.rowYWithNoBanner = probe.tokenRowY()
+        check("...so the first token row is on screen",
+              probe.rowYWithNoBanner >= 0 && probe.rowYWithNoBanner < probe.height, true)
+    }
+
     function assertAFirstReadSpins() {
         console.log("")
         console.log("the first read is outstanding: nothing is known and something is being")
@@ -157,6 +181,15 @@ Item {
         check("...in a sentence, not a Debug render",
               probe.textOf("errorLabel").indexOf("PluginCallFailed"), -1)
         check("...and offers the way out", probe.shown("errorRetryButton"), true)
+
+        console.log("")
+        console.log("   and the banner is a BANNER. A Layout nested in a Layout defaults to")
+        console.log("   fillHeight true, so this row once claimed every spare pixel and pushed")
+        console.log("   the balances off the bottom — while every assertion above still passed.")
+        var moved = probe.tokenRowY() - probe.rowYWithNoBanner
+        check("the rows moved down by a banner, not by a screenful", moved > 0 && moved < 120,
+              true)
+        check("...and are still on screen", probe.tokenRowY() < probe.height, true)
     }
 
     function assertRetryAsksAgain() {
@@ -206,6 +239,7 @@ Item {
         onTriggered: {
             probe.phase++
             if (probe.phase === 1) {
+                probe.assertAnAbsentBannerTakesNoSpace()
                 probe.assertAFirstReadSpins()
                 fake.balancesJson = probe.answered
                 fake.balancesLoading = false
