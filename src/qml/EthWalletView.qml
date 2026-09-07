@@ -207,6 +207,19 @@ Item {
     readonly property bool scoped: ready && backend.scopedDataFresh
     readonly property bool dataLoading: ready && backend.dataLoading
     readonly property bool balancesLoading: ready && backend.balancesLoading
+
+    // Neutral copies of five design-system icons. LogosIconButton colorizes its source, and
+    // colorization preserves luminance — so an SVG that ships #5C5C5C or #969696 stays dark
+    // whatever `iconColor` asks for, and reads as a disabled control. copy, check, close and
+    // grid already ship white; these five did not. Local rather than fixed upstream because
+    // those files are shared with Basecamp and the package manager, where the darker weight
+    // is what ships today. Delete these the day the design system normalises them.
+    readonly property url iconArrowLeft: Qt.resolvedUrl("assets/arrow-left.svg")
+    readonly property url iconList: Qt.resolvedUrl("assets/list.svg")
+    readonly property url iconRefresh: Qt.resolvedUrl("assets/refresh.svg")
+    readonly property url iconTrash: Qt.resolvedUrl("assets/trash.svg")
+    readonly property url iconTriangleDown: Qt.resolvedUrl("assets/triangle-down.svg")
+
     readonly property bool quoteLoading: ready && backend.quoteLoading
 
     readonly property bool balancesKnown: scoped && backend.balancesJson.length > 0
@@ -1293,6 +1306,7 @@ Item {
             // not decoration.
             LogosIconButton {
                 objectName: "manageAccountsButton"
+                flat: true
                 size: 32
                 iconSize: 16
                 iconSource: LogosIcons.grid
@@ -1455,12 +1469,17 @@ Item {
         RowLayout {
             objectName: "errorRow"
             Layout.fillWidth: true
+            // A Layout nested in a Layout defaults to fillHeight TRUE — this row took the
+            // whole view and pushed everything below it off the bottom.
+            Layout.fillHeight: false
+            // Gated here rather than on each child: an invisible item is excluded from the
+            // layout, so with no error the row occupies nothing at all.
+            visible: root.ready && root.backend.lastError.length > 0
             spacing: 8
 
             LogosText {
                 objectName: "errorLabel"
                 Layout.fillWidth: true
-                visible: root.ready && root.backend.lastError.length > 0
                 // Backend-authored; may contain anything.
                 textFormat: Text.PlainText
                 wrapMode: Text.WordWrap
@@ -1469,7 +1488,6 @@ Item {
             }
             LogosButton {
                 objectName: "errorRetryButton"
-                visible: root.ready && root.backend.lastError.length > 0
                 enabled: root.ready
                 text: "Retry"
                 // `refresh` clears lastError on entry, so the banner and this button leave
@@ -1561,7 +1579,7 @@ Item {
                                     flat: true
                                     size: 32
                                     iconSize: 16
-                                    iconSource: LogosIcons.list
+                                    iconSource: root.iconList
                                     enabled: root.ready
                                     onClicked: tokenSortMenu.popupUnder(tokenSortButton)
                                 }
@@ -1875,7 +1893,7 @@ Item {
                         flat: true
                         size: 32
                         iconSize: 20
-                        iconSource: LogosIcons.arrowLeft
+                        iconSource: root.iconArrowLeft
                         onClicked: root.back()
                     }
                     LogosText {
@@ -2117,7 +2135,7 @@ Item {
                             flat: true
                             size: 32
                             iconSize: 20
-                            iconSource: LogosIcons.arrowLeft
+                            iconSource: root.iconArrowLeft
                             onClicked: root.back()
                         }
                         LogosText {
@@ -2135,7 +2153,7 @@ Item {
                             flat: true
                             size: 32
                             iconSize: 18
-                            iconSource: LogosIcons.refresh
+                            iconSource: root.iconRefresh
                             // `txTo` present means a receipt was absorbed by a build carrying the
                             // fields below; an older settled row has a fee and would never have
                             // been offered the re-poll that backfills them.
@@ -2608,9 +2626,10 @@ Item {
                     Layout.fillWidth: true
                     LogosIconButton {
                         objectName: "networksBack"
+                        flat: true
                         size: 32
-                        iconSize: 16
-                        iconSource: LogosIcons.arrowLeft
+                        iconSize: 20
+                        iconSource: root.iconArrowLeft
                         onClicked: root.back()
                     }
                     LogosText { text: "Networks"; font.pixelSize: 20 }
@@ -2691,9 +2710,10 @@ Item {
                     Layout.fillWidth: true
                     LogosIconButton {
                         objectName: "addressBookBack"
+                        flat: true
                         size: 32
-                        iconSize: 16
-                        iconSource: LogosIcons.arrowLeft
+                        iconSize: 20
+                        iconSource: root.iconArrowLeft
                         onClicked: root.back()
                     }
                     LogosText { text: "Address book"; font.pixelSize: 20 }
@@ -2835,6 +2855,7 @@ Item {
                                 LogosIconButton {
                                     objectName: "bookEdit_" + index
                                     visible: !bookRow.editing
+                                    flat: true
                                     size: 32
                                     iconSize: 16
                                     iconSource: Qt.resolvedUrl("assets/edit.svg")
@@ -2846,6 +2867,7 @@ Item {
                                 LogosIconButton {
                                     objectName: "bookConfirm_" + index
                                     visible: bookRow.editing
+                                    flat: true
                                     size: 32
                                     iconSize: 16
                                     iconSource: LogosIcons.check
@@ -2857,6 +2879,7 @@ Item {
                                 LogosIconButton {
                                     objectName: "bookCancel_" + index
                                     visible: bookRow.editing
+                                    flat: true
                                     size: 32
                                     iconSize: 16
                                     iconSource: LogosIcons.close
@@ -2878,9 +2901,10 @@ Item {
                                 LogosIconButton {
                                     objectName: "bookForget_" + index
                                     visible: !bookRow.editing
+                                    flat: true
                                     size: 32
                                     iconSize: 16
-                                    iconSource: LogosIcons.trash
+                                    iconSource: root.iconTrash
                                     ToolTip.text: "Forget"
                                     ToolTip.visible: hovered
                                     ToolTip.delay: 400
@@ -2961,7 +2985,7 @@ Item {
                         flat: true
                         size: 32
                         iconSize: 20
-                        iconSource: LogosIcons.arrowLeft
+                        iconSource: root.iconArrowLeft
                         onClicked: root.back()
                     }
                     LogosText {
@@ -3455,7 +3479,7 @@ Item {
                     flat: true
                     size: 32
                     iconSize: 16
-                    iconSource: LogosIcons.triangleDown
+                    iconSource: root.iconTriangleDown
                     // Always offered now. It used to hide itself when there was no SECOND
                     // account, which was right while my-accounts was all it held — the
                     // address book and the add form are reachable with one account, or none.
