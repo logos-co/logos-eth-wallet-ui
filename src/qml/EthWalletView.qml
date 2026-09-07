@@ -1000,9 +1000,21 @@ Item {
         model: addresses
         displayText: root.accountDisplay(picker.currentAddress)
 
+        // Overriding `delegate` replaces LogosComboBox's OWN, and with it the highlight and
+        // the pointer cursor that made a row look clickable. Both are restored here rather
+        // than left to the style: an ItemDelegate's default background is transparent, so
+        // without this the list is inert-looking text that happens to respond.
         delegate: ItemDelegate {
+            id: accountItem
             width: picker.popupListView ? picker.popupListView.width : picker.width
             objectName: "accountRow_" + index
+            highlighted: picker.highlightedIndex === index
+            background: Rectangle {
+                color: accountItem.highlighted ? Theme.palette.surface : "transparent"
+            }
+            HoverHandler {
+                cursorShape: accountItem.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+            }
             contentItem: ColumnLayout {
                 spacing: 0
                 LogosText {
@@ -1036,6 +1048,16 @@ Item {
         id: pick
         property string address: ""
         property string rowName: ""
+
+        // `hovered`, not `highlighted`: these live in a plain ListView, so nothing else is
+        // driving a highlighted index. Same reason as the account rows — an ItemDelegate
+        // draws no background of its own and would otherwise look inert.
+        background: Rectangle {
+            color: pick.hovered ? Theme.palette.surface : "transparent"
+        }
+        HoverHandler {
+            cursorShape: pick.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+        }
 
         contentItem: ColumnLayout {
             spacing: 0
@@ -1258,19 +1280,6 @@ Item {
                                        "No app on this device manages accounts.")
             }
 
-            // The one identifier a user hands out, so it is copyable wherever it appears.
-            LogosSelectableText {
-                objectName: "addressLabel"
-                text: root.shortAddr(root.selected)
-                color: Theme.palette.textSecondary
-                font.family: Theme.typography.mono
-            }
-            LogosCopyButton {
-                objectName: "addressCopyButton"
-                value: root.selected
-                onCopied: function (v) { root.lastCopiedValue = v }
-            }
-
             Item { Layout.fillWidth: true }
 
             // The active network, on every tab. Testnets are visually distinct so mainnet
@@ -1306,15 +1315,39 @@ Item {
         // are NOT this wallet's, so it does not belong among the controls that name one that
         // is. Managed on its own screen rather than inside the Send form — a picker that can
         // also delete is a picker where a mis-tap during a send costs a saved address.
+        // Under the selector, not beside it. The picker names the account and this is the
+        // address it named — a second line rather than a fourth control competing for the
+        // same row, and the reason the closed picker can show a name alone at all.
+        //
+        // HOME ONLY. It is chrome about the selected account, which a pushed screen is not
+        // about — and "Address book" on the address book page is a button offering to take
+        // you where you are.
         RowLayout {
             Layout.fillWidth: true
+            visible: nav.depth <= 1
+            spacing: Theme.spacing.small
+
+            // The one identifier a user hands out, so it is copyable wherever it appears.
+            LogosSelectableText {
+                objectName: "addressLabel"
+                text: root.shortAddr(root.selected)
+                color: Theme.palette.textSecondary
+                font.family: Theme.typography.mono
+            }
+            LogosCopyButton {
+                objectName: "addressCopyButton"
+                value: root.selected
+                onCopied: function (v) { root.lastCopiedValue = v }
+            }
+
+            Item { Layout.fillWidth: true }
+
             LogosButton {
                 objectName: "addressBookButton"
                 text: "Address book"
                 enabled: root.ready
                 onClicked: root.openAddressBook()
             }
-            Item { Layout.fillWidth: true }
         }
 
         // A badge cannot carry an instruction. When the wallet is showing nothing because the
@@ -2599,67 +2632,74 @@ Item {
                     Layout.fillHeight: true
                     clip: true
                     model: root.contacts
-                    delegate: ColumnLayout {
+                    delegate: LogosFrame {
                         id: bookRow
                         width: ListView.view.width
-                        spacing: 0
                         // Held, not read through `modelData` from a handler: the model is a
                         // plain array and a row's index moves when an earlier one is forgotten.
                         readonly property var contact: modelData
 
-                        RowLayout {
-                            Layout.fillWidth: true
-                            spacing: Theme.spacing.tiny
-                            // Renaming writes through the same upsert an add does, so there is
-                            // one path into the book rather than two that can disagree.
-                            // Seeded, not bound: a binding fights the field while it is typed.
-                            LogosTextField {
-                                id: bookNameField
-                                objectName: "bookName_" + index
+                        // A frame, because the name is an editable BOX and the address is bare
+                        // text: without something holding them together the address reads as
+                        // orphaned rather than as the thing the name is for. It is also the
+                        // shape this app already uses to group a card's fields.
+                        contentItem: ColumnLayout {
+                            spacing: 2
+
+                            RowLayout {
                                 Layout.fillWidth: true
-                                text: modelData.name
-                                placeholderText: "Unnamed"
+                                spacing: Theme.spacing.tiny
+                                // Renaming writes through the same upsert an add does, so
+                                // there is one path into the book rather than two that can
+                                // disagree. Seeded, not bound: a binding fights the field
+                                // while it is being typed.
+                                LogosTextField {
+                                    id: bookNameField
+                                    objectName: "bookName_" + index
+                                    Layout.fillWidth: true
+                                    text: modelData.name
+                                    placeholderText: "Unnamed"
+                                }
+                                LogosCopyButton {
+                                    objectName: "bookCopy_" + index
+                                    value: bookRow.contact.address
+                                    onCopied: function (v) { root.lastCopiedValue = v }
+                                }
+                                LogosIconButton {
+                                    objectName: "bookForget_" + index
+                                    size: 32
+                                    iconSize: 16
+                                    iconSource: LogosIcons.trash
+                                    ToolTip.text: "Forget"
+                                    ToolTip.visible: hovered
+                                    ToolTip.delay: 400
+                                    onClicked: root.backend.forgetContact(bookRow.contact.address)
+                                }
                             }
-                            LogosCopyButton {
-                                objectName: "bookCopy_" + index
-                                value: bookRow.contact.address
-                                onCopied: function (v) { root.lastCopiedValue = v }
+                            // LogosTextField exposes the inner TextInput but no
+                            // editingFinished of its own, so the rename hangs off that rather
+                            // than costing every row a second button whose only job is to say
+                            // "yes, that name".
+                            Connections {
+                                target: bookNameField.textInput
+                                function onEditingFinished() {
+                                    var name = bookNameField.text.trim()
+                                    if (name !== bookRow.contact.name)
+                                        root.backend.saveContact(bookRow.contact.address, name)
+                                }
                             }
-                            LogosIconButton {
-                                objectName: "bookForget_" + index
-                                size: 32
-                                iconSize: 16
-                                iconSource: LogosIcons.trash
-                                ToolTip.text: "Forget"
-                                ToolTip.visible: hovered
-                                ToolTip.delay: 400
-                                onClicked: root.backend.forgetContact(bookRow.contact.address)
+                            // IN FULL, and indented to the field's own text rather than the
+                            // frame's edge, so it sits under the name instead of beside it.
+                            LogosSelectableText {
+                                objectName: "bookAddress_" + index
+                                Layout.fillWidth: true
+                                Layout.leftMargin: Theme.spacing.small
+                                text: bookRow.contact.address
+                                color: Theme.palette.textSecondary
+                                font.family: Theme.typography.mono
+                                font.pixelSize: Theme.typography.secondaryText
+                                wrapMode: Text.WrapAnywhere
                             }
-                        }
-                        // LogosTextField exposes the inner TextInput but no editingFinished of
-                        // its own, so the rename hangs off that rather than costing every row a
-                        // second button whose only job is to say "yes, that name".
-                        Connections {
-                            target: bookNameField.textInput
-                            function onEditingFinished() {
-                                var name = bookNameField.text.trim()
-                                if (name !== bookRow.contact.name)
-                                    root.backend.saveContact(bookRow.contact.address, name)
-                            }
-                        }
-                        // Under the name, and IN FULL. This screen exists to manage these
-                        // addresses; a shortened one cannot be checked against anything, and
-                        // it wraps rather than elides because half an address is worse than
-                        // two lines of one.
-                        LogosSelectableText {
-                            objectName: "bookAddress_" + index
-                            Layout.fillWidth: true
-                            Layout.bottomMargin: Theme.spacing.small
-                            text: bookRow.contact.address
-                            color: Theme.palette.textSecondary
-                            font.family: Theme.typography.mono
-                            font.pixelSize: Theme.typography.secondaryText
-                            wrapMode: Text.WrapAnywhere
                         }
                     }
                 }
