@@ -10,7 +10,7 @@ Testnets are visually distinct from mainnet.
 ## What this module cannot do
 
 It holds no secret. It requests signatures and reads which accounts exist; the vault password
-is taken only by `signer_ui`, and seed phrases only ever reach `keystore_ui`. There is no
+is taken only by `evm_signer_ui`, and seed phrases only ever reach `evm_keystore_ui`. There is no
 password parameter anywhere in `src/eth_wallet_ui.rep`, and there never may be.
 
 ## What the chip claims
