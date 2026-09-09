@@ -12,7 +12,7 @@ import Logos.Theme
 // never be able to mistake which chain they are spending on.
 //
 // This view holds no secret. It requests signatures and reads which accounts exist; the vault
-// password is taken only by signer_ui, and seed phrases only ever reach keystore_ui.
+// password is taken only by evm_signer_ui, and seed phrases only ever reach evm_keystore_ui.
 //
 // Rendering rule: every item showing a string this view did not author sets
 // `textFormat: Text.PlainText`. LogosText is a bare Text with no textFormat, i.e. Qt's AutoText

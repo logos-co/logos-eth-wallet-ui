@@ -2,7 +2,7 @@
 //
 // There is deliberately NO password parameter anywhere below, and there never may be. This
 // UI requests signatures and reads which accounts exist; the vault password is taken only by
-// signer_ui, and key material only ever reaches keystore_ui. CI asserts the absence.
+// evm_signer_ui, and key material only ever reaches evm_keystore_ui. CI asserts the absence.
 //
 // Everything crosses as a JSON string rather than a typed record, matching the backend's own
 // contract — the UI is a renderer, and inventing a second schema here would be a second place
