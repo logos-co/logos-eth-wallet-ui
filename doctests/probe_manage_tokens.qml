@@ -212,7 +212,7 @@ Item {
         }
     }
 
-    property var logos: ({ module: function (n) { return fake } })
+    property var logos: ({ module: function (n) { return fake }, isViewModuleReady: function (n) { return true } })
 
     function assertScreen() {
         console.log("Manage tokens is a screen on the nav stack, reached from Settings and left")

@@ -112,7 +112,7 @@ Item {
     }
 
     property var logos: ({
-        module: function (n) { return fake },
+        module: function (n) { return fake }, isViewModuleReady: function (n) { return true },
         request: function (intent, params, cb) {
             var r = probe.requests
             r.push({ intent: intent, params: params })

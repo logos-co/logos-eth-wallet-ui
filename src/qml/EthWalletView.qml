@@ -344,6 +344,40 @@ Item {
     readonly property string selected: ready ? backend.selectedAccount : ""
     // Destinations offered in the Send picker. You cannot mean to pick the account you are
     // sending from out of a list of recipients; typing it is still allowed, and warned about.
+    readonly property var contacts: ready ? j(backend.contactsJson, "[]") : []
+
+    function contactName(a) {
+        for (var i = 0; i < contacts.length; ++i)
+            if (sameHex(contacts[i].address, a)) return contacts[i].name || ""
+        return ""
+    }
+    function isContact(a) {
+        for (var i = 0; i < contacts.length; ++i)
+            if (sameHex(contacts[i].address, a)) return true
+        return false
+    }
+
+    // Who this account has actually paid, newest first and each address once. Read off the
+    // history it already has rather than stored: a second list of recipients would be a copy
+    // free to disagree with the transactions it was derived from.
+    //
+    // `to` is the RECIPIENT for both kinds, which is the field wanted here. It is not the
+    // transaction's own `to`: for an ERC-20 send that is the token contract, and offering a
+    // contract back as somewhere to send to is how a user burns funds into one. `rawTo` is
+    // the function for that, and it is deliberately not the one used here.
+    readonly property var recentRecipients: {
+        var seen = ({}), out = []
+        for (var i = 0; i < history.length; ++i) {
+            var a = history[i].to || ""
+            if (!a || !a.length) continue
+            var k = a.toLowerCase()
+            if (seen[k]) continue
+            seen[k] = true
+            out.push(a)
+        }
+        return out
+    }
+
     readonly property var otherAccounts: accounts.filter(function (a) {
         return typeof a === "string" && a.length > 0 && !root.sameHex(a, root.selected)
     })
@@ -2698,10 +2732,32 @@ Item {
             return 0
         }
 
+        // Everything the last send left behind, except which token is leaving. A dialog is
+        // not a draft: it reopens on a recipient and an amount the user typed for a DIFFERENT
+        // transaction, and the one that matters most — the address — is the one hardest to
+        // notice is stale. The token survives because the caller chose it on the way in.
+        //
+        // The fee overrides go too, and `advanced` closes over them. An override left armed
+        // under a collapsed disclosure prices the next send at the last one's gas.
+        function clearForm() {
+            toField.text = ""
+            amountField.text = ""
+            maxFeeField.text = ""
+            maxPriorityFeeField.text = ""
+            gasLimitField.text = ""
+            nonceField.text = ""
+            advanced.checked = false
+            tierGroup.selected = "normal"
+        }
+
         // The verdict can have moved since the last quote, so re-price on open: the numbers
         // shown must come from the mode the send would actually run under. The timer started
         // here is ask #4's periodic re-price, and it also clears any stale send error.
+        //
+        // Cleared BEFORE the re-price, so the quote prices the empty form rather than the
+        // previous one and is then withdrawn a frame later.
         onOpened: {
+            sendDialog.clearForm()
             tokenPicker.syncIndex()
             sendForm.reprice()
             if (root.ready) root.backend.setQuoteAutoRefresh(true)
@@ -2796,27 +2852,168 @@ Item {
                     size: 32
                     iconSize: 16
                     iconSource: LogosIcons.triangleDown
-                    // visible, not enabled: with one account there is nobody to offer, and a
-                    // control that can never work should not be on screen looking broken.
-                    visible: root.otherAccounts.length > 0
+                    // Always offered now. It used to hide itself when there was no SECOND
+                    // account, which was right while my-accounts was all it held — the
+                    // address book and the add form are reachable with one account, or none.
                     onClicked: toAccountsMenu.popupUnder(toAccountsButton)
                 }
             }
 
+            // Three places an address can come from, and they are different KINDS of
+            // answer rather than one list with sections: who you have paid, who you chose to
+            // remember, and who you already are. A row writes into the field above rather
+            // than becoming a second source of truth — the free text stays authoritative.
             LogosMenu {
                 id: toAccountsMenu
                 objectName: "toAccountsMenu"
-                Instantiator {
-                    model: root.otherAccounts
-                    delegate: LogosMenuItem {
-                        // Indexed, not addressed: the harness cannot know the checksum
-                        // casing the keystore returns, and the label carries the address.
-                        objectName: "toAccount_" + index
-                        text: root.accountDisplay(modelData) + " — " + root.shortAddr(modelData)
-                        onTriggered: toField.text = modelData
+                implicitWidth: 420
+
+                function addressAt(tab, i) {
+                    if (tab === 0) return root.recentRecipients[i]
+                    if (tab === 1) return root.contacts[i].address
+                    return root.accounts[i]
+                }
+
+                ColumnLayout {
+                    width: parent.width
+                    spacing: Theme.spacing.tiny
+
+                    LogosTabBar {
+                        id: toTabs
+                        objectName: "toTabs"
+                        Layout.fillWidth: true
+                        LogosTabButton { objectName: "toTabRecent"; text: "Recents" }
+                        LogosTabButton { objectName: "toTabBook"; text: "Address book" }
+                        LogosTabButton { objectName: "toTabMine"; text: "My addresses" }
                     }
-                    onObjectAdded: function (i, o) { toAccountsMenu.insertItem(i, o) }
-                    onObjectRemoved: function (i, o) { toAccountsMenu.removeItem(o) }
+
+                    StackLayout {
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: 220
+                        currentIndex: toTabs.currentIndex
+
+                        // ── who this account has paid ──
+                        LogosListView {
+                            objectName: "toRecentList"
+                            clip: true
+                            model: root.recentRecipients
+                            delegate: RowLayout {
+                                width: ListView.view.width
+                                LogosButton {
+                                    objectName: "toRecent_" + index
+                                    Layout.fillWidth: true
+                                    variant: LogosButton.Variant.Secondary
+                                    text: root.namedAddr(modelData)
+                                    onClicked: { toField.text = modelData; toAccountsMenu.close() }
+                                }
+                                // Remembering someone you have paid is the way most contacts
+                                // get in, so it is offered where the address already is.
+                                LogosButton {
+                                    objectName: "toRecentSave_" + index
+                                    visible: !root.isContact(modelData)
+                                    text: "Save"
+                                    onClicked: root.backend.saveContact(modelData, "")
+                                }
+                            }
+                        }
+
+                        // ── who you chose to remember, and where they are managed ──
+                        ColumnLayout {
+                            LogosListView {
+                                objectName: "toBookList"
+                                Layout.fillWidth: true
+                                Layout.fillHeight: true
+                                clip: true
+                                model: root.contacts
+                                delegate: RowLayout {
+                                    width: ListView.view.width
+                                    LogosButton {
+                                        objectName: "toContact_" + index
+                                        Layout.fillWidth: true
+                                        variant: LogosButton.Variant.Secondary
+                                        text: (modelData.name && modelData.name.length
+                                               ? modelData.name + " · " : "")
+                                              + root.shortAddr(modelData.address)
+                                        onClicked: {
+                                            toField.text = modelData.address
+                                            toAccountsMenu.close()
+                                        }
+                                    }
+                                    LogosButton {
+                                        objectName: "toContactForget_" + index
+                                        text: "Forget"
+                                        onClicked: root.backend.forgetContact(modelData.address)
+                                    }
+                                }
+                            }
+                            LogosText {
+                                objectName: "toBookEmpty"
+                                Layout.fillWidth: true
+                                visible: root.contacts.length === 0
+                                textFormat: Text.PlainText
+                                wrapMode: Text.WordWrap
+                                color: Theme.palette.textSecondary
+                                text: "No saved addresses yet. Save one from Recents, or add "
+                                      + "it below."
+                            }
+                            // Adding lives here rather than behind another dialog: this one is
+                            // already inside the send form, and a third layer of popup is a
+                            // layer a user cannot get out of by pressing Escape once.
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: Theme.spacing.tiny
+                                LogosTextField {
+                                    id: newContactName
+                                    objectName: "newContactName"
+                                    Layout.preferredWidth: 120
+                                    placeholderText: "Name"
+                                }
+                                LogosTextField {
+                                    id: newContactAddress
+                                    objectName: "newContactAddress"
+                                    Layout.fillWidth: true
+                                    placeholderText: "Address (0x…)"
+                                }
+                                LogosButton {
+                                    objectName: "newContactSave"
+                                    text: "Add"
+                                    enabled: newContactAddress.text.trim().length > 0
+                                    onClicked: {
+                                        root.backend.saveContact(newContactAddress.text.trim(),
+                                                                 newContactName.text.trim())
+                                        newContactAddress.text = ""
+                                        newContactName.text = ""
+                                    }
+                                }
+                            }
+                            // The backend's own words. A refused address is the one thing
+                            // here a user cannot diagnose from the row that did not appear.
+                            LogosText {
+                                objectName: "contactsError"
+                                Layout.fillWidth: true
+                                visible: root.ready && root.backend.contactsError.length > 0
+                                textFormat: Text.PlainText
+                                wrapMode: Text.WordWrap
+                                color: Theme.palette.error
+                                text: root.ready ? root.backend.contactsError : ""
+                            }
+                        }
+
+                        // ── who you already are ──
+                        LogosListView {
+                            objectName: "toMineList"
+                            clip: true
+                            model: root.accounts
+                            delegate: LogosButton {
+                                objectName: "toAccount_" + index
+                                width: ListView.view.width
+                                variant: LogosButton.Variant.Secondary
+                                text: root.accountDisplay(modelData) + " — "
+                                      + root.shortAddr(modelData)
+                                onClicked: { toField.text = modelData; toAccountsMenu.close() }
+                            }
+                        }
+                    }
                 }
             }
 

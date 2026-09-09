@@ -652,6 +652,10 @@ STILL_SYNC = {
     "get_account_wallets": "refresh(), beside the labels: an account nobody named borrows "
                            "its wallet's, and the two have to land in the same turn or the "
                            "picker renames itself between them",
+    "list_contacts": "refresh(), and after either write below — the backend orders the book, "
+                     "so the view re-reads rather than editing its published copy",
+    "save_contact": "the address book, which reaches no chain and writes one small file",
+    "forget_contact": "the address book",
     "suggest_fees": "refresh()",
     "set_active_chain": "a chain switch, which re-reads everything behind it anyway",
     "send": "the send path, whose ordering witness is taken around the call",
@@ -662,7 +666,7 @@ STILL_SYNC = {
 called = set(re.findall(r"modules\(\)\.eth_wallet_backend\.(\w+)\(", code))
 sync = sorted(n for n in called
               if not n.endswith("AsyncResult") and not re.match(r"on[A-Z]", n))
-check("every synchronous backend call is one of the twelve inventoried here",
+check("every synchronous backend call is one of the fifteen inventoried here",
       sync, sorted(STILL_SYNC))
 check("...and the receipt re-read is no longer one of them", "refresh_tx_status" in sync, False)
 check("refreshTxStatus: claim, call, own the reply, re-read, lower the spinner",
@@ -1030,6 +1034,35 @@ check("no entry is a bare string",
       [e for e in META.get("uses", []) if not isinstance(e, dict)], [])
 check("...and each names a single provider",
       sorted({e.get("cardinality") for e in META.get("uses", [])}), ["single"])
+
+print()
+print("the Send form is cleared ON OPEN, and BEFORE the re-price — a quote priced from the")
+print("previous form is a quote withdrawn a frame later, and the order is the whole point.")
+print("A probe cannot see this: with no overlay a Popup never opens and `onOpened` never")
+print("fires, so what runs it is only assertable here.")
+opened = qml_fn_body(qml_body, "onOpened") if False else " ".join(qml_item("sendDialog"))
+check("onOpened clears the form before it prices it",
+      in_order(opened, "onOpened", "sendDialog.clearForm()", "sendForm.reprice()"), True)
+check("...and clearing empties the recipient, the amount and every fee override",
+      all(f in qml_fn_body(qml_body, "clearForm")
+          for f in ["toField.text", "amountField.text", "maxFeeField.text",
+                    "maxPriorityFeeField.text", "gasLimitField.text", "nonceField.text",
+                    "advanced.checked"]), True)
+
+print()
+print("the recipient picker offers three sources and writes into the field rather than")
+print("becoming a second one. Its rows live in a Popup with no delegates instantiated while")
+print("it is closed, so the wiring is assertable here and the LISTS are asserted in the probe.")
+# Against the whole view: `qml_item` stops at the next objectName, and this block is made
+# almost entirely of them.
+for tab in ["toTabRecent", "toTabBook", "toTabMine"]:
+    check(f"  {tab} is offered", tab in qml_body, True)
+check("Recents is bound to the derived list, not to history directly",
+      "model: root.recentRecipients" in qml_body, True)
+check("the book is bound to the backend's, in the backend's order",
+      "model: root.contacts" in qml_body, True)
+check("saving and forgetting ASK the backend rather than editing the published copy",
+      "root.backend.saveContact(" in qml_body and "root.backend.forgetContact(" in qml_body, True)
 
 if "--grep-only" in sys.argv:
     print()

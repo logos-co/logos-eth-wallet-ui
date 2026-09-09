@@ -149,7 +149,7 @@ Item {
         }
     }
 
-    property var logos: ({ module: function (n) { return fake } })
+    property var logos: ({ module: function (n) { return fake }, isViewModuleReady: function (n) { return true } })
 
     // Driven through the button a human presses. `visible` on anything inside a CLOSED popup
     // reads false whatever its binding says, so every assertion about a menu row below is made
