@@ -664,7 +664,7 @@ STILL_SYNC = {
 called = set(re.findall(r"modules\(\)\.eth_wallet_backend\.(\w+)\(", code))
 sync = sorted(n for n in called
               if not n.endswith("AsyncResult") and not re.match(r"on[A-Z]", n))
-check("every synchronous backend call is one of the fifteen inventoried here",
+check("every synchronous backend call is one of the fourteen inventoried here",
       sync, sorted(STILL_SYNC))
 check("...and the receipt re-read is no longer one of them", "refresh_tx_status" in sync, False)
 check("refreshTxStatus: claim, call, own the reply, re-read, lower the spinner",
