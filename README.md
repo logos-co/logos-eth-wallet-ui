@@ -328,6 +328,14 @@ and opens no socket. Beside it are seven tables of plain C++ over the pure heade
 view's own QR encoder, which need no app either; `doctests/run_tables.sh` runs all eight, and
 each file also carries its own one-line invocation.
 
+`doctests/eth-wallet-ui-e2e.test.yaml` is the other half, and the only one that runs what
+actually ships: it builds the plugin and the five modules under it, stands a real
+`logos-standalone-app` up, and drives the view over the QML inspector. Everything above runs
+the view against a **fabricated** backend, so none of it can say whether the built plugin
+loads and finds the real `eth_wallet_backend`. It is hermetic — no chain, no funded key: the
+keystore is empty, and an empty wallet's honest answers (an em-dash, "nothing to receive to",
+a network chip that still reads) are answers only a wired-up backend can give. `.github/workflows/doctests.yml` runs it on both platforms and publishes the report.
+
 `doctests/assert_live_accounts.py` is the one regression a table could not hold: rename an
 account in the keystore and the wallet must stop showing the old name **without being
 reopened**. It never calls `refresh()` — that absence is the assertion, and section 4 fails the
