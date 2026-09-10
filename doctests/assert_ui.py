@@ -1005,6 +1005,24 @@ check("...and the switch puts its binding back rather than keeping the press",
 check("...while a builtin, and the native token, cannot be pressed at all",
       "!manageRow.locked" in qml_binding("manageTokenToggle_", "enabled"), True)
 
+print("0o2) the token screen says WHERE a row's name and decimals came from, for every answer")
+print("     the backend can give. eth_wallet_backend's list_tokens documents the vocabulary:")
+print("     native | allowlist | custom | downloaded | embedded | unknown | enabled.")
+print("     The branch reading \"shipped\" matched none of them, and the else called four of")
+print("     them this wallet's own built-in list — which is what a row enabled from a token")
+print("     list wrongly showed, over a note saying this wallet downloads no lists at all.")
+_meta = " ".join(qml_item("tokenMetadataRow"))
+check("every metadataSource the backend documents has its own answer",
+      sorted(set(re.findall(r'metadataSource === "(\w+)"', _meta))),
+      ["allowlist", "custom", "downloaded", "embedded", "enabled", "native", "unknown"])
+print("     and the note beside it speaks only where the row leaves something unsaid — a")
+print("     name nothing decorated, or a snapshot of a list that has since dropped the row")
+_note = " ".join(qml_item("tokenListNote"))
+check("the note is conditional, not a standing claim",
+      sorted(set(re.findall(r'metadataSource === "(\w+)"', _note))), ["allowlist", "enabled"])
+check("...and no longer says this wallet downloads no token lists",
+      "does not download token lists" in qml, False)
+
 print("0p) Manage tokens says WHICH of its several nothings it is looking at. The reply")
 print("    carries three counts and an optional error, and the four answers they encode")
 print("    used to render as one silent screen. doctests/probe_manage_tokens.qml drives")
@@ -1353,8 +1371,10 @@ check("chip on the token screen", props("chainChip").get("text"), "SEPOLIA · TE
 print("   the metadata row discriminates; the boolean it replaces said No for ETH forever")
 check("no explorer row anywhere", oid("tokenExplorerRow"), None)
 check("metadata row instead", props("tokenMetadataRow").get("value"), "Defined by the network")
-check("and the card says what the list is", props("tokenListNote").get("text"),
-      "does not download token lists", "contains")
+print("   and the note beside it is SILENT for a row the row above already explains. It was")
+print("   unconditional, and said this wallet downloads no token lists — over rows that had")
+print("   come from a downloaded one.")
+check("no note over the native currency", props("tokenListNote").get("visible"), False)
 
 print("9) a copy button puts the WHOLE value on the clipboard, not the shortened display")
 me=props("addressCopyButton").get("value")

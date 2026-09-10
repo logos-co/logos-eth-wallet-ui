@@ -2718,21 +2718,40 @@ Item {
                         DetailRow {
                             objectName: "tokenMetadataRow"
                             label: "Metadata"
+                            // Every name the backend documents, not three of them. "shipped"
+                            // was never one of its answers, so that branch was dead — and the
+                            // else caught `embedded`, `custom`, `enabled` and `unknown` and
+                            // called all four this wallet's own list, which is what a row
+                            // enabled from a token list wrongly said.
                             value: tokenPage.tok.metadataSource === "native"     ? "Defined by the network"
-                                 : tokenPage.tok.metadataSource === "shipped"    ? "Included with this wallet"
-                                 : tokenPage.tok.metadataSource === "downloaded" ? "From a downloaded token list"
-                                                                                 : "This wallet's built-in list"
+                                 : tokenPage.tok.metadataSource === "allowlist"  ? "This wallet's built-in list"
+                                 : tokenPage.tok.metadataSource === "embedded"   ? "A token list shipped with this device"
+                                 : tokenPage.tok.metadataSource === "downloaded" ? "A token list downloaded on this device"
+                                 : tokenPage.tok.metadataSource === "custom"     ? "A token list you added"
+                                 : tokenPage.tok.metadataSource === "enabled"    ? "A snapshot taken when you enabled it"
+                                 : tokenPage.tok.metadataSource === "unknown"    ? "A token list that did not say which"
+                                                                                 : "—"
                         }
 
+                        // Only where the row above leaves something unsaid. It used to be
+                        // unconditional and claimed this wallet downloads no token lists —
+                        // untrue since token_list arrived, and printed over rows that had come
+                        // from a downloaded list.
                         LogosText {
                             objectName: "tokenListNote"
                             Layout.fillWidth: true
+                            visible: text.length > 0
                             wrapMode: Text.WordWrap
+                            textFormat: Text.PlainText
                             color: Theme.palette.textSecondary
                             font.pixelSize: Theme.typography.secondaryText
-                            text: "This wallet only shows tokens on its own built-in list, and "
-                                  + "does not download token lists. A token that is not on that "
-                                  + "list cannot appear here."
+                            text: tokenPage.tok.metadataSource === "allowlist"
+                                  ? "Named by this wallet's own table. No token list on this "
+                                    + "device carries this contract."
+                                  : tokenPage.tok.metadataSource === "enabled"
+                                    ? "You enabled this from a list that no longer carries it, "
+                                      + "so the name and decimals here are the snapshot taken then."
+                                    : ""
                         }
                     }
                 }
