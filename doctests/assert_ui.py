@@ -1130,8 +1130,8 @@ print("becoming a second one. Its rows live in a Popup with no delegates instant
 print("it is closed, so the wiring is assertable here and the LISTS are asserted in the probe.")
 # Against the whole view: `qml_item` stops at the next objectName, and this block is made
 # almost entirely of them.
-for tab in ["toTabRecent", "toTabBook", "toTabMine"]:
-    check(f"  {tab} is offered", tab in qml_body, True)
+for tname in ["toTabRecent", "toTabBook", "toTabMine"]:
+    check(f"  {tname} is offered", tname in qml_body, True)
 check("Recents is bound to the derived list, not to history directly",
       "model: root.recentRecipients" in qml_body, True)
 check("the book is bound to the backend's, in the backend's order",
