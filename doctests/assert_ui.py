@@ -736,7 +736,7 @@ print("   system's own copy button was the only one that did, and it looked like
 print("   out in a row of three. It was the one that was right.")
 check("no icon button is a bare LogosIconButton",
       re.findall(r"^\s*LogosIconButton \{", qml, re.M), [])
-check("...they all come from the one hover-aware rule", len(icon_buttons), 13)
+check("...they all come from the one hover-aware rule", len(icon_buttons), 14)
 check("...which is stated once", qml.count("component HoverIcon:"), 1)
 check("...and the tint follows the cursor",
       qml_binding("HoverIcon", "iconColor") or
@@ -751,7 +751,7 @@ print("   any other")
 backs = [b for b in icon_buttons if "iconArrowLeft" in b]
 check("every back arrow is one size",
       sorted({re.search(r"iconSize: (\d+)", b).group(1) for b in backs}), ["20"])
-check("...on every screen there is to leave", len(backs), 5)
+check("...on every screen there is to leave", len(backs), 6)
 
 check("the four spinner-bearing claims",
       sorted(set(re.findall(r"beginClaim\((m_\w+)", code))),

@@ -2,9 +2,10 @@ name: CI
 
 # The offline half of this view's suite — the half that needs no app.
 #
-# What runs: the seven C++ tables over the pure headers in src/, the seven QML
-# probes that load the real view against a fabricated backend, and the source
-# assertions in assert_ui.py --grep-only.
+# What runs: the seven C++ tables over the pure headers in src/, the JS table
+# over the view's own QR encoder, the eight QML probes that load the real view
+# against a fabricated backend, and the source assertions in assert_ui.py
+# --grep-only.
 #
 # What does NOT run, and why: sections 1 and up of assert_ui.py, and
 # assert_live_accounts.py. Both drive a live logos-standalone-app over the QML
@@ -123,14 +124,14 @@ jobs:
           if grep -q "SKIP" /tmp/tables.log; then
             echo "::error::the view probes skipped instead of running"; exit 1
           fi
-          for p in probe_manage_tokens probe_token_identity probe_tokens_sort probe_tx_detail probe_intents probe_recipients probe_balances_states; do
+          for p in probe_manage_tokens probe_token_identity probe_tokens_sort probe_tx_detail probe_intents probe_recipients probe_balances_states probe_receive; do
             grep -q -- "--- $p.qml" /tmp/tables.log \
               || { echo "::error::probe never ran: $p"; exit 1; }
           done
-          # Seven tables and seven probes each sign off with one RESULT line, and
+          # Eight tables and eight probes each sign off with one RESULT line, and
           # a probe that reaches its last phase is the only thing that prints
           # one. A header with silence under it counts here and passes nothing.
           n=$(grep -c "RESULT: ALL PASS" /tmp/tables.log)
-          echo "sections that reported: $n"; [ "$n" -ge 14 ]
+          echo "sections that reported: $n"; [ "$n" -ge 16 ]
           n=$(grep -c "  PASS  " /tmp/tables.log)
-          echo "assertions: $n"; [ "$n" -ge 500 ]
+          echo "assertions: $n"; [ "$n" -ge 560 ]
