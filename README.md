@@ -3,9 +3,10 @@
 Send ether on one Ethereum network at a time, with the full set of fee controls.
 
 Information design follows MetaMask: one question per screen, everything else behind a
-disclosure. Three sections (Tokens, Send, Activity) and **the active network visible
-at all times** — a user must never be able to mistake which chain they are spending on.
-Testnets are visually distinct from mainnet.
+disclosure. Four sections (Tokens, Send, Receive, Activity) and **the active network
+visible at all times** — a user must never be able to mistake which chain they are spending
+on. Testnets are visually distinct from mainnet. No action button sits above the tab strip: a
+button that opens a tab, on top of that tab, is two answers to one question.
 
 ## What this module cannot do
 
@@ -271,16 +272,52 @@ price there has ever been renders as `<0.00001`. Nothing on this screen is compu
 gas *percentage* is the backend's integer, and a token the wallet does not list shows its raw
 on-chain integer labelled `base units` rather than being scaled by an assumed 18.
 
+## QR
+
+**Receive** is a section, not a screen you open. It encodes the selected account's
+address and draws it as a grid of plain
+`Rectangle`s, one per **run** of dark modules. That drawing is ported from the Monero wallet,
+which arrived at it the hard way: inside Basecamp's `ui_qml` sandbox a `data:` URI is refused,
+a remote URL is refused, and a `Canvas` never receives `paint()` in the plugin's own
+`QQuickWidget`. All three were measured; none is worth rediscovering. What the sandbox *does*
+admit is a local file under the plugin's own roots, so a sibling `.js` import works.
+
+Where this **diverges** from Monero is which side of the wire the encoder sits on. There, the
+backend publishes the matrix, because a Monero receive URI carries an **amount** the backend
+owns and re-encodes on every keystroke. Here there is no amount and never will be — an
+EIP-681 URI whose amount a scanning wallet silently ignores is a wrong figure with nothing on
+screen saying so — and the payload is the bare EIP-55 address, which is already a property of
+the view. So `src/qml/qrcodegen.js` (Nayuki's MIT encoder, flattened to top-level functions
+because QML has no module system and the published UMD preamble throws) encodes it in the view,
+the `.rep` is untouched, and no backend round trip stands between selecting an account and
+seeing its code.
+
+The matrix is built **only while the section shows**. A `StackLayout` keeps every page alive,
+so an ungated binding would re-encode on every account switch and leave a few hundred
+`Rectangle`s resident for a tab the user may never open. `probe_receive.qml` asserts both
+halves: nothing encoded off the section, and every run drawn again on return.
+
+The address goes in **bare and unmodified**: uppercasing it voids the EIP-55 checksum. The cell
+size is floored and the box takes whatever falls out, rather than the modules being fitted into
+a fixed 240px — a fractional cell leaves hairline seams that some scanners read as module
+boundaries. The two colours are literal `#000000` on `#ffffff`, not `Theme` tokens, because a
+palette colour inverts in dark mode and an inverted code does not scan.
+
+`doctests/qr_table.mjs` runs the encoder against facts the ISO spec fixes rather than against
+itself — the version a 42-character byte segment needs, the finder and timing patterns, and the
+published format-information string for level M. `doctests/probe_receive.qml` covers everything
+between the encoder and the screen.
+
 ## Testing
 
 `doctests/assert_ui.py` drives the running view over the QML inspector and asserts what is on
 screen. Both harnesses take the port from `LOGOS_INSPECTOR_PORT`, defaulting to the app's own
 3768; point them at a fixture you started yourself, because everything past their setup writes
 real keystore and `eth_rpc` state. Its sections `0` through `0n` need no app at all — `--grep-only` runs them
-and opens no socket. Beside it are six tables of plain C++ over the pure headers in `src/`
-(and, for `test_token_identity.cpp`, over the view's own source), which need no app either;
-`doctests/run_tables.sh` compiles and runs all six, and each file also carries its own one-line
-invocation.
+and opens no socket. Beside it are seven tables of plain C++ over the pure headers in `src/`
+(and, for `test_token_identity.cpp`, over the view's own source) and one of JavaScript over the
+view's own QR encoder, which need no app either; `doctests/run_tables.sh` runs all eight, and
+each file also carries its own one-line invocation.
 
 `doctests/assert_live_accounts.py` is the one regression a table could not hold: rename an
 account in the keystore and the wallet must stop showing the old name **without being
@@ -331,6 +368,8 @@ where a table **runs** them:
 | `test_sweep_decision.cpp` | the sweep schedule, including a read that failed |
 | `probe_tx_detail.qml` | the transaction screen's own bindings, loaded and driven |
 | `probe_tokens_sort.qml` | the sort control, and the order the token list is laid out in |
+| `qr_table.mjs` | the QR encoder, against the spec's own version, pattern and format facts |
+| `probe_receive.qml` | the Receive section: what is encoded, and what is drawn |
 
 Neutering any of those now fails a row that executed it. What is left for a grep is what no
 table can see — QML bindings, and whether the backend *consults* the transitions at all — and

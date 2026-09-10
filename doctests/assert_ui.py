@@ -84,6 +84,12 @@ def tab(i):
     r=call("callMethod",{"objectId":oid("ethWalletRoot"),"method":"selectTab","args":[i]})
     time.sleep(0.5)
     return r
+def open_send():
+    """Enter Send the way a user does now: its tab. The button this replaces called
+    openSend(null), which RESET the token to the native currency; entering does not, because
+    the section keeps its form. Nothing below chooses another token until 29's last block, so
+    every call here still lands on native — and 21 ASSERTS that rather than assuming it."""
+    tab(1); time.sleep(0.5)
 def view(method,*args):
     r=call("callMethod",{"objectId":oid("ethWalletRoot"),"method":method,"args":list(args)})
     time.sleep(0.8)
@@ -1135,7 +1141,7 @@ check("the form is emptied from exactly two places", len(clears), 2)
 check("...an accepted send LEAVES the section, then empties it — the other order re-prices "
       "an emptied form still on screen",
       in_order(qml_fn_body(qml_body, "onPendingRequestIdChanged"),
-               "root.selectTab(2)", "sendPage.clearForm()"), True)
+               "root.selectTab(3)", "sendPage.clearForm()"), True)
 check("...and Cancel empties it and goes back to Tokens",
       any("sendPage.clearForm(); root.selectTab(0)" in l for l in clears), True)
 check("...and clearing empties the recipient, the amount and every fee override",
@@ -1266,14 +1272,14 @@ call("evaluate",{"expression":'logos.callModule("eth_rpc_module","patch_chain_en
 call("evaluate",{"expression":'logos.module("eth_wallet_ui").setActiveChain(11155111)'})
 time.sleep(3)
 
-print("1) the tab actually moves, and the chip is on ALL THREE tabs")
-for i,name in enumerate(["Tokens","Send","Activity"]):
+print("1) the tab actually moves, and the chip is on ALL FOUR tabs")
+for i,name in enumerate(["Tokens","Send","Receive","Activity"]):
     tab(i)
     check(f"pages.currentIndex after selectTab({i})", props("pages").get("currentIndex"), i)
     check(f"chip on {name}", props("chainChip").get("text"), "SEPOLIA · TESTNET")
 
 print("2) empty history, asserted by PROPERTY on the Activity tab")
-tab(2)
+tab(3)
 print("   the line is a CLAIM about this account, so it speaks only for a history we read")
 check("the history was actually read", ev("historyKnown"), True)
 check("historyEmpty.visible", props("historyEmpty").get("visible"), True)
@@ -1282,7 +1288,7 @@ tab(0)
 check("historyEmpty.visible on Tokens", props("historyEmpty").get("visible"), False)
 
 print("3) the Send button names the network")
-call("callMethod",{"objectId":oid("openSendButton"),"method":"clicked","args":[]}); time.sleep(1)
+open_send()
 check("submit label", props("sendSubmitButton").get("text"), "Send on Sepolia (testnet)")
 
 print("4) the seven advanced fee controls, plus the token picker and the fee estimate")
@@ -1344,7 +1350,7 @@ check("no transaction screen", oid("txDetailPage"), None)
 print("11) Send offers this wallet's own accounts without taking away free text")
 call("evaluate",{"expression":'logos.callModule("keystore_module","import_private_key",["59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d","pw123456"])'})
 call("evaluate",{"expression":'logos.module("eth_wallet_ui").refresh()'}); time.sleep(2.5)
-call("callMethod",{"objectId":oid("openSendButton"),"method":"clicked","args":[]}); time.sleep(1)
+open_send()
 check("picker on screen once a second account exists", props("toAccountsButton").get("visible"), True)
 check("the entry names the account and its address", props("toAccount_0").get("text"), "0x7099", "contains")
 print("   the regression: the handler said popupUnder(toAccountsButton) with only an")
@@ -1441,7 +1447,7 @@ print("   and a blocking proxy is never badged verified")
 check("chip under a blocking proxy", props("verifiedChip").get("text"), "Not verified")
 
 print("16) the receipt sweep is STOPPED when nothing is still due")
-tab(2)
+tab(3)
 print("   on the Activity tab, or every `visible` below reads false whatever it is bound to")
 check("control: the tab is really showing", props("activityRouteNote").get("visible"), True)
 check("nothing recorded to sweep", ev("history.length"), 0)
@@ -1531,9 +1537,11 @@ tab(0)
 check("list row is the bounded figure", props("balance_native").get("text"), str(disp))
 
 print("21) the Send screen picks a token and takes TOKEN units")
-call("callMethod",{"objectId":oid("openSendButton"),"method":"clicked","args":[]}); time.sleep(1)
+open_send()
 check("the picker offers what the wallet holds", (ev("tokens.length") or 0) >= 1, True)
 check("it names the symbol and the balance", props("sendTokenPicker").get("model"), "ETH", "contains")
+# Entering no longer resets the token, so this is the DEFAULT being asserted: nothing above
+# has chosen another, and syncIndex resolves an unset token to row 0, the native currency.
 check("and it opens on the native currency", props("sendPage").get("token"), "ETH")
 check("the amount field asks for ETH, not wei", props("amountField").get("placeholderText"),
       "Amount in ETH")
@@ -1676,7 +1684,7 @@ else:
         check("put back on the chain the rest of this file expects", ev("net.chainId"), back)
 
 print("27) changing WHAT is being sent withdraws the figures priced for the old request")
-call("callMethod",{"objectId":oid("openSendButton"),"method":"clicked","args":[]}); time.sleep(1)
+open_send()
 call("setProperty",{"objectId":oid("toField"),"property":"text","value":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8"})
 call("setProperty",{"objectId":oid("amountField"),"property":"text","value":"0.001"}); time.sleep(3)
 check("a quote is on screen for the request as typed", props("quoteSummary").get("text"),
@@ -1709,7 +1717,7 @@ print("28) a form edit that re-prices NOTHING still withdraws the figures it inv
 # 27 drives the tier button, which does re-price, and passed over this entirely: the old guard
 # hung off the CALL, so an edit that made no call withdrew nothing and left the previous
 # request's gas limit, ceiling and nonce on screen with Submit still armed.
-call("callMethod",{"objectId":oid("openSendButton"),"method":"clicked","args":[]}); time.sleep(1)
+open_send()
 call("setProperty",{"objectId":oid("toField"),"property":"text","value":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8"})
 call("setProperty",{"objectId":oid("amountField"),"property":"text","value":"0.001"}); time.sleep(3)
 check("a quote is on screen for the request as typed", props("quoteSummary").get("text"),
@@ -1732,7 +1740,7 @@ call("callMethod",{"objectId":oid("sendCancelButton"),"method":"clicked","args":
 print("29) re-entering on a different token does not render the previous token's quote")
 # The second shape: setQuoteAutoRefresh(false) cleared the request and the timer but not the
 # figures, so an ETH quote rendered under a form reading "Amount in WETH".
-call("callMethod",{"objectId":oid("openSendButton"),"method":"clicked","args":[]}); time.sleep(1)
+open_send()
 call("setProperty",{"objectId":oid("toField"),"property":"text","value":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8"})
 call("setProperty",{"objectId":oid("amountField"),"property":"text","value":"0.001"}); time.sleep(3)
 priced_native = props("quoteSummary").get("text")

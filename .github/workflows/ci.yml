@@ -2,9 +2,11 @@ name: CI
 
 # The offline half of this view's suite — the half that needs no app.
 #
-# What runs: the seven C++ tables over the pure headers in src/, the seven QML
-# probes that load the real view against a fabricated backend, and the source
-# assertions in assert_ui.py --grep-only.
+# What runs: the seven C++ tables over the pure headers in src/, the JS table
+# over the view's own QR encoder, the zbar decode of the codes it renders (the
+# one check here with a non-Qt system dependency), the eight QML probes that
+# load the real view against a fabricated backend, and the source assertions in
+# assert_ui.py --grep-only.
 #
 # What does NOT run, and why: sections 1 and up of assert_ui.py, and
 # assert_live_accounts.py. Both drive a live logos-standalone-app over the QML
@@ -116,21 +118,23 @@ jobs:
           # when it finds no Qt Quick runtime, which is the right default for a
           # developer and the wrong one here. Both paths are handed over
           # explicitly, and the log is checked for having taken them.
-          nix shell nixpkgs#qt6.qtdeclarative -c bash -c '
+          nix shell nixpkgs#qt6.qtdeclarative nixpkgs#zbar -c bash -c '
             d=$(dirname $(dirname $(readlink -f $(command -v qml))))
             QML_BIN="$d/bin/qml" QT_QML_DIR="$d/lib/qt-6/qml" \
               ./doctests/run_tables.sh' 2>&1 | tee /tmp/tables.log
           if grep -q "SKIP" /tmp/tables.log; then
             echo "::error::the view probes skipped instead of running"; exit 1
           fi
-          for p in probe_manage_tokens probe_token_identity probe_tokens_sort probe_tx_detail probe_intents probe_recipients probe_balances_states; do
+          for p in probe_manage_tokens probe_token_identity probe_tokens_sort probe_tx_detail probe_intents probe_recipients probe_balances_states probe_receive; do
             grep -q -- "--- $p.qml" /tmp/tables.log \
               || { echo "::error::probe never ran: $p"; exit 1; }
           done
-          # Seven tables and seven probes each sign off with one RESULT line, and
-          # a probe that reaches its last phase is the only thing that prints
-          # one. A header with silence under it counts here and passes nothing.
+          # Eight tables, the zbar decode, and eight probes each sign off with one
+          # RESULT line, and a probe that reaches its last phase is the only thing
+          # that prints one. A header with silence under it counts here and passes
+          # nothing. 8 + 1 + 8 = 17 — do NOT "correct" this to 16, the decode is
+          # the seventeenth and the floor is what keeps it in the run.
           n=$(grep -c "RESULT: ALL PASS" /tmp/tables.log)
-          echo "sections that reported: $n"; [ "$n" -ge 14 ]
+          echo "sections that reported: $n"; [ "$n" -ge 17 ]
           n=$(grep -c "  PASS  " /tmp/tables.log)
-          echo "assertions: $n"; [ "$n" -ge 500 ]
+          echo "assertions: $n"; [ "$n" -ge 750 ]

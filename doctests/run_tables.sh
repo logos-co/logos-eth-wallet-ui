@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Compile and run every table in this directory, then the view probe.
 #
-# The tables are plain C++ over the pure headers in ../src and need a Qt6Core and nothing else —
-# no app, no backend, no GUI. The probe needs a Qt Quick runtime and skips without one.
+# The C++ tables are plain C++ over the pure headers in ../src and need a Qt6Core and nothing
+# else — no app, no backend, no GUI. qr_table.mjs needs node. The probes need a Qt Quick runtime
+# and skip without one.
 #
 # Qt is located in this order: $QT_DIR, then pkg-config, then the qtbase in the module's own
 # nix closure. Framework and non-framework layouts both work.
@@ -56,9 +57,28 @@ for t in test_*.cpp; do
     echo "=== $t"
     "$bin" || rc=1
 done
+# The one table that is not C++: the view's QR encoder is JavaScript, and node runs the same
+# text the view imports. Loud rather than quiet when node is absent — CI reads a SKIP as a fail.
+echo
+echo "=== qr_table.mjs"
+if command -v node >/dev/null 2>&1; then
+    node qr_table.mjs || rc=1
+else
+    echo "SKIP: no node to run qr_table.mjs"
+fi
+
 # And the half a C++ table cannot reach: the view's own bindings, evaluated. It SKIPS with 0
 # when there is no Qt Quick runtime to hand, so this stays one command either way.
 echo
+echo "=== qr_scan.sh"
+# Structure and parameters are checked next door; this is the only step that asks a READER
+# whether the code decodes. zbar absent is a failure, not a skip.
+if command -v zbarimg >/dev/null 2>&1; then
+    ./qr_scan.sh || rc=1
+else
+    echo "SKIP: no zbarimg to decode the rendered codes (nix shell nixpkgs#zbar)"
+fi
+
 echo "=== view probes"
 ./run_view_probe.sh || rc=1
 

@@ -4,12 +4,13 @@ import QtQuick.Layouts 1.15
 import Logos.Controls
 import Logos.Icons
 import Logos.Theme
+import "qrcodegen.js" as QrGen
 
 // The Ethereum wallet.
 //
 // Information design follows MetaMask: one question per screen, everything else behind a
-// disclosure. Two tabs, one action, and the active network visible at all times — a user must
-// never be able to mistake which chain they are spending on.
+// disclosure. Four sections, no action button above the tab strip, and the active network
+// visible at all times — a user must never be able to mistake which chain they are spending on.
 //
 // This view holds no secret. It requests signatures and reads which accounts exist; the vault
 // password is taken only by evm_signer_ui, and seed phrases only ever reach evm_keystore_ui.
@@ -162,7 +163,7 @@ Item {
                 // The transaction exists now, so leave the form for where it shows up.
                 // Tab first, then clear: an emptied form re-priced while still on screen
                 // is a quote for a send nobody is making.
-                root.selectTab(2)
+                root.selectTab(3)
                 sendPage.clearForm()
             }
         }
@@ -461,6 +462,9 @@ Item {
         nav.pushItem(addressBookComponent)
     }
 
+    // A name for the tab index, so the probe and any later caller do not carry the number.
+    function openReceive() { root.selectTab(2) }
+
     function openManageTokens() {
         if (nav.depth > 1) nav.popToIndex(0, StackView.Immediate)
         nav.pushItem(manageTokensComponent)
@@ -544,6 +548,35 @@ Item {
     function shortAddr(a) {
         if (!a || a.length < 12) return a || ""
         return a.substring(0, 6) + "…" + a.substring(a.length - 4)
+    }
+
+    // The QR is encoded HERE, in JavaScript, and drawn as plain Rectangles. The sandbox this
+    // view runs in refuses `data:` URIs and remote URLs, and a Canvas never receives paint()
+    // inside the plugin's QQuickWidget — all three were measured. A sibling .js import is
+    // admitted, so the encoder is one.
+    function qrModules(text) {
+        try {
+            return text && text.length > 0 ? QrGen.modules(text) : null
+        } catch (e) {
+            return null
+        }
+    }
+
+    // One Item per RUN of dark modules rather than per module: a solid row of the finder
+    // pattern is then one Rectangle rather than seven.
+    function qrRuns(qr) {
+        var runs = []
+        if (!qr) return runs
+        for (var y = 0; y < qr.size; y++) {
+            var x = 0
+            while (x < qr.size) {
+                if (qr.bits.charAt(y * qr.size + x) !== "1") { x++; continue }
+                var start = x
+                while (x < qr.size && qr.bits.charAt(y * qr.size + x) === "1") x++
+                runs.push([start, y, x - start])
+            }
+        }
+        return runs
     }
 
     // A hash is 66 characters, so it gets a wider window than an address: two transactions
@@ -1562,18 +1595,7 @@ Item {
                     // is not one. The same number is a row in the table below, under its own
                     // symbol, where it means what it says.
 
-                    LogosButton {
-                        objectName: "openSendButton"
-                        Layout.alignment: Qt.AlignHCenter
-                        text: "Send"
-                        enabled: root.ready && !root.sendPending
-                        // Opens on the first token, which is the native currency. The picker
-                        // inside the dialog is what actually decides, so this preselects
-                        // rather than dictates.
-                        onClicked: root.openSend(null)
-                    }
-
-                    // ── three sections ──
+                    // ── four sections ──
                     LogosTabBar {
                         id: tabs
                         objectName: "tabs"
@@ -1581,6 +1603,7 @@ Item {
                         onCurrentIndexChanged: pages.currentIndex = currentIndex
                         LogosTabButton { text: "Tokens" }
                         LogosTabButton { text: "Send" }
+                        LogosTabButton { text: "Receive" }
                         LogosTabButton { text: "Activity" }
                     }
 
@@ -2321,6 +2344,118 @@ Item {
                                         }
                                     }
                                 }
+                            }
+                        }
+
+                        // Receive: the account's address, as something a phone can read and
+                        // as text a human can check against it. No amount field — an amount
+                        // makes this an EIP-681 URI, and a wallet that scans one and ignores
+                        // the amount sends the wrong figure with nothing on screen saying so.
+                        Item {
+                            id: receivePage
+                            objectName: "receivePage"
+
+                            // The bare EIP-55 address, and never uppercased: the mixed case IS the checksum,
+                            // and folding it throws away the only thing that catches a mistyped address.
+                            readonly property string payload: root.selected
+                            // Encoded only while the section shows. A StackLayout keeps every page
+                            // alive, so an ungated binding re-encodes on every account switch for a
+                            // tab the user may never open.
+                            readonly property var qr: visible ? root.qrModules(payload) : null
+
+                            ColumnLayout {
+                                anchors.fill: parent
+                                anchors.margins: Theme.spacing.medium
+                                spacing: Theme.spacing.small
+
+                                // An EVM address is the same on every chain, so the network chip above does
+                                // not narrow what this code is for. A user who reads it as "Sepolia only"
+                                // would ask for a second address they do not have.
+                                LogosText {
+                                    objectName: "receiveNote"
+                                    Layout.fillWidth: true
+                                    textFormat: Text.PlainText
+                                    wrapMode: Text.WordWrap
+                                    color: Theme.palette.textSecondary
+                                    text: "One address, every EVM chain. What arrives depends on the network "
+                                          + "the sender is on, not the one selected here."
+                                }
+
+                                Item { Layout.fillHeight: true }
+
+                                // Plain Rectangles, for the reason qrModules() gives.
+                                Rectangle {
+                                    id: qrBox
+                                    objectName: "receiveQrBox"
+                                    Layout.alignment: Qt.AlignHCenter
+                                    readonly property var qr: receivePage.qr
+                                    readonly property int quiet: 4
+                                    // Floored, and the BOX then takes the size that falls out. A fractional
+                                    // cell leaves hairline seams between the rectangles, and a scanner reads
+                                    // some of those as module boundaries.
+                                    readonly property int cell: qr ? Math.max(1, Math.floor(240 / (qr.size + quiet * 2))) : 0
+                                    // Literal, not Theme: a palette colour inverts in dark mode, and an
+                                    // inverted code does not scan. Do not "fix" these.
+                                    color: "#ffffff"
+                                    visible: !!qr
+                                    Layout.preferredWidth: qr ? cell * (qr.size + quiet * 2) : 0
+                                    Layout.preferredHeight: Layout.preferredWidth
+
+                                    Repeater {
+                                        model: root.qrRuns(qrBox.qr)
+                                        Rectangle {
+                                            x: (modelData[0] + qrBox.quiet) * qrBox.cell
+                                            y: (modelData[1] + qrBox.quiet) * qrBox.cell
+                                            width: modelData[2] * qrBox.cell
+                                            height: qrBox.cell
+                                            color: "#000000"
+                                        }
+                                    }
+                                }
+
+                                LogosText {
+                                    objectName: "receiveUnavailable"
+                                    Layout.alignment: Qt.AlignHCenter
+                                    visible: !receivePage.qr
+                                    textFormat: Text.PlainText
+                                    color: Theme.palette.textSecondary
+                                    // `qr` is null for BOTH an empty selection and an encoder that
+                                    // threw, and the address line beside this one keys off the
+                                    // payload — so saying "no account" under a visible address is a
+                                    // screen contradicting itself.
+                                    text: receivePage.payload.length > 0
+                                          ? "This address could not be encoded, so there is no code to show."
+                                          : "No account is selected, so there is nothing to receive to."
+                                }
+
+                                // The WHOLE address, wrapped rather than shortened: this screen is where a
+                                // user checks it character by character against what they were given, and
+                                // the elided form in the header cannot be checked against anything.
+                                LogosSelectableText {
+                                    objectName: "receiveAddress"
+                                    Layout.fillWidth: true
+                                    visible: receivePage.payload.length > 0
+                                    horizontalAlignment: Text.AlignHCenter
+                                    wrapMode: TextEdit.WrapAnywhere
+                                    font.family: Theme.typography.mono
+                                    text: receivePage.payload
+                                }
+
+                                LogosCopyButton {
+                                    // Its own name. Reusing `addressCopyButton` from the header would give
+                                    // two controls one name, and a harness that finds by objectName and
+                                    // ignores visibility would reach whichever came first.
+                                    objectName: "receiveAddressCopyButton"
+                                    Layout.alignment: Qt.AlignHCenter
+                                    ToolTip.text: "Copy"
+                                    ToolTip.visible: hovered
+                                    ToolTip.delay: 400
+                                    visible: receivePage.payload.length > 0
+                                    value: receivePage.payload
+                                    onCopied: function (v) { root.lastCopiedValue = v }
+                                }
+
+                                Item { Layout.fillHeight: true }
                             }
                         }
 
