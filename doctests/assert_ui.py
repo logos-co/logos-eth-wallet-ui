@@ -952,9 +952,15 @@ print("   each body is behind a Loader keyed on its own section, so a closed one
 print("   item at all — three screens live in one tab only because two of them are not built")
 check("...each loaded only while its own section is open",
       len(re.findall(r'expanded: settingsPage\.openSection === "', settings)), 3)
-check("...and opening it picks that section, THEN reads — rather than showing the last answer",
-      in_order(qml_fn_body(qml_body, "openManageTokens"),
-               'root.openSettings("tokens")', 'root.searchTokens("")'), True)
+print("   the read is keyed on the section being OPEN, not on the route that opened it. It")
+print("   used to sit in openManageTokens(), whose only caller was a button the Settings tab")
+print("   replaced — so the header click built the screen, asked for nothing, and left an")
+print("   em-dash standing. probe_manage_tokens now opens the way a user must and asserts it.")
+check("...and opening the section is what reads the offered set",
+      'onOpenSectionChanged: if (openSection === "tokens") root.searchTokens("")' in qml, True)
+check("...from exactly one place, so no route can reach the screen without it",
+      len([l for l in qml_lines
+           if 'root.searchTokens("")' in l and not l.strip().startswith("//")]), 1)
 print("   the query goes to the BACKEND. The embedded Uniswap list is thousands of rows, so")
 print("   a filter written here would mean pulling all of them across the wire first")
 check("the list renders what the backend answered",

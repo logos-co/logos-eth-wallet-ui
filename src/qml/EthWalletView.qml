@@ -524,12 +524,9 @@ Item {
     // A name for the tab index, so the probe and any later caller do not carry the number.
     function openReceive() { root.selectTab(2) }
 
-    function openManageTokens() {
-        root.openSettings("tokens")
-        // The empty query is the whole offered set. Asked for here rather than in the screen's
-        // Component.onCompleted, so re-opening it re-reads rather than showing the last answer.
-        root.searchTokens("")
-    }
+    // A name for the section, kept because the probes and the harness call it. The READ is not
+    // here: see settingsPage.onOpenSectionChanged.
+    function openManageTokens() { root.openSettings("tokens") }
     function back() { if (nav.depth > 1) nav.popCurrentItem() }
 
     // The closed set of actions the verdict may carry. Text only, no button: a sandboxed view
@@ -2583,6 +2580,15 @@ Item {
                             // did not ask for on every launch, and every consumer would owe that
                             // screen's backend surface whether it uses it or not.
                             property string openSection: ""
+
+                            // The empty query is the whole offered set, asked for when the
+                            // section OPENS — keyed on the state rather than on the route that
+                            // reached it. It used to hang off openManageTokens(), whose only
+                            // caller was a button this tab replaced: the header click then built
+                            // the screen and read nothing, and it showed an em-dash for ever.
+                            // Not the screen's own Component.onCompleted, so re-opening re-reads
+                            // rather than showing the last answer.
+                            onOpenSectionChanged: if (openSection === "tokens") root.searchTokens("")
 
                             ColumnLayout {
                                 anchors.fill: parent
