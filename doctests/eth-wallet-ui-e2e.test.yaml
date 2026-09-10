@@ -1,0 +1,266 @@
+name: "The wallet's five sections, in a real host with a real backend"
+description: |
+  `doctests/run_tables.sh` already loads `EthWalletView.qml` offscreen against a
+  **fabricated** backend, and asserts a great deal about it. What it cannot say is
+  whether the thing that ships works: whether the built plugin loads in a real
+  host, finds the real `eth_wallet_backend`, and comes up at all.
+
+  That is the whole of what this proves, and it is deliberately hermetic — no
+  chain, no funded key, no network. The keystore is empty, so the figures are
+  em-dashes and Receive says it has nothing to receive to. Those are the honest
+  answers for an empty wallet, and they are answers only a wired-up backend can
+  give: an unwired view renders nothing at all (one bad property binding takes
+  the whole view down, and the only trace is a qWarning in the host log).
+
+sections:
+  - title: "Build the pieces"
+    step: true
+    text: |
+      The wallet UI is one plugin over five modules. `eth_wallet_backend` is a
+      dependency of the view; `eth_rpc_module`, `fee_module`, `keystore_module`
+      and `token_list_module` are dependencies of *it*, and only one level is
+      bundled — so the rest are staged here rather than assumed.
+
+      `capability_module` is not bundled with the standalone host either. Without
+      it every token handshake times out and every call is refused, and the view
+      comes up empty with nothing on screen saying why.
+    steps:
+      - title: "The host and the test driver"
+        run: |
+          set -euo pipefail
+          nix build 'github:logos-co/logos-standalone-app' --no-write-lock-file -o result-app
+          nix build 'github:logos-co/logos-qt-mcp' --no-write-lock-file -o result-mcp
+        code_block: |
+          nix build 'github:logos-co/logos-standalone-app' --no-write-lock-file -o result-app
+          nix build 'github:logos-co/logos-qt-mcp' --no-write-lock-file -o result-mcp
+
+      # Its own step ON PURPOSE: the harness dispatches
+      #   if file / elif run / elif ui_test / elif check_file
+      # so a check_file sharing a step with run: is never evaluated.
+      - title: "The runtime and driver really landed"
+        check_file: "result-app"
+
+      # One build per step. A single step running several builds reports only the
+      # LAST one's exit code, so the earlier ones can fail while the step is green.
+      - title: "Build the wallet UI"
+        run: "nix build 'github:logos-co/logos-eth-wallet-ui{release}#install' --no-write-lock-file -o result-ui"
+        code_block: "nix build 'github:logos-co/logos-eth-wallet-ui#install' --no-write-lock-file -o result-ui"
+
+      - title: "The wallet UI really produced a plugin"
+        check_file: "result-ui/plugins"
+
+      - title: "Build the wallet backend"
+        run: "nix build 'github:logos-co/logos-eth-wallet-backend#install' --no-write-lock-file -o result-backend"
+        code_block: "nix build 'github:logos-co/logos-eth-wallet-backend#install' --no-write-lock-file -o result-backend"
+
+      - title: "The backend really produced modules"
+        check_file: "result-backend/modules"
+
+      - title: "Build the keystore"
+        run: "nix build 'github:logos-co/logos-evm-keystore-module#install' --no-write-lock-file -o result-keystore"
+        code_block: "nix build 'github:logos-co/logos-evm-keystore-module#install' --no-write-lock-file -o result-keystore"
+
+      - title: "The keystore really produced modules"
+        check_file: "result-keystore/modules"
+
+      - title: "Build the RPC, fee and token-list modules"
+        run: |
+          set -euo pipefail
+          nix build 'github:logos-co/logos-evm-eth-rpc-module#install'    --no-write-lock-file -o result-rpc
+          nix build 'github:logos-co/logos-evm-fee-module#install'        --no-write-lock-file -o result-fee
+          nix build 'github:logos-co/logos-evm-token-list-module#install' --no-write-lock-file -o result-tokens
+        code_block: |
+          nix build 'github:logos-co/logos-evm-eth-rpc-module#install'    --no-write-lock-file -o result-rpc
+          nix build 'github:logos-co/logos-evm-fee-module#install'        --no-write-lock-file -o result-fee
+          nix build 'github:logos-co/logos-evm-token-list-module#install' --no-write-lock-file -o result-tokens
+
+      - title: "All three really produced modules"
+        check_file: "result-tokens/modules"
+
+      - title: "Build capability_module"
+        run: "nix build 'github:logos-co/logos-capability-module#install' --no-write-lock-file -o result-capability"
+        code_block: "nix build 'github:logos-co/logos-capability-module#install' --no-write-lock-file -o result-capability"
+
+      - title: "capability_module really produced modules"
+        check_file: "result-capability/modules"
+
+      - title: "Lay them out for the host"
+        run: |
+          set -euo pipefail
+          mkdir -p tree/modules tree/plugins
+          cp -r result-backend/modules/*    tree/modules/
+          cp -r result-keystore/modules/*   tree/modules/
+          cp -r result-rpc/modules/*        tree/modules/
+          cp -r result-fee/modules/*        tree/modules/
+          cp -r result-tokens/modules/*     tree/modules/
+          cp -r result-capability/modules/* tree/modules/
+          cp -r result-ui/plugins/*         tree/plugins/
+          # Store paths are 0555; a later copy into them fails without this.
+          chmod -R u+w tree
+          ls tree/modules tree/plugins
+        code_block: |
+          mkdir -p tree/modules tree/plugins
+          cp -r result-backend/modules/*  tree/modules/
+          cp -r result-keystore/modules/* tree/modules/
+          cp -r result-rpc/modules/*      tree/modules/
+          cp -r result-fee/modules/*      tree/modules/
+          cp -r result-tokens/modules/*   tree/modules/
+          cp -r result-ui/plugins/*       tree/plugins/
+        expect_contains:
+          - "eth_wallet_backend"
+          - "keystore_module"
+          - "eth_rpc_module"
+          - "eth_wallet_ui"
+
+  - title: "The five sections, over a real backend"
+    step: true
+    text: |
+      Two environment variables matter and neither is optional:
+
+      - `QT_FORCE_STDERR_LOGGING=1` — otherwise Qt routes the app's own
+        diagnostics to journald and a failure prints **nothing at all**, which
+        reads exactly like a passing run.
+      - `QML_INSPECTOR_PORT=3768` — the inspector is compiled in but only listens
+        when this is set, so without it the driver has nothing to attach to.
+
+      Tabs are driven through `selectTab()` rather than clicked: qt-mcp cannot
+      click a `LogosTabButton`, and the view carries that function for this
+      reason. `pages.currentIndex` is then read back, so a `selectTab` that
+      silently did nothing is not mistaken for a section that rendered.
+    steps:
+      - title: "It comes up, and the backend is behind it"
+        ui_test:
+          launch: "env QT_FORCE_STDERR_LOGGING=1 QML_INSPECTOR_PORT=3768 ./result-app/bin/logos-standalone-app -p ./tree/plugins/eth_wallet_ui -m ./tree/modules -u ./userdir"
+          qt_mcp: "result-mcp"
+          launch_timeout: 600
+          tests:
+            - name: "The view rendered"
+              # A tab label, and the one that is unambiguous: "Tokens" is also a
+              # Settings section header, and findByProperty matches text EXACTLY
+              # over the whole tree.
+              action: wait_for
+              texts: ["Receive"]
+              timeout: 60000
+
+            - name: "...and it is the wallet's own view, not the shell's chrome"
+              action: expect_property
+              find_value: "ethWalletRoot"
+              property: "objectName"
+              value: "ethWalletRoot"
+
+            - name: "The network chip answers, which only a wired backend can do"
+              # Not a literal in the QML: it is composed from what eth_rpc_module
+              # reports through eth_wallet_backend. An unwired view has no chip at
+              # all, and a wired one that could not read shows "—".
+              action: expect_property
+              find_value: "chainChip"
+              property: "text"
+              value: "ETHEREUM"
+
+            - name: "Tokens is section 0"
+              action: call_method
+              find_value: "ethWalletRoot"
+              method: "selectTab"
+              args: [0]
+            - name: "...and the pages followed"
+              action: expect_property
+              find_value: "pages"
+              property: "currentIndex"
+              value: 0
+
+            - name: "Send is section 1"
+              action: call_method
+              find_value: "ethWalletRoot"
+              method: "selectTab"
+              args: [1]
+            - name: "...and the send form is the one on screen"
+              action: expect_property
+              find_value: "pages"
+              property: "currentIndex"
+              value: 1
+            - name: "...carrying the submit button"
+              action: expect_property
+              find_value: "sendSubmitButton"
+              property: "visible"
+              value: true
+
+            - name: "Receive is section 2"
+              action: call_method
+              find_value: "ethWalletRoot"
+              method: "selectTab"
+              args: [2]
+            - name: "...and it is showing"
+              action: expect_property
+              find_value: "pages"
+              property: "currentIndex"
+              value: 2
+            - name: "...saying what an empty keystore has to say"
+              # The honest answer for a wallet with no account, and the one that
+              # distinguishes it from an address that could not be ENCODED — the
+              # two states `qr === null` covers.
+              action: expect_property
+              find_value: "receiveUnavailable"
+              property: "text"
+              value: "No account is selected, so there is nothing to receive to."
+            - name: "...and drawing no code, having nothing to encode"
+              action: expect_property
+              find_value: "receiveQrBox"
+              property: "visible"
+              value: false
+
+            - name: "Activity is section 3"
+              action: call_method
+              find_value: "ethWalletRoot"
+              method: "selectTab"
+              args: [3]
+            - name: "...and the history line is the one on screen"
+              action: expect_property
+              find_value: "pages"
+              property: "currentIndex"
+              value: 3
+
+            - name: "Settings is section 4"
+              action: call_method
+              find_value: "ethWalletRoot"
+              method: "selectTab"
+              args: [4]
+            - name: "...and it is showing"
+              action: expect_property
+              find_value: "pages"
+              property: "currentIndex"
+              value: 4
+            - name: "...with nothing open, so no screen was built for it"
+              action: expect_property
+              find_value: "settingsPage"
+              property: "openSection"
+              value: ""
+            - name: "...and its three sections are named"
+              action: wait_for
+              texts: ["Address book", "Networks"]
+              timeout: 10000
+              screenshot: "eth-wallet-ui-settings.png"
+
+            - name: "Opening a section builds it"
+              # A LogosItemDelegate, so this one IS clickable — unlike the tab bar.
+              action: click_object
+              find_value: "tokensSectionHeader"
+            - name: "...and the tab says which is open"
+              action: expect_property
+              find_value: "settingsPage"
+              property: "openSection"
+              value: "tokens"
+            - name: "...and the catalogue screen is really there now"
+              action: expect_property
+              find_value: "manageTokensPage"
+              property: "visible"
+              value: true
+
+            - name: "Closing it again"
+              action: click_object
+              find_value: "tokensSectionHeader"
+            - name: "...leaves nothing open"
+              action: expect_property
+              find_value: "settingsPage"
+              property: "openSection"
+              value: ""
+              screenshot: "eth-wallet-ui-tokens-section.png"
