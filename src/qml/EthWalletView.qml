@@ -154,9 +154,17 @@ Item {
         target: root.ready ? root.backend : null
         // Either outcome ends the wait: the backend took it (a request id appears) or
         // refused it (an error does). Both have to clear, or a refusal leaves the button
-        // dead and the only way out is closing the dialog.
+        // dead with nothing on the section to revive it. Only the first navigates, which
+        // is what lets a refusal be asserted as "still on Send".
         function onPendingRequestIdChanged() {
-            if (root.sendPending) { root.sendSubmitting = false; sendDialog.close() }
+            if (root.sendPending) {
+                root.sendSubmitting = false
+                // The transaction exists now, so leave the form for where it shows up.
+                // Tab first, then clear: an emptied form re-priced while still on screen
+                // is a quote for a send nobody is making.
+                root.selectTab(2)
+                sendPage.clearForm()
+            }
         }
         function onSendErrorChanged() {
             if (root.backend.sendError.length > 0) root.sendSubmitting = false
@@ -423,6 +431,13 @@ Item {
         if (nav.depth > 1) nav.popToIndex(0, StackView.Immediate)
         tabs.currentIndex = i
         pages.currentIndex = i
+    }
+    // The token must be chosen BEFORE the section becomes visible: entering runs
+    // tokenPicker.syncIndex(), which reads it back off sendPage. Reversed, the picker resyncs
+    // to whatever was there and the caller's choice is dropped silently.
+    function openSend(t) {
+        sendPage.selectToken(t)
+        root.selectTab(1)
     }
     // Keyed, never named: two contracts on one chain may both answer "LIT", and the by-symbol
     // form of this could only ever reach the first of them.
@@ -1555,16 +1570,17 @@ Item {
                         // Opens on the first token, which is the native currency. The picker
                         // inside the dialog is what actually decides, so this preselects
                         // rather than dictates.
-                        onClicked: { sendDialog.selectToken(null); sendDialog.open() }
+                        onClicked: root.openSend(null)
                     }
 
-                    // ── two tabs ──
+                    // ── three sections ──
                     LogosTabBar {
                         id: tabs
                         objectName: "tabs"
                         Layout.fillWidth: true
                         onCurrentIndexChanged: pages.currentIndex = currentIndex
                         LogosTabButton { text: "Tokens" }
+                        LogosTabButton { text: "Send" }
                         LogosTabButton { text: "Activity" }
                     }
 
@@ -1800,6 +1816,514 @@ Item {
                             }
                         }
 
+                        // Send. A section like the two beside it: comparing a balance against
+                        // what you are about to send costs a tab, not a cancelled draft.
+                        Item {
+                            id: sendPage
+                            objectName: "sendPage"
+
+                            // WHICH ASSET LEAVES THE ACCOUNT, in the two fields the backend's SendRequest takes.
+                            //
+                            // `token` is the symbol — "ETH" included, because a built-in symbol still resolves to
+                            // the native token. `tokenAddress` is the CONTRACT, and the backend resolves it first:
+                            // a symbol two enabled contracts share is refused outright rather than guessed, so the
+                            // address is what makes a send of either of them deliverable at all. Empty address is
+                            // the native currency. Both are empty only until `openSend` seeds them on the way in.
+                            property string token: ""
+                            property string tokenAddress: ""
+
+                            // The one place either is written. A null token is the native currency.
+                            function selectToken(t) {
+                                sendPage.token = t && t.symbol !== undefined ? String(t.symbol) : ""
+                                sendPage.tokenAddress = t && t.native !== true
+                                                          && typeof t.address === "string" ? t.address : ""
+                            }
+
+                            // Where the chosen token sits in root.tokens, 0 (the native currency) when it is not
+                            // there. By identity: matching the symbol landed on the first contract wearing it.
+                            function tokenIndex() {
+                                var k = sendPage.tokenAddress.length ? sendPage.tokenAddress.toLowerCase()
+                                                                       : "native"
+                                for (var i = 0; i < root.tokens.length; ++i)
+                                    if (root.tokenKey(root.tokens[i]) === k) return i
+                                return 0
+                            }
+
+                            // Everything the last send left behind, except which token is leaving. Run on an
+                            // accepted send and on Cancel — deliberately NOT on entry: what this protects is
+                            // the NEXT send inheriting a stale recipient, and a section, unlike a popup, is
+                            // stepped away from and back into mid-send.
+                            //
+                            // The fee overrides go too, and `advanced` closes over them. An override left armed
+                            // under a collapsed disclosure prices the next send at the last one's gas.
+                            function clearForm() {
+                                toField.text = ""
+                                amountField.text = ""
+                                maxFeeField.text = ""
+                                maxPriorityFeeField.text = ""
+                                gasLimitField.text = ""
+                                nonceField.text = ""
+                                advanced.checked = false
+                                tierGroup.selected = "normal"
+                            }
+                            // Entering and leaving, in place of onOpened/onClosed: StackLayout
+                            // gives exactly one child `visible`, and it falls the same way when
+                            // a detail screen covers the home item — which is also when the
+                            // quote poll should stop. Clears nothing; see clearForm.
+                            onVisibleChanged: {
+                                if (!root.ready) return
+                                if (visible) { tokenPicker.syncIndex(); sendForm.reprice() }
+                                root.backend.setQuoteAutoRefresh(visible)
+                            }
+
+                            LogosScrollView {
+                                id: sendScroll
+                                objectName: "sendScroll"
+                                anchors.fill: parent
+                                // As txDetailScroll: the component hard-binds contentWidth to
+                                // its own width, and this form must never scroll sideways.
+                                contentWidth: availableWidth
+
+                                ColumnLayout {
+                                    id: sendForm
+                                    objectName: "sendForm"
+                                    // An explicit width, not fillWidth: a layout inside a
+                                    // Flickable is otherwise unconstrained and collapses to
+                                    // its own implicit width.
+                                    width: sendScroll.availableWidth
+                                    spacing: Theme.spacing.small
+
+                                    function request() {
+                                        var r = {
+                                            from: root.selected,
+                                            to: toField.text.trim(),
+                                            // TOKEN units — "0.1" ETH, not 10^17 wei. `amount` still means base units
+                                            // on the wire, so the two are separate fields and never reinterpreted.
+                                            amountUnits: amountField.text.trim(),
+                                            tier: tierGroup.selected
+                                        }
+                                        if (sendPage.token.length) r.token = sendPage.token
+                                        // The contract, exactly. `token` is a label two of them may share; this is the
+                                        // field that decides which one moves, and the backend resolves it first.
+                                        if (sendPage.tokenAddress.length) r.tokenAddress = sendPage.tokenAddress
+                                        if (advanced.checked) {
+                                            if (maxFeeField.text.length) r.maxFeePerGas = maxFeeField.text.trim()
+                                            if (maxPriorityFeeField.text.length) r.maxPriorityFeePerGas = maxPriorityFeeField.text.trim()
+                                            if (gasLimitField.text.length) r.gasLimit = gasLimitField.text.trim()
+                                            if (nonceField.text.length) r.nonce = parseInt(nonceField.text.trim())
+                                        }
+                                        return JSON.stringify(r)
+                                    }
+
+                                    // What the form describes RIGHT NOW. A binding, so every edit re-evaluates it —
+                                    // which is what makes a change no control re-priced impossible to miss.
+                                    readonly property string formRequest: request()
+                                    // The figures, only while they priced the request above. Hooking the REQUEST
+                                    // rather than each control is the difference between withdrawing a stale number
+                                    // and hoping the handler that would have withdrawn it ran.
+                                    readonly property var q: root.quoteRequest.length > 0
+                                                             && root.quoteRequest === sendForm.formRequest
+                                                             ? root.quote : ({})
+
+                                    function reprice() { if (root.ready) root.backend.quote(sendForm.formRequest) }
+                                    // Every way the form can change, including the ones no control caused: the token
+                                    // list being re-read under an open dialog, the account moving beneath it.
+                                    onFormRequestChanged: if (sendPage.visible) reprice()
+
+                                    // Which token is leaving the account. Without this the header Send could only
+                                    // ever move the native currency.
+                                    LogosComboBox {
+                                        id: tokenPicker
+                                        objectName: "sendTokenPicker"
+                                        Layout.fillWidth: true
+                                        // A composed string model, not textRole: it matches accountPicker's shape and
+                                        // needs no role plumbing.
+                                        model: root.tokens.map(function (t) { return root.tokenPickerLabel(t) })
+                                        enabled: root.ready && root.tokens.length > 0
+                                        onActivated: sendPage.selectToken(root.tokens[currentIndex])
+
+                                        // Re-asserted, not bound, exactly as accountPicker: ComboBox rewrites
+                                        // currentIndex imperatively and resets it when the model is re-read — and the
+                                        // picker naming a different token from the amount field beside it is two
+                                        // answers to one question.
+                                        function syncIndex() {
+                                            currentIndex = sendPage.tokenIndex()
+                                            if (root.tokens.length) sendPage.selectToken(root.tokens[currentIndex])
+                                        }
+                                        Component.onCompleted: syncIndex()
+                                        onModelChanged: syncIndex()
+                                    }
+
+                                    // Free text stays the single source of truth: the picker writes into the field
+                                    // rather than becoming a second one.
+                                    RowLayout {
+                                        Layout.fillWidth: true
+                                        spacing: Theme.spacing.tiny
+                                        LogosTextField {
+                                            id: toField
+                                            objectName: "toField"
+                                            Layout.fillWidth: true
+                                            placeholderText: "Recipient address (0x…)"
+                                        }
+                                        // `id`, not objectName alone: an objectName does not enter the QML scope
+                                        // chain, so `popupUnder(toAccountsButton)` below was a ReferenceError that
+                                        // aborted the handler before the menu was ever asked to open.
+                                        HoverIcon {
+                                            id: toAccountsButton
+                                            objectName: "toAccountsButton"
+                                            size: 32
+                                            iconSize: 16
+                                            iconSource: root.iconTriangleDown
+                                            // Always offered now. It used to hide itself when there was no SECOND
+                                            // account, which was right while my-accounts was all it held — the
+                                            // address book and the add form are reachable with one account, or none.
+                                            onClicked: toAccountsMenu.popupUnder(toAccountsButton)
+                                        }
+                                    }
+
+                                    // Three places an address can come from, and they are different KINDS of
+                                    // answer rather than one list with sections: who you have paid, who you chose to
+                                    // remember, and who you already are. A row writes into the field above rather
+                                    // than becoming a second source of truth — the free text stays authoritative.
+                                    LogosMenu {
+                                        id: toAccountsMenu
+                                        objectName: "toAccountsMenu"
+                                        implicitWidth: 420
+
+                                        function addressAt(tab, i) {
+                                            if (tab === 0) return root.recentRecipients[i]
+                                            if (tab === 1) return root.contacts[i].address
+                                            return root.accounts[i]
+                                        }
+
+                                        ColumnLayout {
+                                            width: parent.width
+                                            spacing: Theme.spacing.tiny
+
+                                            LogosTabBar {
+                                                id: toTabs
+                                                objectName: "toTabs"
+                                                Layout.fillWidth: true
+                                                LogosTabButton { objectName: "toTabRecent"; text: "Recents" }
+                                                LogosTabButton { objectName: "toTabBook"; text: "Address book" }
+                                                LogosTabButton { objectName: "toTabMine"; text: "My addresses" }
+                                            }
+
+                                            StackLayout {
+                                                Layout.fillWidth: true
+                                                Layout.preferredHeight: 220
+                                                currentIndex: toTabs.currentIndex
+
+                                                // ── who this account has paid ──
+                                                LogosListView {
+                                                    objectName: "toRecentList"
+                                                    clip: true
+                                                    model: root.recentRecipients
+                                                    delegate: PickableAddress {
+                                                        objectName: "toRecent_" + index
+                                                        width: ListView.view.width
+                                                        address: modelData
+                                                        onClicked: { toField.text = modelData; toAccountsMenu.close() }
+                                                    }
+                                                }
+
+                                                // ── who you chose to remember ──
+                                                //
+                                                // Read-only here. Managing the book from inside a send is a mis-tap
+                                                // during a transaction costing a saved address, so this offers rows
+                                                // and the Address book screen owns the rest.
+                                                ColumnLayout {
+                                                    LogosListView {
+                                                        objectName: "toBookList"
+                                                        Layout.fillWidth: true
+                                                        Layout.fillHeight: true
+                                                        clip: true
+                                                        model: root.contacts
+                                                        delegate: PickableAddress {
+                                                            objectName: "toContact_" + index
+                                                            width: ListView.view.width
+                                                            address: modelData.address
+                                                            onClicked: {
+                                                                toField.text = modelData.address
+                                                                toAccountsMenu.close()
+                                                            }
+                                                        }
+                                                    }
+                                                    LogosText {
+                                                        objectName: "toBookEmpty"
+                                                        Layout.fillWidth: true
+                                                        visible: root.contacts.length === 0
+                                                        textFormat: Text.PlainText
+                                                        wrapMode: Text.WordWrap
+                                                        color: Theme.palette.textSecondary
+                                                        text: "No saved addresses yet. Add them from the Address book."
+                                                    }
+                                                }
+
+                                                // ── who you already are ──
+                                                LogosListView {
+                                                    objectName: "toMineList"
+                                                    clip: true
+                                                    model: root.accounts
+                                                    delegate: PickableAddress {
+                                                        objectName: "toAccount_" + index
+                                                        width: ListView.view.width
+                                                        address: modelData
+                                                        onClicked: { toField.text = modelData; toAccountsMenu.close() }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    // Warned, not refused: the backend builds a self-send happily, and a rule the UI
+                                    // enforces alone is a second copy of a rule free to drift from it.
+                                    LogosText {
+                                        objectName: "selfSendWarning"
+                                        visible: root.sameHex(toField.text.trim(), root.selected)
+                                        Layout.fillWidth: true
+                                        textFormat: Text.PlainText
+                                        wrapMode: Text.WordWrap
+                                        color: Theme.palette.warning
+                                        text: "This sends to the account you are sending from. It costs gas and moves nothing."
+                                    }
+
+                                    LogosTextField {
+                                        id: amountField
+                                        objectName: "amountField"
+                                        Layout.fillWidth: true
+                                        // Token units, so "0.1" means a tenth of an ETH. The backend parses it against
+                                        // the resolved token's decimals with exact integer arithmetic.
+                                        // Never "Amount in ETH" on a network we could not read: the native currency
+                                        // is not ETH everywhere, and a unit is a claim like any other.
+                                        placeholderText: sendPage.token.length ? "Amount in " + sendPage.token
+                                                       : root.nativeSymbol.length ? "Amount in " + root.nativeSymbol
+                                                                                  : "Amount"
+                                    }
+
+                                    // Fee tiers. Labelled Low / Market / Advanced after the reference; the wire names
+                                    // stay slow/normal/fast, which is what fee_module speaks.
+                                    // The variant binding is what makes the default visible: Market is already the
+                                    // selected tier, but three identical Secondary buttons said so nowhere.
+                                    RowLayout {
+                                        id: tierGroup
+                                        property string selected: "normal"
+                                        spacing: Theme.spacing.tiny
+                                        LogosButton {
+                                            objectName: "tierSlow"; text: "Low"
+                                            variant: tierGroup.selected === "slow" ? LogosButton.Variant.Primary
+                                                                                   : LogosButton.Variant.Secondary
+                                            onClicked: tierGroup.selected = "slow"
+                                        }
+                                        LogosButton {
+                                            objectName: "tierNormal"; text: "Market"
+                                            variant: tierGroup.selected === "normal" ? LogosButton.Variant.Primary
+                                                                                     : LogosButton.Variant.Secondary
+                                            onClicked: tierGroup.selected = "normal"
+                                        }
+                                        LogosButton {
+                                            objectName: "tierFast"; text: "Fast"
+                                            variant: tierGroup.selected === "fast" ? LogosButton.Variant.Primary
+                                                                                   : LogosButton.Variant.Secondary
+                                            onClicked: tierGroup.selected = "fast"
+                                        }
+                                    }
+
+                                    // Where the numbers came from. A wallet quietly pricing off legacy gasPrice is how
+                                    // an overpayment goes unnoticed, so the source is on screen rather than in a log.
+                                    // The read is asynchronous now, so this line has a "reading" state of its own.
+                                    LogosSpinner {
+                                        objectName: "feeSourceSpinner"
+                                        implicitWidth: 14
+                                        implicitHeight: 14
+                                        visible: root.feesPending
+                                        running: visible
+                                        ringColor: Theme.palette.textSecondary
+                                    }
+                                    LogosText {
+                                        objectName: "feeSourceLabel"
+                                        visible: !root.feesPending
+                                        textFormat: Text.PlainText
+                                        color: Theme.palette.textSecondary
+                                        // Gated on the FIGURES like everything else here: `root.fees` is read under no
+                                        // request, so it named a basis for a quote the form had already withdrawn.
+                                        text: sendForm.q.ok !== true ? ""
+                                            : sendForm.q.feeSource !== undefined ? "Fee basis: " + sendForm.q.feeSource
+                                            : root.fees.source !== undefined ? "Fee basis: " + root.fees.source : ""
+                                    }
+
+                                    // The chip in the header speaks for the balances only. These figures come from
+                                    // fee_module and the proxy's own execution provider, and `feeRoute` says so.
+                                    LogosText {
+                                        objectName: "feeRouteNote"
+                                        visible: root.verificationOn
+                                        Layout.fillWidth: true
+                                        wrapMode: Text.WordWrap
+                                        color: Theme.palette.textSecondary
+                                        font.pixelSize: Theme.typography.secondaryText
+                                        text: "Fee figures are " + root.routeNote(sendForm.q.feeRoute)
+                                    }
+
+                                    LogosText {
+                                        objectName: "quoteSummary"
+                                        textFormat: Text.PlainText
+                                        wrapMode: Text.WordWrap
+                                        Layout.fillWidth: true
+                                        text: sendForm.q.ok === true
+                                              ? "Gas limit " + sendForm.q.gasLimit
+                                                + " · max fee " + sendForm.q.maxFeePerGas
+                                                + " · nonce " + sendForm.q.nonce
+                                              : ""
+                                    }
+
+                                    // WHICH CONTRACT THE FIGURES PRICED, taken from prepare_send's own reply rather
+                                    // than from the form that asked. A symbol two offered tokens share names no asset,
+                                    // and this is the last screen before a signature — so where the symbol settles
+                                    // nothing, the contract is stated here. In the error colour if the backend priced
+                                    // a contract the picker did not choose, which is a send about to move the wrong one.
+                                    LogosText {
+                                        objectName: "quoteTokenNote"
+                                        textFormat: Text.PlainText
+                                        Layout.fillWidth: true
+                                        wrapMode: Text.WordWrap
+                                        readonly property string priced: sendForm.q.ok === true
+                                                                         && typeof sendForm.q.tokenAddress === "string"
+                                                                         ? sendForm.q.tokenAddress : ""
+                                        readonly property bool mismatch: priced.length > 0
+                                                                         && !root.sameHex(priced, sendPage.tokenAddress)
+                                        visible: priced.length > 0
+                                                 && (mismatch || root.tokenDupSymbols[sendPage.token] === true)
+                                        color: mismatch ? Theme.palette.error : Theme.palette.textSecondary
+                                        text: {
+                                            if (priced.length === 0) return ""
+                                            var t = root.tokenByKey(priced.toLowerCase())
+                                            var named = (t && t.name ? t.name + " " : "") + root.shortAddr(priced)
+                                            return mismatch ? "These figures priced a DIFFERENT contract: " + named
+                                                            : "Priced for " + named
+                                        }
+                                    }
+
+                                    // "at most", never "the fee": maxFeePerGas is a ceiling the user is not charged.
+                                    // A wallet presenting a ceiling as a price is how an overpayment goes unnoticed.
+                                    LogosText {
+                                        objectName: "feeEstimate"
+                                        textFormat: Text.PlainText
+                                        Layout.fillWidth: true
+                                        wrapMode: Text.WordWrap
+                                        text: sendForm.q.feeCeilingWeiDisplay !== undefined
+                                              ? "Network fee at most " + sendForm.q.feeCeilingWeiDisplay + " "
+                                                + (sendForm.q.nativeSymbol || "") + " (" + tierGroup.selected + ")"
+                                              : ""
+                                    }
+
+                                    // The figures are withdrawn the moment the request changes, so this is the only
+                                    // thing standing where they were. Text, not a spinner: this column already speaks
+                                    // in sentences and a fourth idiom would not read as one screen.
+                                    LogosText {
+                                        objectName: "quotePricingNote"
+                                        visible: root.quoteLoading && sendForm.q.ok !== true
+                                        Layout.fillWidth: true
+                                        color: Theme.palette.textSecondary
+                                        text: "Pricing…"
+                                    }
+
+                                    LogosText {
+                                        objectName: "quoteStaleNote"
+                                        visible: root.quoteStale && sendForm.q.ok === true
+                                        Layout.fillWidth: true
+                                        wrapMode: Text.WordWrap
+                                        color: Theme.palette.warning
+                                        text: "The fee estimate could not be refreshed. The send is re-priced when "
+                                              + "you submit it."
+                                    }
+
+                                    LogosCheckbox {
+                                        id: advanced
+                                        objectName: "advancedToggle"
+                                        text: "Advanced"
+                                    }
+
+                                    // Prefilled from the quote, so every field shows where its value came from rather
+                                    // than sitting empty. These stay in WEI PER GAS: they are prices, not amounts,
+                                    // and a gas price in token units would be nonsense.
+                                    ColumnLayout {
+                                        visible: advanced.checked
+                                        Layout.fillWidth: true
+                                        LogosTextField {
+                                            id: maxFeeField; objectName: "maxFeeField"; Layout.fillWidth: true
+                                            placeholderText: sendForm.q.maxFeePerGas !== undefined
+                                                             ? "Max fee (wei per gas, suggested " + sendForm.q.maxFeePerGas + ")"
+                                                             : "Max fee (wei per gas)"
+                                        }
+                                        LogosTextField {
+                                            id: maxPriorityFeeField; objectName: "maxPriorityFeeField"; Layout.fillWidth: true
+                                            placeholderText: sendForm.q.maxPriorityFeePerGas !== undefined
+                                                             ? "Priority fee (wei per gas, suggested " + sendForm.q.maxPriorityFeePerGas + ")"
+                                                             : "Priority fee (wei per gas)"
+                                        }
+                                        LogosTextField {
+                                            id: gasLimitField; objectName: "gasLimitField"; Layout.fillWidth: true
+                                            placeholderText: sendForm.q.gasLimit !== undefined
+                                                             ? "Gas limit (estimated " + sendForm.q.gasLimit + ")"
+                                                             : "Gas limit"
+                                        }
+                                        LogosTextField {
+                                            id: nonceField; objectName: "nonceField"; Layout.fillWidth: true
+                                            placeholderText: sendForm.q.nonce !== undefined
+                                                             ? "Nonce (next is " + sendForm.q.nonce + ")"
+                                                             : "Nonce"
+                                        }
+                                    }
+
+                                    // Beside the control that caused it, rather than on the wallet's own error
+                                    // line: that line sits above the tab bar, so a send refused after a scroll
+                                    // down to Advanced would report itself off-screen.
+                                    LogosText {
+                                        objectName: "sendErrorLabel"
+                                        visible: root.ready && root.backend.sendError.length > 0
+                                        Layout.fillWidth: true
+                                        // Backend-authored.
+                                        textFormat: Text.PlainText
+                                        wrapMode: Text.WordWrap
+                                        color: Theme.palette.error
+                                        text: root.ready ? root.backend.sendError : ""
+                                    }
+
+                                    RowLayout {
+                                        Layout.fillWidth: true
+                                        LogosButton {
+                                            objectName: "sendCancelButton"
+                                            text: "Cancel"
+                                            onClicked: { sendPage.clearForm(); root.selectTab(0) }
+                                        }
+                                        Item { Layout.fillWidth: true }
+                                        // Names the network, so the last click before a signature says where it lands.
+                                        // No close() here: the dialog closes on pendingRequestId, so a refusal stays
+                                        // on screen with its reason instead of vanishing behind the wallet.
+                                        LogosSpinner {
+                                            objectName: "sendSubmitSpinner"
+                                            Layout.alignment: Qt.AlignVCenter
+                                            implicitWidth: 18
+                                            implicitHeight: 18
+                                            visible: root.sendSubmitting
+                                            running: visible
+                                            ringColor: Theme.palette.textSecondary
+                                        }
+                                        LogosButton {
+                                            objectName: "sendSubmitButton"
+                                            text: root.netKnown ? "Send on " + root.networkLabel() : "Send"
+                                            enabled: root.ready && !root.sendPending && !root.sendSubmitting
+                                                     && sendForm.q.ok === true
+                                            onClicked: {
+                                                root.sendSubmitting = true
+                                                root.backend.submitSend(sendForm.formRequest)
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
                         // Activity
                         Item {
                             ColumnLayout {
@@ -1975,8 +2499,7 @@ Item {
                     text: "Send " + tokenPage.symbol
                     enabled: root.ready && !root.sendPending
                     onClicked: {
-                        sendDialog.selectToken(tokenPage.tok)
-                        sendDialog.open()
+                        root.openSend(tokenPage.tok)
                     }
                 }
 
@@ -3352,507 +3875,6 @@ Item {
         }
     }
 
-    // ── Send ──────────────────────────────────────────────────────────────────────
-    LogosDialog {
-        id: sendDialog
-        objectName: "sendDialog"
-        title: "Send"
-        anchors.centerIn: parent
-        width: Math.min(parent.width - 40, 520)
-
-        // WHICH ASSET LEAVES THE ACCOUNT, in the two fields the backend's SendRequest takes.
-        //
-        // `token` is the symbol — "ETH" included, because a built-in symbol still resolves to
-        // the native token. `tokenAddress` is the CONTRACT, and the backend resolves it first:
-        // a symbol two enabled contracts share is refused outright rather than guessed, so the
-        // address is what makes a send of either of them deliverable at all. Empty address is
-        // the native currency. Both are empty only until onOpened seeds them from the picker.
-        property string token: ""
-        property string tokenAddress: ""
-
-        // The one place either is written. A null token is the native currency.
-        function selectToken(t) {
-            sendDialog.token = t && t.symbol !== undefined ? String(t.symbol) : ""
-            sendDialog.tokenAddress = t && t.native !== true
-                                      && typeof t.address === "string" ? t.address : ""
-        }
-
-        // Where the chosen token sits in root.tokens, 0 (the native currency) when it is not
-        // there. By identity: matching the symbol landed on the first contract wearing it.
-        function tokenIndex() {
-            var k = sendDialog.tokenAddress.length ? sendDialog.tokenAddress.toLowerCase()
-                                                   : "native"
-            for (var i = 0; i < root.tokens.length; ++i)
-                if (root.tokenKey(root.tokens[i]) === k) return i
-            return 0
-        }
-
-        // Everything the last send left behind, except which token is leaving. A dialog is
-        // not a draft: it reopens on a recipient and an amount the user typed for a DIFFERENT
-        // transaction, and the one that matters most — the address — is the one hardest to
-        // notice is stale. The token survives because the caller chose it on the way in.
-        //
-        // The fee overrides go too, and `advanced` closes over them. An override left armed
-        // under a collapsed disclosure prices the next send at the last one's gas.
-        function clearForm() {
-            toField.text = ""
-            amountField.text = ""
-            maxFeeField.text = ""
-            maxPriorityFeeField.text = ""
-            gasLimitField.text = ""
-            nonceField.text = ""
-            advanced.checked = false
-            tierGroup.selected = "normal"
-        }
-
-        // The verdict can have moved since the last quote, so re-price on open: the numbers
-        // shown must come from the mode the send would actually run under. The timer started
-        // here is ask #4's periodic re-price, and it also clears any stale send error.
-        //
-        // Cleared BEFORE the re-price, so the quote prices the empty form rather than the
-        // previous one and is then withdrawn a frame later.
-        onOpened: {
-            sendDialog.clearForm()
-            tokenPicker.syncIndex()
-            sendForm.reprice()
-            if (root.ready) root.backend.setQuoteAutoRefresh(true)
-        }
-        // onClosed, NOT Component.onDestruction: a Dialog is a Popup and is not destroyed
-        // when it closes, so a destruction handler would never fire and the timer would run on.
-        onClosed: if (root.ready) root.backend.setQuoteAutoRefresh(false)
-
-        contentItem: ColumnLayout {
-            id: sendForm
-            spacing: Theme.spacing.small
-
-            function request() {
-                var r = {
-                    from: root.selected,
-                    to: toField.text.trim(),
-                    // TOKEN units — "0.1" ETH, not 10^17 wei. `amount` still means base units
-                    // on the wire, so the two are separate fields and never reinterpreted.
-                    amountUnits: amountField.text.trim(),
-                    tier: tierGroup.selected
-                }
-                if (sendDialog.token.length) r.token = sendDialog.token
-                // The contract, exactly. `token` is a label two of them may share; this is the
-                // field that decides which one moves, and the backend resolves it first.
-                if (sendDialog.tokenAddress.length) r.tokenAddress = sendDialog.tokenAddress
-                if (advanced.checked) {
-                    if (maxFeeField.text.length) r.maxFeePerGas = maxFeeField.text.trim()
-                    if (maxPriorityFeeField.text.length) r.maxPriorityFeePerGas = maxPriorityFeeField.text.trim()
-                    if (gasLimitField.text.length) r.gasLimit = gasLimitField.text.trim()
-                    if (nonceField.text.length) r.nonce = parseInt(nonceField.text.trim())
-                }
-                return JSON.stringify(r)
-            }
-
-            // What the form describes RIGHT NOW. A binding, so every edit re-evaluates it —
-            // which is what makes a change no control re-priced impossible to miss.
-            readonly property string formRequest: request()
-            // The figures, only while they priced the request above. Hooking the REQUEST
-            // rather than each control is the difference between withdrawing a stale number
-            // and hoping the handler that would have withdrawn it ran.
-            readonly property var q: root.quoteRequest.length > 0
-                                     && root.quoteRequest === sendForm.formRequest
-                                     ? root.quote : ({})
-
-            function reprice() { if (root.ready) root.backend.quote(sendForm.formRequest) }
-            // Every way the form can change, including the ones no control caused: the token
-            // list being re-read under an open dialog, the account moving beneath it.
-            onFormRequestChanged: if (sendDialog.visible) reprice()
-
-            // Which token is leaving the account. Without this the header Send could only
-            // ever move the native currency.
-            LogosComboBox {
-                id: tokenPicker
-                objectName: "sendTokenPicker"
-                Layout.fillWidth: true
-                // A composed string model, not textRole: it matches accountPicker's shape and
-                // needs no role plumbing.
-                model: root.tokens.map(function (t) { return root.tokenPickerLabel(t) })
-                enabled: root.ready && root.tokens.length > 0
-                onActivated: sendDialog.selectToken(root.tokens[currentIndex])
-
-                // Re-asserted, not bound, exactly as accountPicker: ComboBox rewrites
-                // currentIndex imperatively and resets it when the model is re-read — and the
-                // picker naming a different token from the amount field beside it is two
-                // answers to one question.
-                function syncIndex() {
-                    currentIndex = sendDialog.tokenIndex()
-                    if (root.tokens.length) sendDialog.selectToken(root.tokens[currentIndex])
-                }
-                Component.onCompleted: syncIndex()
-                onModelChanged: syncIndex()
-            }
-
-            // Free text stays the single source of truth: the picker writes into the field
-            // rather than becoming a second one.
-            RowLayout {
-                Layout.fillWidth: true
-                spacing: Theme.spacing.tiny
-                LogosTextField {
-                    id: toField
-                    objectName: "toField"
-                    Layout.fillWidth: true
-                    placeholderText: "Recipient address (0x…)"
-                }
-                // `id`, not objectName alone: an objectName does not enter the QML scope
-                // chain, so `popupUnder(toAccountsButton)` below was a ReferenceError that
-                // aborted the handler before the menu was ever asked to open.
-                HoverIcon {
-                    id: toAccountsButton
-                    objectName: "toAccountsButton"
-                    size: 32
-                    iconSize: 16
-                    iconSource: root.iconTriangleDown
-                    // Always offered now. It used to hide itself when there was no SECOND
-                    // account, which was right while my-accounts was all it held — the
-                    // address book and the add form are reachable with one account, or none.
-                    onClicked: toAccountsMenu.popupUnder(toAccountsButton)
-                }
-            }
-
-            // Three places an address can come from, and they are different KINDS of
-            // answer rather than one list with sections: who you have paid, who you chose to
-            // remember, and who you already are. A row writes into the field above rather
-            // than becoming a second source of truth — the free text stays authoritative.
-            LogosMenu {
-                id: toAccountsMenu
-                objectName: "toAccountsMenu"
-                implicitWidth: 420
-
-                function addressAt(tab, i) {
-                    if (tab === 0) return root.recentRecipients[i]
-                    if (tab === 1) return root.contacts[i].address
-                    return root.accounts[i]
-                }
-
-                ColumnLayout {
-                    width: parent.width
-                    spacing: Theme.spacing.tiny
-
-                    LogosTabBar {
-                        id: toTabs
-                        objectName: "toTabs"
-                        Layout.fillWidth: true
-                        LogosTabButton { objectName: "toTabRecent"; text: "Recents" }
-                        LogosTabButton { objectName: "toTabBook"; text: "Address book" }
-                        LogosTabButton { objectName: "toTabMine"; text: "My addresses" }
-                    }
-
-                    StackLayout {
-                        Layout.fillWidth: true
-                        Layout.preferredHeight: 220
-                        currentIndex: toTabs.currentIndex
-
-                        // ── who this account has paid ──
-                        LogosListView {
-                            objectName: "toRecentList"
-                            clip: true
-                            model: root.recentRecipients
-                            delegate: PickableAddress {
-                                objectName: "toRecent_" + index
-                                width: ListView.view.width
-                                address: modelData
-                                onClicked: { toField.text = modelData; toAccountsMenu.close() }
-                            }
-                        }
-
-                        // ── who you chose to remember ──
-                        //
-                        // Read-only here. Managing the book from inside a send is a mis-tap
-                        // during a transaction costing a saved address, so this offers rows
-                        // and the Address book screen owns the rest.
-                        ColumnLayout {
-                            LogosListView {
-                                objectName: "toBookList"
-                                Layout.fillWidth: true
-                                Layout.fillHeight: true
-                                clip: true
-                                model: root.contacts
-                                delegate: PickableAddress {
-                                    objectName: "toContact_" + index
-                                    width: ListView.view.width
-                                    address: modelData.address
-                                    onClicked: {
-                                        toField.text = modelData.address
-                                        toAccountsMenu.close()
-                                    }
-                                }
-                            }
-                            LogosText {
-                                objectName: "toBookEmpty"
-                                Layout.fillWidth: true
-                                visible: root.contacts.length === 0
-                                textFormat: Text.PlainText
-                                wrapMode: Text.WordWrap
-                                color: Theme.palette.textSecondary
-                                text: "No saved addresses yet. Add them from the Address book."
-                            }
-                        }
-
-                        // ── who you already are ──
-                        LogosListView {
-                            objectName: "toMineList"
-                            clip: true
-                            model: root.accounts
-                            delegate: PickableAddress {
-                                objectName: "toAccount_" + index
-                                width: ListView.view.width
-                                address: modelData
-                                onClicked: { toField.text = modelData; toAccountsMenu.close() }
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Warned, not refused: the backend builds a self-send happily, and a rule the UI
-            // enforces alone is a second copy of a rule free to drift from it.
-            LogosText {
-                objectName: "selfSendWarning"
-                visible: root.sameHex(toField.text.trim(), root.selected)
-                Layout.fillWidth: true
-                textFormat: Text.PlainText
-                wrapMode: Text.WordWrap
-                color: Theme.palette.warning
-                text: "This sends to the account you are sending from. It costs gas and moves nothing."
-            }
-
-            LogosTextField {
-                id: amountField
-                objectName: "amountField"
-                Layout.fillWidth: true
-                // Token units, so "0.1" means a tenth of an ETH. The backend parses it against
-                // the resolved token's decimals with exact integer arithmetic.
-                // Never "Amount in ETH" on a network we could not read: the native currency
-                // is not ETH everywhere, and a unit is a claim like any other.
-                placeholderText: sendDialog.token.length ? "Amount in " + sendDialog.token
-                               : root.nativeSymbol.length ? "Amount in " + root.nativeSymbol
-                                                          : "Amount"
-            }
-
-            // Fee tiers. Labelled Low / Market / Advanced after the reference; the wire names
-            // stay slow/normal/fast, which is what fee_module speaks.
-            // The variant binding is what makes the default visible: Market is already the
-            // selected tier, but three identical Secondary buttons said so nowhere.
-            RowLayout {
-                id: tierGroup
-                property string selected: "normal"
-                spacing: Theme.spacing.tiny
-                LogosButton {
-                    objectName: "tierSlow"; text: "Low"
-                    variant: tierGroup.selected === "slow" ? LogosButton.Variant.Primary
-                                                           : LogosButton.Variant.Secondary
-                    onClicked: tierGroup.selected = "slow"
-                }
-                LogosButton {
-                    objectName: "tierNormal"; text: "Market"
-                    variant: tierGroup.selected === "normal" ? LogosButton.Variant.Primary
-                                                             : LogosButton.Variant.Secondary
-                    onClicked: tierGroup.selected = "normal"
-                }
-                LogosButton {
-                    objectName: "tierFast"; text: "Fast"
-                    variant: tierGroup.selected === "fast" ? LogosButton.Variant.Primary
-                                                           : LogosButton.Variant.Secondary
-                    onClicked: tierGroup.selected = "fast"
-                }
-            }
-
-            // Where the numbers came from. A wallet quietly pricing off legacy gasPrice is how
-            // an overpayment goes unnoticed, so the source is on screen rather than in a log.
-            // The read is asynchronous now, so this line has a "reading" state of its own.
-            LogosSpinner {
-                objectName: "feeSourceSpinner"
-                implicitWidth: 14
-                implicitHeight: 14
-                visible: root.feesPending
-                running: visible
-                ringColor: Theme.palette.textSecondary
-            }
-            LogosText {
-                objectName: "feeSourceLabel"
-                visible: !root.feesPending
-                textFormat: Text.PlainText
-                color: Theme.palette.textSecondary
-                // Gated on the FIGURES like everything else here: `root.fees` is read under no
-                // request, so it named a basis for a quote the form had already withdrawn.
-                text: sendForm.q.ok !== true ? ""
-                    : sendForm.q.feeSource !== undefined ? "Fee basis: " + sendForm.q.feeSource
-                    : root.fees.source !== undefined ? "Fee basis: " + root.fees.source : ""
-            }
-
-            // The chip in the header speaks for the balances only. These figures come from
-            // fee_module and the proxy's own execution provider, and `feeRoute` says so.
-            LogosText {
-                objectName: "feeRouteNote"
-                visible: root.verificationOn
-                Layout.fillWidth: true
-                wrapMode: Text.WordWrap
-                color: Theme.palette.textSecondary
-                font.pixelSize: Theme.typography.secondaryText
-                text: "Fee figures are " + root.routeNote(sendForm.q.feeRoute)
-            }
-
-            LogosText {
-                objectName: "quoteSummary"
-                textFormat: Text.PlainText
-                wrapMode: Text.WordWrap
-                Layout.fillWidth: true
-                text: sendForm.q.ok === true
-                      ? "Gas limit " + sendForm.q.gasLimit
-                        + " · max fee " + sendForm.q.maxFeePerGas
-                        + " · nonce " + sendForm.q.nonce
-                      : ""
-            }
-
-            // WHICH CONTRACT THE FIGURES PRICED, taken from prepare_send's own reply rather
-            // than from the form that asked. A symbol two offered tokens share names no asset,
-            // and this is the last screen before a signature — so where the symbol settles
-            // nothing, the contract is stated here. In the error colour if the backend priced
-            // a contract the picker did not choose, which is a send about to move the wrong one.
-            LogosText {
-                objectName: "quoteTokenNote"
-                textFormat: Text.PlainText
-                Layout.fillWidth: true
-                wrapMode: Text.WordWrap
-                readonly property string priced: sendForm.q.ok === true
-                                                 && typeof sendForm.q.tokenAddress === "string"
-                                                 ? sendForm.q.tokenAddress : ""
-                readonly property bool mismatch: priced.length > 0
-                                                 && !root.sameHex(priced, sendDialog.tokenAddress)
-                visible: priced.length > 0
-                         && (mismatch || root.tokenDupSymbols[sendDialog.token] === true)
-                color: mismatch ? Theme.palette.error : Theme.palette.textSecondary
-                text: {
-                    if (priced.length === 0) return ""
-                    var t = root.tokenByKey(priced.toLowerCase())
-                    var named = (t && t.name ? t.name + " " : "") + root.shortAddr(priced)
-                    return mismatch ? "These figures priced a DIFFERENT contract: " + named
-                                    : "Priced for " + named
-                }
-            }
-
-            // "at most", never "the fee": maxFeePerGas is a ceiling the user is not charged.
-            // A wallet presenting a ceiling as a price is how an overpayment goes unnoticed.
-            LogosText {
-                objectName: "feeEstimate"
-                textFormat: Text.PlainText
-                Layout.fillWidth: true
-                wrapMode: Text.WordWrap
-                text: sendForm.q.feeCeilingWeiDisplay !== undefined
-                      ? "Network fee at most " + sendForm.q.feeCeilingWeiDisplay + " "
-                        + (sendForm.q.nativeSymbol || "") + " (" + tierGroup.selected + ")"
-                      : ""
-            }
-
-            // The figures are withdrawn the moment the request changes, so this is the only
-            // thing standing where they were. Text, not a spinner: this column already speaks
-            // in sentences and a fourth idiom would not read as one screen.
-            LogosText {
-                objectName: "quotePricingNote"
-                visible: root.quoteLoading && sendForm.q.ok !== true
-                Layout.fillWidth: true
-                color: Theme.palette.textSecondary
-                text: "Pricing…"
-            }
-
-            LogosText {
-                objectName: "quoteStaleNote"
-                visible: root.quoteStale && sendForm.q.ok === true
-                Layout.fillWidth: true
-                wrapMode: Text.WordWrap
-                color: Theme.palette.warning
-                text: "The fee estimate could not be refreshed. The send is re-priced when "
-                      + "you submit it."
-            }
-
-            LogosCheckbox {
-                id: advanced
-                objectName: "advancedToggle"
-                text: "Advanced"
-            }
-
-            // Prefilled from the quote, so every field shows where its value came from rather
-            // than sitting empty. These stay in WEI PER GAS: they are prices, not amounts,
-            // and a gas price in token units would be nonsense.
-            ColumnLayout {
-                visible: advanced.checked
-                Layout.fillWidth: true
-                LogosTextField {
-                    id: maxFeeField; objectName: "maxFeeField"; Layout.fillWidth: true
-                    placeholderText: sendForm.q.maxFeePerGas !== undefined
-                                     ? "Max fee (wei per gas, suggested " + sendForm.q.maxFeePerGas + ")"
-                                     : "Max fee (wei per gas)"
-                }
-                LogosTextField {
-                    id: maxPriorityFeeField; objectName: "maxPriorityFeeField"; Layout.fillWidth: true
-                    placeholderText: sendForm.q.maxPriorityFeePerGas !== undefined
-                                     ? "Priority fee (wei per gas, suggested " + sendForm.q.maxPriorityFeePerGas + ")"
-                                     : "Priority fee (wei per gas)"
-                }
-                LogosTextField {
-                    id: gasLimitField; objectName: "gasLimitField"; Layout.fillWidth: true
-                    placeholderText: sendForm.q.gasLimit !== undefined
-                                     ? "Gas limit (estimated " + sendForm.q.gasLimit + ")"
-                                     : "Gas limit"
-                }
-                LogosTextField {
-                    id: nonceField; objectName: "nonceField"; Layout.fillWidth: true
-                    placeholderText: sendForm.q.nonce !== undefined
-                                     ? "Nonce (next is " + sendForm.q.nonce + ")"
-                                     : "Nonce"
-                }
-            }
-
-            // Beside the control that caused it. This dialog is modal, so an error written to
-            // the wallet's own error line renders behind the scrim, where nobody is looking.
-            LogosText {
-                objectName: "sendErrorLabel"
-                visible: root.ready && root.backend.sendError.length > 0
-                Layout.fillWidth: true
-                // Backend-authored.
-                textFormat: Text.PlainText
-                wrapMode: Text.WordWrap
-                color: Theme.palette.error
-                text: root.ready ? root.backend.sendError : ""
-            }
-
-            RowLayout {
-                Layout.fillWidth: true
-                LogosButton {
-                    objectName: "sendCancelButton"
-                    text: "Cancel"
-                    onClicked: sendDialog.close()
-                }
-                Item { Layout.fillWidth: true }
-                // Names the network, so the last click before a signature says where it lands.
-                // No close() here: the dialog closes on pendingRequestId, so a refusal stays
-                // on screen with its reason instead of vanishing behind the wallet.
-                LogosSpinner {
-                    objectName: "sendSubmitSpinner"
-                    Layout.alignment: Qt.AlignVCenter
-                    implicitWidth: 18
-                    implicitHeight: 18
-                    visible: root.sendSubmitting
-                    running: visible
-                    ringColor: Theme.palette.textSecondary
-                }
-                LogosButton {
-                    objectName: "sendSubmitButton"
-                    text: root.netKnown ? "Send on " + root.networkLabel() : "Send"
-                    enabled: root.ready && !root.sendPending && !root.sendSubmitting
-                             && sendForm.q.ok === true
-                    onClicked: {
-                        root.sendSubmitting = true
-                        root.backend.submitSend(sendForm.formRequest)
-                    }
-                }
-            }
-        }
-    }
 
     // ── pending approval ──────────────────────────────────────────────────────────
     LogosDialog {

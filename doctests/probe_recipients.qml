@@ -54,9 +54,11 @@ Item {
     // A LogosDialog is a Popup: its contentItem is not parented into the tree `find` walks,
     // and its `visible` reads false here whatever its binding says. Reach in through the
     // dialog, and assert on state and text rather than on visibility.
-    function inDialog(dialogName, name) {
-        var d = find(view.item, dialogName)
-        var hit = (d && d.contentItem) ? find(d.contentItem, name) : null
+    // Send is a SECTION now, so its controls are in the ordinary item tree under sendPage —
+    // no contentItem hop, which is the one a Popup needs and an Item does not have.
+    function inSend(name) {
+        var d = find(view.item, "sendPage")
+        var hit = d ? find(d, name) : null
         return hit || ({ text: "<missing>", enabled: "<missing>" })
     }
 
@@ -176,30 +178,40 @@ Item {
 
     // ── what the form remembers ──────────────────────────────────────────────
 
-    function assertTheFormIsEmptyEveryTime() {
+    function assertTheFormKeepsADraftButNotALastSend() {
         console.log("")
-        console.log("a Send dialog is not a draft. It reopens on the recipient and the amount")
-        console.log("typed for a DIFFERENT transaction, and the address is both the field that")
-        console.log("matters most and the one hardest to notice is stale")
-        var dlg = find(view.item, "sendDialog")
-        inDialog("sendDialog", "toField").text = probe.friend
-        inDialog("sendDialog", "amountField").text = "0.25"
-        inDialog("sendDialog", "gasLimitField").text = "21000"
-        inDialog("sendDialog", "advancedToggle").checked = true
+        console.log("a section is STEPPED AWAY FROM — to read a balance on Tokens, to check an")
+        console.log("address in the book — and stepped back into mid-send. The popup cleared on")
+        console.log("every open; doing that here would eat a half-typed transfer for a glance")
+        probe.openSend()
+        inSend("toField").text = probe.friend
+        inSend("amountField").text = "0.25"
+        view.item.selectTab(0)
+        view.item.selectTab(1)
+        check("the recipient survived the round trip", inSend("toField").text, probe.friend)
+        check("...and so did the amount", inSend("amountField").text, "0.25")
 
-        // Driven directly: `onOpened` cannot fire in a harness with no overlay, so what is
-        // measured here is that clearing EMPTIES the form. That it runs on open, and before
-        // the re-price, is a source assertion.
-        dlg.clearForm()
-        check("the recipient is gone", inDialog("sendDialog", "toField").text, "")
-        check("...and so is the amount", inDialog("sendDialog", "amountField").text, "")
+        console.log("")
+        console.log("...but a form is still not a draft to inherit. What the popup was really")
+        console.log("protecting against is the NEXT send starting on the recipient and amount")
+        console.log("typed for a different one, and the address is both the field that matters")
+        console.log("most and the one hardest to notice is stale. Cancel is where that happens")
+        console.log("now — and, in the view, the moment a send is accepted.")
+        inSend("gasLimitField").text = "21000"
+        inSend("advancedToggle").checked = true
+        // The real control, not clearForm() called by hand: a popup's onOpened could not fire
+        // in a harness with no overlay, so this was a source assertion. A section's is a click.
+        find(view.item, "sendCancelButton").clicked()
+        check("the recipient is gone", inSend("toField").text, "")
+        check("...and so is the amount", inSend("amountField").text, "")
 
         console.log("")
         console.log("...and the fee overrides with them, under a disclosure that closes. An")
         console.log("override left armed behind a collapsed Advanced prices the NEXT send at")
         console.log("the last one's gas, with nothing on screen saying so")
-        check("advanced is closed", inDialog("sendDialog", "advancedToggle").checked, false)
-        check("...and the gas override is empty", inDialog("sendDialog", "gasLimitField").text, "")
+        check("advanced is closed", inSend("advancedToggle").checked, false)
+        check("...and the gas override is empty", inSend("gasLimitField").text, "")
+        check("and Cancel left the section", find(view.item, "pages").currentIndex, 0)
     }
 
     // ── where a recipient comes from ─────────────────────────────────────────
@@ -351,7 +363,7 @@ Item {
                 return
             item.ready = true
 
-            probe.assertTheFormIsEmptyEveryTime()
+            probe.assertTheFormKeepsADraftButNotALastSend()
             probe.assertRecentsAreCounterpartiesNotContracts()
             probe.assertTheBookIsOfferedAndManaged()
             probe.assertANameIsReadOnlyUntilAsked()

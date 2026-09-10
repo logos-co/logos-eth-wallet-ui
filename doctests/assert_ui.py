@@ -329,44 +329,47 @@ print("0d) the Send figures are bound to the REQUEST they priced, not to the las
 # ceiling and nonce on screen with Submit still armed. Hooking each CONTROL is what let a
 # change that went through no control keep the old numbers; the hook is the request itself.
 qml = VIEW.read_text()
-dialog = qml[qml.index("id: sendDialog"):qml.index("── pending approval")]
-figures = [f"EthWalletView.qml: {l.strip()}" for l in dialog.splitlines()
+# Send is a SECTION now, so its span ends where the next one begins rather than at the
+# next top-level block. Sliced from the id, so it takes the page's own header with it.
+_send_at = qml.index("id: sendPage")
+send = qml[_send_at:qml.index("// Activity", _send_at)]
+figures = [f"EthWalletView.qml: {l.strip()}" for l in send.splitlines()
            if "root.quote." in l and not l.strip().startswith("//")]
-check("no figure in the dialog reads the quote unpaired with its request", figures, [])
+check("no figure in the section reads the quote unpaired with its request", figures, [])
 check("the pairing IS the `q` declaration, not a line somewhere near it",
       "root.quoteRequest === sendForm.formRequest" in qml_decl("q"), True)
 check("...and the request is a BINDING, so an edit re-evaluates it",
       qml_decl("formRequest"), "readonly property string formRequest: request()")
 check("...which is also what re-prices",
-      any(l.strip() == "onFormRequestChanged: if (sendDialog.visible) reprice()"
-          for l in dialog.splitlines()), True)
+      any(l.strip() == "onFormRequestChanged: if (sendPage.visible) reprice()"
+          for l in send.splitlines()), True)
 print("   control: no control handler re-prices — a handler is exactly what a change can skip")
 CONTROL = re.compile(r"on(TextChanged|CheckedChanged|Clicked|Activated|Triggered)\s*:")
-handlers = [f"EthWalletView.qml: {l.strip()}" for l in dialog.splitlines()
+handlers = [f"EthWalletView.qml: {l.strip()}" for l in send.splitlines()
             if "reprice" in l and CONTROL.match(l.strip())]
 check("no control handler re-prices", handlers, [])
-print("   ...and the whole dialog re-prices from exactly two places: the request, and the open")
-print("   (the verdict can have moved since the last quote, so an open re-prices regardless)")
-sites = [l.strip() for l in dialog.splitlines()
+print("   ...and the whole section re-prices from exactly two places: the request, and the")
+print("   entry (the verdict can have moved since the last quote, so entering re-prices)")
+sites = [l.strip() for l in send.splitlines()
          if "reprice" in l and not l.strip().startswith("//")]
-check("the re-price hangs off the request and the open, nowhere else", len(sites), 3)
+check("the re-price hangs off the request and the entry, nowhere else", len(sites), 3)
 # `sendSubmitting` JOINED this binding rather than replacing anything in it: the gap between
-# the click and the shell's chooser is real work with the dialog still up, and a second click
+# the click and the shell's chooser is real work with the form still up, and a second click
 # in it would price and reserve a nonce twice.
 check("and Submit is armed by a quote that priced THIS form, and disarmed by a click in flight",
       qml_binding("sendSubmitButton", "enabled"),
       "enabled: root.ready && !root.sendPending && !root.sendSubmitting "
       "&& sendForm.q.ok === true")
 print("   the token picker answers with the field beside it, as accountPicker already did:")
-print("   ComboBox resets currentIndex when its model is re-read, and sendDialog.token did not")
+print("   ComboBox resets currentIndex when its model is re-read, and sendPage.token did not")
 print("   asserted against syncIndex's OWN body: onActivated three lines up carries the same")
 print("   substring, and syncIndex is what re-asserts on a MODEL change — the defect described")
-picker = re.search(r'objectName: "sendTokenPicker"(.*?)\n            \}', dialog, re.S)
+picker = re.search(r'objectName: "sendTokenPicker"(.*?)\n {36}\}', send, re.S)
 sync = qml_fn_body(picker.group(1) if picker else "", "syncIndex")
 check("sendTokenPicker re-asserts its index on a model change",
       bool(picker) and "onModelChanged: syncIndex()" in picker.group(1), True)
 check("...and syncIndex writes the token back, so the picker and the amount field agree",
-      "sendDialog.selectToken(root.tokens[currentIndex])" in sync, True)
+      "sendPage.selectToken(root.tokens[currentIndex])" in sync, True)
 
 print("0e) the backend holds NO rule about what may reach the screen")
 # WHY THIS SECTION LOOKS NOTHING LIKE THE ELEVEN PASSES BEFORE IT.
@@ -441,7 +444,7 @@ check("active_chain_changed adopts the chain it names, first",
       handler("Active_chain_changed").strip().startswith("adoptChain(chainId);"), True)
 check("balances_updated ignores an account that is not on screen",
       "address.compare(selectedAccount()" in handler("Balances_updated"), True)
-check("closing the dialog withdraws the figures, not just the timer",
+check("leaving the section withdraws the figures, not just the timer",
       "withdrawQuote(s)" in fn_body("setQuoteAutoRefresh"), True)
 print("   the tables need no app, and doctests/run_tables.sh runs all five")
 for t in ["test_apply.cpp", "test_data_guard.cpp", "test_reply_scope.cpp",
@@ -962,7 +965,7 @@ check("the query the view re-asks with is the one it was given",
 # A ListView inside a ScrollView is two scrollers fighting over one wheel event, and the inner
 # one is handed unbounded height — every row is built at once.
 manage = qml_lines[next(i for i, l in enumerate(qml_lines) if '"manageTokensPage"' in l):
-                   next(i for i, l in enumerate(qml_lines) if '"sendDialog"' in l)]
+                   next(i for i, l in enumerate(qml_lines) if "── pending approval" in l)]
 check("the list scrolls itself rather than sitting inside a scroll view",
       [l.strip() for l in manage if "ScrollView" in l], [])
 check("...and it is the design system's list view",
@@ -1111,13 +1114,30 @@ check("...and each names a single provider",
       sorted({e.get("cardinality") for e in META.get("uses", [])}), ["single"])
 
 print()
-print("the Send form is cleared ON OPEN, and BEFORE the re-price — a quote priced from the")
-print("previous form is a quote withdrawn a frame later, and the order is the whole point.")
-print("A probe cannot see this: with no overlay a Popup never opens and `onOpened` never")
-print("fires, so what runs it is only assertable here.")
-opened = qml_fn_body(qml_body, "onOpened") if False else " ".join(qml_item("sendDialog"))
-check("onOpened clears the form before it prices it",
-      in_order(opened, "onOpened", "sendDialog.clearForm()", "sendForm.reprice()"), True)
+print("entering the Send section syncs the picker BEFORE it prices — a quote priced against")
+print("a token the picker has not resolved yet is a quote withdrawn a frame later.")
+entered = " ".join(qml_item("sendPage"))
+check("entering syncs the picker before it prices",
+      in_order(entered, "onVisibleChanged", "tokenPicker.syncIndex()", "sendForm.reprice()"), True)
+print("   and entering deliberately clears NOTHING. The popup emptied on every open; a")
+print("   section is stepped away from to read a balance and stepped back into mid-send, so")
+print("   the same rule here eats a half-typed transfer for a glance at the Tokens tab.")
+# The handler alone, not the page header around it: `function clearForm()` is declared a few
+# lines up, so a window over the whole header answers "clearForm" whatever the handler does.
+on_visible = entered[entered.index("onVisibleChanged"):]
+check("entering the section clears nothing", "clearForm" in on_visible, False)
+print("   what the popup was really protecting — the NEXT send inheriting the last one's")
+print("   recipient — is kept, at the two edges where the send is actually over")
+clears = [l.strip() for l in qml_lines
+          if "clearForm()" in l and not l.strip().startswith("//")
+          and not l.strip().startswith("function ")]
+check("the form is emptied from exactly two places", len(clears), 2)
+check("...an accepted send LEAVES the section, then empties it — the other order re-prices "
+      "an emptied form still on screen",
+      in_order(qml_fn_body(qml_body, "onPendingRequestIdChanged"),
+               "root.selectTab(2)", "sendPage.clearForm()"), True)
+check("...and Cancel empties it and goes back to Tokens",
+      any("sendPage.clearForm(); root.selectTab(0)" in l for l in clears), True)
 check("...and clearing empties the recipient, the amount and every fee override",
       all(f in qml_fn_body(qml_body, "clearForm")
           for f in ["toField.text", "amountField.text", "maxFeeField.text",
@@ -1246,14 +1266,14 @@ call("evaluate",{"expression":'logos.callModule("eth_rpc_module","patch_chain_en
 call("evaluate",{"expression":'logos.module("eth_wallet_ui").setActiveChain(11155111)'})
 time.sleep(3)
 
-print("1) the tab actually moves, and the chip is on BOTH tabs")
-for i,name in enumerate(["Tokens","Activity"]):
+print("1) the tab actually moves, and the chip is on ALL THREE tabs")
+for i,name in enumerate(["Tokens","Send","Activity"]):
     tab(i)
     check(f"pages.currentIndex after selectTab({i})", props("pages").get("currentIndex"), i)
     check(f"chip on {name}", props("chainChip").get("text"), "SEPOLIA · TESTNET")
 
 print("2) empty history, asserted by PROPERTY on the Activity tab")
-tab(1)
+tab(2)
 print("   the line is a CLAIM about this account, so it speaks only for a history we read")
 check("the history was actually read", ev("historyKnown"), True)
 check("historyEmpty.visible", props("historyEmpty").get("visible"), True)
@@ -1421,7 +1441,7 @@ print("   and a blocking proxy is never badged verified")
 check("chip under a blocking proxy", props("verifiedChip").get("text"), "Not verified")
 
 print("16) the receipt sweep is STOPPED when nothing is still due")
-tab(1)
+tab(2)
 print("   on the Activity tab, or every `visible` below reads false whatever it is bound to")
 check("control: the tab is really showing", props("activityRouteNote").get("visible"), True)
 check("nothing recorded to sweep", ev("history.length"), 0)
@@ -1514,14 +1534,14 @@ print("21) the Send screen picks a token and takes TOKEN units")
 call("callMethod",{"objectId":oid("openSendButton"),"method":"clicked","args":[]}); time.sleep(1)
 check("the picker offers what the wallet holds", (ev("tokens.length") or 0) >= 1, True)
 check("it names the symbol and the balance", props("sendTokenPicker").get("model"), "ETH", "contains")
-check("and it opens on the native currency", props("sendDialog").get("token"), "ETH")
+check("and it opens on the native currency", props("sendPage").get("token"), "ETH")
 check("the amount field asks for ETH, not wei", props("amountField").get("placeholderText"),
       "Amount in ETH")
 print("   the wire always names the token now, 'ETH' included — tokens::find resolves it to")
 print("   the native path, so this removes a UI conditional rather than adding a backend one")
 call("setProperty",{"objectId":oid("toField"),"property":"text","value":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8"})
 call("setProperty",{"objectId":oid("amountField"),"property":"text","value":"0.25"}); time.sleep(2.5)
-req=call("evaluate",{"objectId":oid("sendDialog"),"expression":"request()"}).get("result")
+req=call("evaluate",{"objectId":oid("sendForm"),"expression":"request()"}).get("result")
 check("the request carries token units", '"amountUnits":"0.25"' in str(req), True)
 check("...and names the token", '"token":"ETH"' in str(req), True)
 print("   control: the base-units field must NOT also be set — they mean different units")
@@ -1536,12 +1556,15 @@ call("setProperty",{"objectId":oid("amountField"),"property":"text","value":"999
 time.sleep(2.5)
 call("evaluate",{"expression":'logos.module("eth_wallet_ui").submitSend(JSON.stringify({from:logos.module("eth_wallet_ui").selectedAccount,to:"0x70997970C51812dc3A010C7d01b50e0d17dc79C8",amountUnits:"99999000",token:"ETH"}))'})
 time.sleep(3)
-check("the reason is inside the modal", props("sendErrorLabel").get("visible"), True)
+check("the reason is beside the control that caused it", props("sendErrorLabel").get("visible"), True)
 check("and it is the backend's own words", props("sendErrorLabel").get("text"),
       "insufficient funds", "contains")
 print("   the defect this replaces: the dialog closed unconditionally, so the message landed")
 print("   on the wallet behind the scrim and the user never saw it")
-check("the dialog did NOT close", props("sendDialog").get("visible"), True)
+print("   asserted as the TAB, not as `visible`: a section's visible is true whenever its tab")
+print("   is current, so reading it back would pass no matter what the refusal did. The")
+print("   accepted path moves to Activity, so staying on Send is a real answer.")
+check("the view did NOT leave the Send section", props("pages").get("currentIndex"), 1)
 check("nothing is pending", ev("sendPending"), False)
 call("callMethod",{"objectId":oid("sendCancelButton"),"method":"clicked","args":[]}); time.sleep(0.8)
 
@@ -1706,7 +1729,7 @@ print("   send priced for a request the form no longer describes")
 check("Submit is disarmed", props("sendSubmitButton").get("enabled"), False)
 call("callMethod",{"objectId":oid("sendCancelButton"),"method":"clicked","args":[]}); time.sleep(0.8)
 
-print("29) reopening on a different token does not render the previous token's quote")
+print("29) re-entering on a different token does not render the previous token's quote")
 # The second shape: setQuoteAutoRefresh(false) cleared the request and the timer but not the
 # figures, so an ETH quote rendered under a form reading "Amount in WETH".
 call("callMethod",{"objectId":oid("openSendButton"),"method":"clicked","args":[]}); time.sleep(1)
@@ -1715,7 +1738,7 @@ call("setProperty",{"objectId":oid("amountField"),"property":"text","value":"0.0
 priced_native = props("quoteSummary").get("text")
 check("an ETH send is priced", priced_native, "Gas limit", "contains")
 call("callMethod",{"objectId":oid("sendCancelButton"),"method":"clicked","args":[]}); time.sleep(0.8)
-check("closing the dialog withdrew the quote with it", ev("quoteRequest"), "")
+check("leaving the section withdrew the quote with it", ev("quoteRequest"), "")
 erc20 = [t for t in json.loads(ev("JSON.stringify(tokens)") or "[]") if t.get("native") is not True]
 if not erc20:
     print("  SKIP  this network's token list carries no ERC-20 to reopen on")
