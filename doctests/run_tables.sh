@@ -70,6 +70,15 @@ fi
 # And the half a C++ table cannot reach: the view's own bindings, evaluated. It SKIPS with 0
 # when there is no Qt Quick runtime to hand, so this stays one command either way.
 echo
+echo "=== qr_scan.sh"
+# Structure and parameters are checked next door; this is the only step that asks a READER
+# whether the code decodes. zbar absent is a failure, not a skip.
+if command -v zbarimg >/dev/null 2>&1; then
+    ./qr_scan.sh || rc=1
+else
+    echo "SKIP: no zbarimg to decode the rendered codes (nix shell nixpkgs#zbar)"
+fi
+
 echo "=== view probes"
 ./run_view_probe.sh || rc=1
 

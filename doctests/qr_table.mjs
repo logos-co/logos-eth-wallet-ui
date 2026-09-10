@@ -5,10 +5,12 @@
 // here by stripping that line and evaluating the rest — the SAME text the view imports, not a
 // copy of it. A copy is what drifts, and what this file is about is a code that scans.
 //
-// Nothing below reads the payload back out: a decoder here would be this encoder run
-// backwards, and would agree with it however wrong both were. So the assertions are against
+// Two kinds of assertion, because structure alone is not enough. Most of this file checks
 // facts the ISO spec fixes independently — the version a 42-character byte segment needs, the
-// finder and timing patterns, and the published format-information string for level M.
+// finder and timing patterns, the published format-information string for level M. Section 8
+// then checks the error-correction tables against segno's, because a corrupted ECC table
+// leaves every one of those structural facts intact. What neither can prove is that the thing
+// SCANS; doctests/qr_scan.sh does that, by decoding the output with zbar.
 //
 // Run: node doctests/qr_table.mjs
 
@@ -19,7 +21,9 @@ import { dirname, join } from "node:path";
 const here = dirname(fileURLToPath(import.meta.url));
 const src = readFileSync(join(here, "..", "src", "qml", "qrcodegen.js"), "utf8")
     .replace(/^\s*\.pragma\s+library\s*$/m, "");
-const names = [...src.matchAll(/^function\s+(\w+)\s*\(/gm)].map((m) => m[1]);
+const names = [...src.matchAll(/^function\s+(\w+)\s*\(/gm)].map((m) => m[1])
+  // the ECC tables are top-level `var`s, and section 8 checks them against segno
+  .concat([...src.matchAll(/^var\s+(\w+)\s*=/gm)].map((m) => m[1]));
 const Q = new Function(`${src}\nreturn { ${names.join(", ")} };`)();
 
 let failed = 0;
@@ -107,6 +111,34 @@ check("...and 300 grows it again", Q.modules("x".repeat(300)).size > Q.modules("
 check("4000 bytes is beyond version 40 and says so", (() => {
     try { Q.modules("x".repeat(4000)); return "no error" } catch (e) { return e instanceof RangeError }
 })(), true);
+
+
+// 8) the level-M error-correction parameters, against an implementation that is not this one
+//
+// The structural checks above cannot see a corrupted ECC table: the code still has finder
+// patterns, still has the right size, and a scanner's own error correction may even recover
+// the payload. So these two rows come from segno 1.6.6 (a pure-Python encoder with its own
+// tables, read out of `segno.consts.ECC`), not from the file under test. If they and this
+// encoder ever disagree, one of them has drifted from ISO/IEC 18004 table 9.
+const SEGNO_M_BLOCKS = [
+   1, 1, 1, 2, 2, 4, 4, 4, 5, 5, 5, 8, 9, 9, 10, 10, 11, 13, 14, 16, 17, 17, 18, 20, 21,
+   23, 25, 26, 28, 29, 31, 33, 35, 37, 38, 40, 43, 45, 47, 49
+]
+const SEGNO_M_ECC_PER_BLOCK = [
+   10, 16, 26, 18, 24, 16, 18, 22, 22, 26, 30, 22, 22, 24, 24, 28, 28, 26, 26, 26, 26, 28,
+   28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28
+]
+console.log("8) the ECC parameters agree with an independent encoder's tables")
+{
+  const M = 1 // ECL_MEDIUM's index into the tables
+  let blocksOk = 0, eccOk = 0
+  for (let v = 1; v <= 40; v++) {
+    if (Q.NUM_ERROR_CORRECTION_BLOCKS[M][v] === SEGNO_M_BLOCKS[v - 1]) blocksOk++
+    if (Q.ECC_CODEWORDS_PER_BLOCK[M][v] === SEGNO_M_ECC_PER_BLOCK[v - 1]) eccOk++
+  }
+  check("blocks per version match segno for all 40", blocksOk, 40)
+  check("ecc codewords per block match segno for all 40", eccOk, 40)
+}
 
 console.log(`\nRESULT: ${failed ? "FAILURES" : "ALL PASS"}`);
 process.exit(failed ? 1 : 0);

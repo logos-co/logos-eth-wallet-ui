@@ -195,6 +195,29 @@ Item {
         console.log("Rectangle standing in for a dark module that never gets drawn")
         var zero = runs.filter(function (r) { return r[2] < 1 })
         check("no empty runs", zero.length, 0)
+
+        console.log("")
+        console.log("and finally the Rectangles THEMSELVES — everything above is arithmetic on")
+        console.log("a returned array, which stays true even if the Repeater draws nothing, or")
+        console.log("draws the code in the ground colour, or transposes it")
+        var drawn = []
+        for (var c = 0; c < box.children.length; ++c)
+            if (box.children[c].color !== undefined && box.children[c] !== box)
+                drawn.push(box.children[c])
+        check("one Rectangle per run reached the scene", drawn.length, runs.length)
+
+        var cell = box.cell, quiet = box.quiet
+        var placed = 0, dark_drawn = 0
+        for (var d = 0; d < drawn.length; ++d) {
+            var it = drawn[d]
+            for (var r2 = 0; r2 < runs.length; ++r2) {
+                if (it.x === (runs[r2][0] + quiet) * cell && it.y === (runs[r2][1] + quiet) * cell
+                        && it.width === runs[r2][2] * cell && it.height === cell) { placed++; break }
+            }
+            if (String(it.color) === "#000000") dark_drawn++
+        }
+        check("...each at its run's place and size", placed, runs.length)
+        check("...and each drawn dark, not in the ground colour", dark_drawn, runs.length)
     }
 
     function assertTheGeometryLandsOnWholePixels() {

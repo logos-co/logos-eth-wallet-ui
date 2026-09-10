@@ -117,7 +117,7 @@ jobs:
           # when it finds no Qt Quick runtime, which is the right default for a
           # developer and the wrong one here. Both paths are handed over
           # explicitly, and the log is checked for having taken them.
-          nix shell nixpkgs#qt6.qtdeclarative -c bash -c '
+          nix shell nixpkgs#qt6.qtdeclarative nixpkgs#zbar -c bash -c '
             d=$(dirname $(dirname $(readlink -f $(command -v qml))))
             QML_BIN="$d/bin/qml" QT_QML_DIR="$d/lib/qt-6/qml" \
               ./doctests/run_tables.sh' 2>&1 | tee /tmp/tables.log
@@ -132,6 +132,6 @@ jobs:
           # a probe that reaches its last phase is the only thing that prints
           # one. A header with silence under it counts here and passes nothing.
           n=$(grep -c "RESULT: ALL PASS" /tmp/tables.log)
-          echo "sections that reported: $n"; [ "$n" -ge 16 ]
+          echo "sections that reported: $n"; [ "$n" -ge 17 ]
           n=$(grep -c "  PASS  " /tmp/tables.log)
-          echo "assertions: $n"; [ "$n" -ge 560 ]
+          echo "assertions: $n"; [ "$n" -ge 620 ]
