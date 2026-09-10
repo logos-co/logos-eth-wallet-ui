@@ -1577,7 +1577,13 @@ Item {
             id: tabs
             objectName: "tabs"
             Layout.fillWidth: true
-            onCurrentIndexChanged: pages.currentIndex = currentIndex
+            // Through selectTab, so a CLICK obeys the same rule the function does. It used to
+            // set the page index alone, which left a pushed screen sitting over the tab the
+            // user had just chosen: the strip said Send, the pane still showed Address book.
+            // Unreachable until the strip moved outside the StackView and stayed on screen.
+            // No loop — selectTab assigns the index it was given, and an unchanged value
+            // emits nothing.
+            onCurrentIndexChanged: root.selectTab(currentIndex)
             LogosTabButton { text: "Tokens" }
             LogosTabButton { text: "Send" }
             LogosTabButton { text: "Receive" }
