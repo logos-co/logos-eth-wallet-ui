@@ -134,4 +134,4 @@ jobs:
           n=$(grep -c "RESULT: ALL PASS" /tmp/tables.log)
           echo "sections that reported: $n"; [ "$n" -ge 17 ]
           n=$(grep -c "  PASS  " /tmp/tables.log)
-          echo "assertions: $n"; [ "$n" -ge 620 ]
+          echo "assertions: $n"; [ "$n" -ge 750 ]
