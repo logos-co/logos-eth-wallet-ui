@@ -174,7 +174,8 @@ Item {
         return find(screen(), name) || ({ text: "<missing>", visible: "<missing>" })
     }
 
-    function openSend() { find(view.item, "openSendButton").clicked() }
+    // The tab IS the entry point now; there is no button left to click.
+    function openSend() { view.item.selectTab(1) }
 
     // ── what the form remembers ──────────────────────────────────────────────
 

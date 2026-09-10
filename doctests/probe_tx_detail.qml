@@ -515,8 +515,8 @@ Item {
             probe.assertFreshErc20Screen()
             // The list itself, which needs a layout pass the handler it is asserted from
             // cannot wait for: its delegates do not exist until the view has laid out.
-            // Activity is index 2 now — Send sits between it and Tokens.
-            item.selectTab(2)
+            // Activity is index 3 now — Send and Receive sit between it and Tokens.
+            item.selectTab(3)
             settle.start()
         }
     }

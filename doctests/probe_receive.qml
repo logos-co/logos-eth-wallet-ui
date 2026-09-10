@@ -103,6 +103,8 @@ Item {
 
     // A pushed screen, not a popup: its items really are instantiated, so the code can be
     // measured rather than read off a binding that nothing evaluated.
+    // Receive is a tab, so this is the HOME item rather than a pushed screen — but the
+    // lookup is the same one, and `visible` still answers whether the section is showing.
     function screen() {
         var nav = find(view.item, "nav")
         return nav ? nav.currentItem : null
@@ -113,27 +115,24 @@ Item {
 
     // ── getting there ────────────────────────────────────────────────────────
 
-    function assertReceiveIsAnActionOnTheAccountInHand() {
+    function assertReceiveIsASectionAndNothingIsAButton() {
         console.log("")
-        console.log("Receive sits beside Send, not among Address book / Networks / Tokens:")
-        console.log("those three open places you configure something in, and this one does a")
-        console.log("thing with the account already selected. So it is armed by that account")
-        console.log("and by nothing else")
-        var btn = find(view.item, "openReceiveButton")
-        check("the button is there", btn !== null, true)
-        check("...and armed, an account being selected", btn.enabled, true)
-
-        fake.selectedAccount = ""
-        check("no account, nothing to receive to", btn.enabled, false)
-        fake.selectedAccount = probe.me
-        check("...and armed again once there is one", btn.enabled, true)
+        console.log("Receive is a SECTION, beside Tokens, Send and Activity. It was a button")
+        console.log("above the tab strip next to a Send button — and once Send became a tab,")
+        console.log("that put two ways to reach it one above the other")
+        check("no Receive button is left", find(view.item, "openReceiveButton"), null)
+        check("...and no Send button either", find(view.item, "openSendButton"), null)
 
         console.log("")
-        console.log("and it pushes a screen, which is what makes the code measurable at all —")
-        console.log("a popup instantiates no delegates in a harness with no overlay")
-        btn.clicked()
-        check("the page is open", onScreen("receivePage").visible, true)
-        check("...with a way back", onScreen("receiveBack").visible, true)
+        console.log("a section is also what makes the code measurable at all: a popup")
+        console.log("instantiates no delegates in a harness with no overlay, and a pushed")
+        console.log("screen would have to be pushed")
+        view.item.openReceive()
+        check("the section is showing", onScreen("receivePage").visible, true)
+        check("...as tab 2, between Send and Activity",
+              find(view.item, "pages").currentIndex, 2)
+        check("...and it carries no back arrow, having nothing to go back from",
+              find(view.item, "receiveBack"), null)
     }
 
     // ── what is encoded ──────────────────────────────────────────────────────
@@ -311,9 +310,21 @@ Item {
                 return
             item.ready = true
 
-            probe.assertReceiveIsAnActionOnTheAccountInHand()
+            probe.assertReceiveIsASectionAndNothingIsAButton()
             probe.assertTheBareChecksummedAddressIsWhatIsEncoded()
             probe.assertTheMatrixReachesTheRectangles()
+            settle.start()
+        }
+    }
+
+    // The BOX's size needs a layout pass the handler above cannot wait for. Selecting the tab
+    // makes the page current, but a StackLayout child is measured on the next polish, not on
+    // the write — so `width` read in the same turn is still 0. The run rectangles above need
+    // no wait: their geometry hangs off `cell`, which is arithmetic on a property.
+    Timer {
+        id: settle
+        interval: 400
+        onTriggered: {
             probe.assertTheGeometryLandsOnWholePixels()
             probe.assertTheAddressIsWholeAndSeparatelyCopyable()
             probe.assertAnEmptySelectionHidesTheCodeRatherThanThrowing()

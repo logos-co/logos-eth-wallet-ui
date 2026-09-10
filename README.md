@@ -3,9 +3,10 @@
 Send ether on one Ethereum network at a time, with the full set of fee controls.
 
 Information design follows MetaMask: one question per screen, everything else behind a
-disclosure. Three sections (Tokens, Send, Activity) and **the active network visible
-at all times** — a user must never be able to mistake which chain they are spending on.
-Testnets are visually distinct from mainnet.
+disclosure. Four sections (Tokens, Send, Receive, Activity) and **the active network
+visible at all times** — a user must never be able to mistake which chain they are spending
+on. Testnets are visually distinct from mainnet. Nothing sits above the tab strip: a button
+that opens a tab, on top of that tab, is two answers to one question.
 
 ## What this module cannot do
 
@@ -273,7 +274,8 @@ on-chain integer labelled `base units` rather than being scaled by an assumed 18
 
 ## QR
 
-**Receive** encodes the selected account's address and draws it as a grid of plain
+**Receive** is a section, not a screen you open. It encodes the selected account's
+address and draws it as a grid of plain
 `Rectangle`s, one per **run** of dark modules. That drawing is ported from the Monero wallet,
 which arrived at it the hard way: inside Basecamp's `ui_qml` sandbox a `data:` URI is refused,
 a remote URL is refused, and a `Canvas` never receives `paint()` in the plugin's own
@@ -362,7 +364,7 @@ where a table **runs** them:
 | `probe_tx_detail.qml` | the transaction screen's own bindings, loaded and driven |
 | `probe_tokens_sort.qml` | the sort control, and the order the token list is laid out in |
 | `qr_table.mjs` | the QR encoder, against the spec's own version, pattern and format facts |
-| `probe_receive.qml` | the Receive screen: what is encoded, and what is drawn |
+| `probe_receive.qml` | the Receive section: what is encoded, and what is drawn |
 
 Neutering any of those now fails a row that executed it. What is left for a grep is what no
 table can see — QML bindings, and whether the backend *consults* the transitions at all — and
