@@ -154,7 +154,8 @@ Item {
         target: root.ready ? root.backend : null
         // Either outcome ends the wait: the backend took it (a request id appears) or
         // refused it (an error does). Both have to clear, or a refusal leaves the button
-        // dead and the only way out is closing the dialog.
+        // dead with nothing on the section to revive it. Only the first navigates, which
+        // is what lets a refusal be asserted as "still on Send".
         function onPendingRequestIdChanged() {
             if (root.sendPending) {
                 root.sendSubmitting = false
