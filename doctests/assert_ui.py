@@ -742,7 +742,7 @@ print("   system's own copy button was the only one that did, and it looked like
 print("   out in a row of three. It was the one that was right.")
 check("no icon button is a bare LogosIconButton",
       re.findall(r"^\s*LogosIconButton \{", qml, re.M), [])
-check("...they all come from the one hover-aware rule", len(icon_buttons), 13)
+check("...they all come from the one hover-aware rule", len(icon_buttons), 10)
 check("...which is stated once", qml.count("component HoverIcon:"), 1)
 check("...and the tint follows the cursor",
       qml_binding("HoverIcon", "iconColor") or
@@ -757,7 +757,9 @@ print("   any other")
 backs = [b for b in icon_buttons if "iconArrowLeft" in b]
 check("every back arrow is one size",
       sorted({re.search(r"iconSize: (\d+)", b).group(1) for b in backs}), ["20"])
-check("...on every screen there is to leave", len(backs), 5)
+# Two, not five: Address book, Networks and Manage tokens are sections of the Settings tab
+# now, and a section has nothing to go back FROM. Only the two pushed detail screens do.
+check("...on every screen there is to leave", len(backs), 2)
 
 check("the four spinner-bearing claims",
       sorted(set(re.findall(r"beginClaim\((m_\w+)", code))),
@@ -940,14 +942,19 @@ check("the choice is counted before the call that can pump a stale reply in",
 check("...and the rule that drops one older than it is a pure function, run by a table",
       "adoptedTokenSort(reply, issuedAt, m_sortChoiceGen)" in fn_body("adoptTokenSort"), True)
 
-print("0o) Manage tokens: a SCREEN on the nav stack, reached from Settings, listing what the")
-print("    BACKEND answered for a query. doctests/probe_manage_tokens.qml drives it.")
-check("Settings is what opens it",
-      "root.openManageTokens()" in " ".join(qml_item("manageTokensButton")), True)
-check("...onto the nav stack, so the back arrow works",
-      "nav.pushItem(manageTokensComponent)" in qml_fn_body(qml_body, "openManageTokens"), True)
-check("...and opening it reads, rather than showing the last answer",
-      'root.searchTokens("")' in qml_fn_body(qml_body, "openManageTokens"), True)
+print("0o) Manage tokens: a SECTION of the Settings tab, listing what the BACKEND answered")
+print("    for a query. doctests/probe_manage_tokens.qml drives it.")
+settings = qml[qml.index('objectName: "settingsPage"'):qml.index("// ── token detail")]
+check("the Settings tab holds all three screens, as sections",
+      sorted(re.findall(r"body: (\w+Component)", settings)),
+      ["addressBookComponent", "manageTokensComponent", "networksComponent"])
+print("   each body is behind a Loader keyed on its own section, so a closed one holds no")
+print("   item at all — three screens live in one tab only because two of them are not built")
+check("...each loaded only while its own section is open",
+      len(re.findall(r'expanded: settingsPage\.openSection === "', settings)), 3)
+check("...and opening it picks that section, THEN reads — rather than showing the last answer",
+      in_order(qml_fn_body(qml_body, "openManageTokens"),
+               'root.openSettings("tokens")', 'root.searchTokens("")'), True)
 print("   the query goes to the BACKEND. The embedded Uniswap list is thousands of rows, so")
 print("   a filter written here would mean pulling all of them across the wire first")
 check("the list renders what the backend answered",
@@ -1210,9 +1217,12 @@ check("...which is the StackView's depth, read once",
       qml_decl("homeChrome").endswith("nav !== null && nav.depth <= 1"), True)
 check("there is no Settings popup left to hold links to any of them",
       "settingsDialog" in qml_body, False)
-check("...and each button opens a screen rather than a dialog",
-      all(f"root.open{n}()" in qml_body for n in ["AddressBook", "Networks", "ManageTokens"]),
-      True)
+check("...nor three buttons in the chrome, which is what replaced it",
+      [n for n in ("addressBookButton", "networksButton", "manageTokensButton")
+       if n in qml_body], [])
+check("...each is a section of the Settings tab, reached by one named function",
+      all(f'root.openSettings("{k}")' in qml_body
+          for k in ["addressBook", "networks", "tokens"]), True)
 print()
 print("what the Tokens screen turns on and off is which tokens this wallet SHOWS. Where they")
 print("come from is device-wide and owned elsewhere, exactly as the endpoint is — so it asks")

@@ -215,12 +215,16 @@ Item {
     property var logos: ({ module: function (n) { return fake }, isViewModuleReady: function (n) { return true } })
 
     function assertScreen() {
-        console.log("Manage tokens is a screen on the nav stack, reached from Settings and left")
-        console.log("by its own back arrow")
-        check("the screen is on the stack", find(view.item, "manageTokensPage") !== null, true)
-        check("...under MetaMask's own title", find(view.item, "manageTokensTitle").text,
-              "Manage tokens")
-        check("...with a back arrow", find(view.item, "manageTokensBackButton") !== null, true)
+        console.log("Manage tokens is a SECTION of the Settings tab, named by the accordion")
+        console.log("header rather than by a title of its own, and built only while it is open")
+        check("the section is loaded", find(view.item, "manageTokensPage") !== null, true)
+        check("...named by its own header", find(view.item, "tokensSectionHeader").text, "Tokens")
+        check("...and carrying no back arrow, having nothing to go back from",
+              find(view.item, "manageTokensBackButton"), null)
+        console.log("   and the other two sections are NOT built: a closed Loader holds no item,")
+        console.log("   which is the whole reason three screens fit in one tab")
+        check("the address book is not standing", find(view.item, "addressBookPage"), null)
+        check("...nor the networks screen", find(view.item, "networksPage"), null)
         check("...and the field asks for what MetaMask asks for",
               find(view.item, "tokenSearchField").placeholderText,
               "Enter token name or address")
@@ -479,6 +483,9 @@ Item {
         console.log("...and a chain change with the screen CLOSED spends no call: re-opening it")
         console.log("reads the whole offered set anyway, and a wallet is at its busiest exactly")
         console.log("when the chain first arrives")
+        // Proved closed before the negative is asserted: "no call went out" is true of a
+        // screen that never opened, so without this the control passes on its own.
+        check("the section really closed", find(view.item, "manageTokensPage"), null)
         check("no call went out", searchesSince(), 0)
     }
 
@@ -594,7 +601,9 @@ Item {
                 probe.assertChainChangeReSearches()
             } else if (probe.phase === 16) {
                 probe.assertRowsReturn()
-                view.item.back()
+                // Closing it is collapsing the SECTION now, not popping a screen: back() leaves
+                // the nav stack alone here and would have left the catalogue open and searching.
+                find(view.item, "tokensSectionHeader").clicked()
             } else {
                 probe.searchesBefore = probe.searchCount()
                 fake.activeNetworkJson = JSON.stringify({ chainId: probe.chain,
