@@ -292,6 +292,11 @@ because QML has no module system and the published UMD preamble throws) encodes 
 the `.rep` is untouched, and no backend round trip stands between selecting an account and
 seeing its code.
 
+The matrix is built **only while the section shows**. A `StackLayout` keeps every page alive,
+so an ungated binding would re-encode on every account switch and leave a few hundred
+`Rectangle`s resident for a tab the user may never open. `probe_receive.qml` asserts both
+halves: nothing encoded off the section, and every run drawn again on return.
+
 The address goes in **bare and unmodified**: uppercasing it voids the EIP-55 checksum. The cell
 size is floored and the box takes whatever falls out, rather than the modules being fitted into
 a fixed 240px — a fractional cell leaves hairline seams that some scanners read as module

@@ -160,6 +160,15 @@ Item {
         check("...and the matrix with it", onScreen("receiveQrBox").qr.bits === moved, false)
     }
 
+    // Rectangles that actually reached the scene under the box, as opposed to runs in an array.
+    function drawnCount(box) {
+        var n = 0
+        for (var c = 0; c < box.children.length; ++c)
+            if (box.children[c].color !== undefined && box.children[c] !== box)
+                n++
+        return n
+    }
+
     // ── what is drawn ────────────────────────────────────────────────────────
 
     function assertTheMatrixReachesTheRectangles() {
@@ -317,6 +326,37 @@ Item {
         check("...and it recovers", onScreen("receiveQrBox").visible, true)
     }
 
+    // ── the encoder's working hours ──────────────────────────────────────────
+
+    function assertTheCodeIsUpWhileTheSectionShows() {
+        console.log("")
+        console.log("a StackLayout keeps every page alive, so an ungated binding re-encodes on")
+        console.log("every account switch for a section the user may never open. The matrix is")
+        console.log("built while it is on screen and given up when it is not")
+        var page = onScreen("receivePage")
+        check("on the section, there is a matrix", page.qr !== null, true)
+        check("...and Rectangles drawing it", drawnCount(find(view.item, "receiveQrBox")) > 0, true)
+        view.item.selectTab(0)
+    }
+
+    function assertNothingIsEncodedOffTheSection() {
+        var page = find(view.item, "receivePage")
+        check("off the section, the matrix is given up", page.qr, null)
+        // Given a turn of the event loop first: a Repeater releases its items with
+        // deleteLater, so a count taken in the same frame as the model change is still full.
+        check("...and the Rectangles with it", drawnCount(find(view.item, "receiveQrBox")), 0)
+        view.item.openReceive()
+    }
+
+    function assertTheCodeComesBackOnReturn() {
+        var page = find(view.item, "receivePage")
+        var box = find(view.item, "receiveQrBox")
+        check("back on it, the code is rebuilt", page.qr !== null, true)
+        check("...for the account still selected", page.payload, probe.me)
+        check("...and drawn again, every run of it",
+              drawnCount(box), view.item.qrRuns(page.qr).length)
+    }
+
     Loader {
         id: view
         anchors.fill: parent
@@ -347,6 +387,22 @@ Item {
             probe.assertTheGeometryLandsOnWholePixels()
             probe.assertTheAddressIsWholeAndSeparatelyCopyable()
             probe.assertAnEmptySelectionHidesTheCodeRatherThanThrowing()
+            probe.assertTheCodeIsUpWhileTheSectionShows()
+            offSection.start()
+        }
+    }
+
+    Timer {
+        id: offSection
+        interval: 400
+        onTriggered: { probe.assertNothingIsEncodedOffTheSection(); backOn.start() }
+    }
+
+    Timer {
+        id: backOn
+        interval: 400
+        onTriggered: {
+            probe.assertTheCodeComesBackOnReturn()
 
             console.log("")
             console.log(probe.failures ? "RESULT: FAILURES" : "RESULT: ALL PASS")

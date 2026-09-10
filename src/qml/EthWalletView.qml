@@ -2358,7 +2358,10 @@ Item {
                             // The bare EIP-55 address, and never uppercased: the mixed case IS the checksum,
                             // and folding it throws away the only thing that catches a mistyped address.
                             readonly property string payload: root.selected
-                            readonly property var qr: root.qrModules(payload)
+                            // Encoded only while the section shows. A StackLayout keeps every page
+                            // alive, so an ungated binding re-encodes on every account switch for a
+                            // tab the user may never open.
+                            readonly property var qr: visible ? root.qrModules(payload) : null
 
                             ColumnLayout {
                                 anchors.fill: parent
