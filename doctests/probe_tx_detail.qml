@@ -513,12 +513,35 @@ Item {
             probe.assertNativeScreen()
             item.openTxDetail(probe.freshHash)
             probe.assertFreshErc20Screen()
+            probe.assertATabClickLeavesThePushedScreen()
             // The list itself, which needs a layout pass the handler it is asserted from
             // cannot wait for: its delegates do not exist until the view has laid out.
             // Activity is index 3 now — Send and Receive sit between it and Tokens.
             item.selectTab(3)
             settle.start()
         }
+    }
+
+    // Driven through the STRIP's own index, not selectTab(): a click on a LogosTabButton
+    // moves that index and nothing else, so a test that calls selectTab passes whatever the
+    // strip does. That is exactly how this shipped — the strip said Send while the pane still
+    // showed the screen pushed from Settings.
+    function assertATabClickLeavesThePushedScreen() {
+        console.log("")
+        console.log("a tab CLICK leaves whatever screen was pushed. The strip is outside the")
+        console.log("StackView now, so it stays reachable while a detail screen is up — and a")
+        console.log("strip naming one place over a pane showing another is two answers at once")
+        var nav = find(view.item, "nav")
+        var tabs = find(view.item, "tabs")
+        check("a screen is up to begin with", nav.depth, 2)
+        // A DIFFERENT tab, deliberately. Writing the index it already holds emits nothing, so
+        // the handler never runs and the check passes having driven nothing — which is what
+        // the first version of this did.
+        check("...and the strip is not already on the tab we are about to name",
+              tabs.currentIndex !== 1, true)
+        tabs.currentIndex = 1
+        check("the click left it", nav.depth, 1)
+        check("...and landed on the tab it named", find(view.item, "pages").currentIndex, 1)
     }
 
     Timer {

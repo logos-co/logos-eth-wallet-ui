@@ -230,58 +230,31 @@ Item {
         iconColor: isActive ? Theme.palette.text : Theme.palette.textTertiary
     }
 
-    // One Settings section: a header that names it, and a body that EXISTS only while it is
-    // open. Collapsed costs nothing — the Loader holds no item — which is what makes three
-    // screens affordable in one tab. An inline component cannot reach this document's ids, so
-    // `expanded` is bound and `toggled` handled from the use site.
-    component SettingsSection: ColumnLayout {
-        id: sec
-        property string title: ""
-        property Component body: null
+    // One row of the Settings tab: it names a screen and GOES there, the way a token row goes
+    // to a token. An inline component cannot reach this document's ids, so the chevron is
+    // passed in and the destination is handled at the use site.
+    component SettingsEntry: LogosItemDelegate {
+        id: entry
         property url chevron
-        property bool expanded: false
-        readonly property alias loadedItem: sectionBody.item
-        signal toggled()
 
-        spacing: 0
         Layout.fillWidth: true
-        // Only the open one takes the leftover height. Each body carries its own list and
-        // scrolls itself, so it needs real height rather than an outer scroller over it.
-        Layout.fillHeight: sec.expanded
+        implicitHeight: 44
+        font.pixelSize: Theme.typography.panelTitleText
+        font.weight: Theme.typography.weightMedium
 
-        LogosItemDelegate {
-            objectName: sec.objectName + "Header"
-            Layout.fillWidth: true
-            implicitHeight: 44
-            text: sec.title
-            font.pixelSize: Theme.typography.panelTitleText
-            font.weight: Theme.typography.weightMedium
-            onClicked: sec.toggled()
-
-            // Anchored inside the delegate rather than replacing its contentItem, which would
-            // drop the background and hover surface it draws.
-            LogosIcon {
-                objectName: sec.objectName + "Chevron"
-                anchors {
-                    right: parent.right
-                    verticalCenter: parent.verticalCenter
-                    rightMargin: Theme.spacing.medium
-                }
-                width: 16
-                height: 16
-                source: sec.chevron
-                rotation: sec.expanded ? 0 : -90
+        // Anchored inside the delegate rather than replacing its contentItem, which would drop
+        // the background and hover surface it draws. Pointing the way it takes you.
+        LogosIcon {
+            objectName: entry.objectName + "Chevron"
+            anchors {
+                right: parent.right
+                verticalCenter: parent.verticalCenter
+                rightMargin: Theme.spacing.medium
             }
-        }
-
-        Loader {
-            id: sectionBody
-            objectName: sec.objectName + "Body"
-            active: sec.expanded
-            visible: active
-            sourceComponent: sec.body
-            Layout.fillWidth: true
-            Layout.fillHeight: true
+            width: 16
+            height: 16
+            source: entry.chevron
+            rotation: -90
         }
     }
     readonly property url iconList: Qt.resolvedUrl("assets/list.svg")
@@ -354,14 +327,11 @@ Item {
     // The query the catalogue on screen answers. Held at ROOT because the field that typed it
     // lives inside a page the nav stack destroys, and because a chain change has to re-ask it.
     property string tokenQuery: ""
-    // Whether that screen is the one in front of the user. Read off what is LOADED rather than
-    // latched by the open/close calls, which would drift the moment a fourth section appeared:
-    // the section's Loader holds an item only while it is open, and the page still declares
-    // itself rather than being keyed on by objectName. The tab has to be showing too — a
-    // section left open under another tab is not in front of anyone.
+    // Whether that screen is the one in front of the user. Read off the nav stack rather than
+    // latched by the open/close calls, which would drift the moment a third one appeared. The
+    // page declares itself; an objectName is the harness's handle, not an identity to key on.
     readonly property bool manageTokensOpen:
-        settingsPage.visible && tokensSection.loadedItem !== null
-        && tokensSection.loadedItem.isTokenCatalogue === true
+        nav && nav.currentItem !== null && nav.currentItem.isTokenCatalogue === true
     // The active chain as a typed int, so the handler below fires on a network CHANGE rather
     // than on every republish of the same one. 0 is a network that could not be read.
     readonly property int chainId: net.chainId !== undefined ? net.chainId : 0
@@ -508,21 +478,23 @@ Item {
     }
     // The three settings screens are sections of one tab now. Kept as named functions: they
     // are what the probes and the harness call, and one place to change if the tab moves.
-    function openNetworks() { root.openSettings("networks") }
+    // The three settings screens are PUSHED, like a token or a transaction. selectTab first:
+    // it pops any screen already up and puts the strip on Settings, so the tab the user is
+    // left looking at is the one the pushed screen belongs to.
+    function openNetworks() { root.selectTab(4); nav.pushItem(networksComponent) }
 
-    function openAddressBook() { root.openSettings("addressBook") }
-
-    function openSettings(section) {
-        settingsPage.openSection = section
-        root.selectTab(4)
-    }
+    function openAddressBook() { root.selectTab(4); nav.pushItem(addressBookComponent) }
 
     // A name for the tab index, so the probe and any later caller do not carry the number.
     function openReceive() { root.selectTab(2) }
 
-    // A name for the section, kept because the probes and the harness call it. The READ is not
-    // here: see settingsPage.onOpenSectionChanged.
-    function openManageTokens() { root.openSettings("tokens") }
+    function openManageTokens() {
+        root.selectTab(4)
+        nav.pushItem(manageTokensComponent)
+        // The empty query is the whole offered set. Asked for here rather than in the screen's
+        // Component.onCompleted, so re-opening it re-reads rather than showing the last answer.
+        root.searchTokens("")
+    }
     function back() { if (nav.depth > 1) nav.popCurrentItem() }
 
     // The closed set of actions the verdict may carry. Text only, no button: a sandboxed view
@@ -1605,7 +1577,13 @@ Item {
             id: tabs
             objectName: "tabs"
             Layout.fillWidth: true
-            onCurrentIndexChanged: pages.currentIndex = currentIndex
+            // Through selectTab, so a CLICK obeys the same rule the function does. It used to
+            // set the page index alone, which left a pushed screen sitting over the tab the
+            // user had just chosen: the strip said Send, the pane still showed Address book.
+            // Unreachable until the strip moved outside the StackView and stayed on screen.
+            // No loop — selectTab assigns the index it was given, and an unchanged value
+            // emits nothing.
+            onCurrentIndexChanged: root.selectTab(currentIndex)
             LogosTabButton { text: "Tokens" }
             LogosTabButton { text: "Send" }
             LogosTabButton { text: "Receive" }
@@ -2555,65 +2533,39 @@ Item {
                         }
                     }
 
-                    // Settings. The three screens this wallet has, as sections of one tab
-                    // rather than three buttons in the chrome above it. Exactly one is open
-                    // at a time — see SettingsSection.
+                    // Settings. An index of the three screens this wallet has: each row GOES
+                    // there, the way a token row goes to a token. They are pushed onto `nav`,
+                    // which sits under the tab strip — so a settings screen is a place inside
+                    // this tab, with its own title and its own way back.
                     Item {
                         id: settingsPage
                         objectName: "settingsPage"
-
-                        // Which section is open, by name rather than index so the order can
-                        // change without moving the default. Empty — all closed — is the
-                        // start: a section that opened itself would build a screen the user
-                        // did not ask for on every launch, and every consumer would owe that
-                        // screen's backend surface whether it uses it or not.
-                        property string openSection: ""
-
-                        // The empty query is the whole offered set, asked for when the
-                        // section OPENS — keyed on the state rather than on the route that
-                        // reached it. It used to hang off openManageTokens(), whose only
-                        // caller was a button this tab replaced: the header click then built
-                        // the screen and read nothing, and it showed an em-dash for ever.
-                        // Not the screen's own Component.onCompleted, so re-opening re-reads
-                        // rather than showing the last answer.
-                        onOpenSectionChanged: if (openSection === "tokens") root.searchTokens("")
 
                         ColumnLayout {
                             anchors.fill: parent
                             anchors.margins: Theme.spacing.medium
                             spacing: Theme.spacing.tiny
 
-                            SettingsSection {
-                                id: addressBookSection
-                                objectName: "addressBookSection"
-                                title: "Address book"
+                            SettingsEntry {
+                                objectName: "addressBookEntry"
+                                text: "Address book"
                                 chevron: root.iconTriangleDown
-                                body: addressBookComponent
-                                expanded: settingsPage.openSection === "addressBook"
-                                onToggled: settingsPage.openSection = expanded ? "" : "addressBook"
+                                onClicked: root.openAddressBook()
                             }
-                            SettingsSection {
-                                id: networksSection
-                                objectName: "networksSection"
-                                title: "Networks"
+                            SettingsEntry {
+                                objectName: "networksEntry"
+                                text: "Networks"
                                 chevron: root.iconTriangleDown
-                                body: networksComponent
-                                expanded: settingsPage.openSection === "networks"
-                                onToggled: settingsPage.openSection = expanded ? "" : "networks"
+                                onClicked: root.openNetworks()
                             }
-                            SettingsSection {
-                                id: tokensSection
-                                objectName: "tokensSection"
-                                title: "Tokens"
+                            SettingsEntry {
+                                objectName: "tokensEntry"
+                                text: "Tokens"
                                 chevron: root.iconTriangleDown
-                                body: manageTokensComponent
-                                expanded: settingsPage.openSection === "tokens"
-                                onToggled: settingsPage.openSection = expanded ? "" : "tokens"
+                                onClicked: root.openManageTokens()
                             }
 
-                            // Nothing open leaves the three headers at the top rather than
-                            // spread down the tab.
-                            Item { Layout.fillHeight: settingsPage.openSection === "" }
+                            Item { Layout.fillHeight: true }
                         }
                     }
                 }
@@ -2766,21 +2718,40 @@ Item {
                         DetailRow {
                             objectName: "tokenMetadataRow"
                             label: "Metadata"
+                            // Every name the backend documents, not three of them. "shipped"
+                            // was never one of its answers, so that branch was dead — and the
+                            // else caught `embedded`, `custom`, `enabled` and `unknown` and
+                            // called all four this wallet's own list, which is what a row
+                            // enabled from a token list wrongly said.
                             value: tokenPage.tok.metadataSource === "native"     ? "Defined by the network"
-                                 : tokenPage.tok.metadataSource === "shipped"    ? "Included with this wallet"
-                                 : tokenPage.tok.metadataSource === "downloaded" ? "From a downloaded token list"
-                                                                                 : "This wallet's built-in list"
+                                 : tokenPage.tok.metadataSource === "allowlist"  ? "This wallet's built-in list"
+                                 : tokenPage.tok.metadataSource === "embedded"   ? "A token list shipped with this device"
+                                 : tokenPage.tok.metadataSource === "downloaded" ? "A token list downloaded on this device"
+                                 : tokenPage.tok.metadataSource === "custom"     ? "A token list you added"
+                                 : tokenPage.tok.metadataSource === "enabled"    ? "A snapshot taken when you enabled it"
+                                 : tokenPage.tok.metadataSource === "unknown"    ? "A token list that did not say which"
+                                                                                 : "—"
                         }
 
+                        // Only where the row above leaves something unsaid. It used to be
+                        // unconditional and claimed this wallet downloads no token lists —
+                        // untrue since token_list arrived, and printed over rows that had come
+                        // from a downloaded list.
                         LogosText {
                             objectName: "tokenListNote"
                             Layout.fillWidth: true
+                            visible: text.length > 0
                             wrapMode: Text.WordWrap
+                            textFormat: Text.PlainText
                             color: Theme.palette.textSecondary
                             font.pixelSize: Theme.typography.secondaryText
-                            text: "This wallet only shows tokens on its own built-in list, and "
-                                  + "does not download token lists. A token that is not on that "
-                                  + "list cannot appear here."
+                            text: tokenPage.tok.metadataSource === "allowlist"
+                                  ? "Named by this wallet's own table. No token list on this "
+                                    + "device carries this contract."
+                                  : tokenPage.tok.metadataSource === "enabled"
+                                    ? "You enabled this from a list that no longer carries it, "
+                                      + "so the name and decimals here are the snapshot taken then."
+                                    : ""
                         }
                     }
                 }
@@ -3392,6 +3363,19 @@ Item {
                 anchors.margins: Theme.spacing.medium
                 spacing: Theme.spacing.small
 
+                RowLayout {
+                    Layout.fillWidth: true
+                    HoverIcon {
+                        objectName: "networksBack"
+                        size: 32
+                        iconSize: 20
+                        iconSource: root.iconArrowLeft
+                        onClicked: root.back()
+                    }
+                    LogosText { text: "Networks"; font.pixelSize: 20 }
+                    Item { Layout.fillWidth: true }
+                }
+
                 // Read-only here: eth_rpc's chains.json is DEVICE-WIDE and shared with every
                 // Logos wallet, so this wallet reports it and the Ethereum RPC app owns it.
                 // The button below asks for that app by capability rather than by name, so a
@@ -3461,6 +3445,19 @@ Item {
                 anchors.fill: parent
                 anchors.margins: Theme.spacing.medium
                 spacing: Theme.spacing.small
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    HoverIcon {
+                        objectName: "addressBookBack"
+                        size: 32
+                        iconSize: 20
+                        iconSource: root.iconArrowLeft
+                        onClicked: root.back()
+                    }
+                    LogosText { text: "Address book"; font.pixelSize: 20 }
+                    Item { Layout.fillWidth: true }
+                }
 
                 // These are COUNTERPARTIES. Saying so is worth a line: a user who reads this
                 // as "my accounts" would look here for one and conclude it had been lost.
@@ -3723,6 +3720,20 @@ Item {
 
                 RowLayout {
                     Layout.fillWidth: true
+                    HoverIcon {
+                        objectName: "manageTokensBackButton"
+                        size: 32
+                        iconSize: 20
+                        iconSource: root.iconArrowLeft
+                        onClicked: root.back()
+                    }
+                    LogosText {
+                        objectName: "manageTokensTitle"
+                        textFormat: Text.PlainText
+                        text: "Manage tokens"
+                        font.pixelSize: Theme.typography.panelTitleText
+                        font.weight: Theme.typography.weightMedium
+                    }
                     Item { Layout.fillWidth: true }
                     // What THIS screen turns on and off is which tokens the wallet shows.
                     // Where those tokens come from — the lists, their URLs, a custom one — is

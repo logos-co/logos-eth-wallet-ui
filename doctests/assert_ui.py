@@ -745,7 +745,7 @@ print("   system's own copy button was the only one that did, and it looked like
 print("   out in a row of three. It was the one that was right.")
 check("no icon button is a bare LogosIconButton",
       re.findall(r"^\s*LogosIconButton \{", qml, re.M), [])
-check("...they all come from the one hover-aware rule", len(icon_buttons), 10)
+check("...they all come from the one hover-aware rule", len(icon_buttons), 13)
 check("...which is stated once", qml.count("component HoverIcon:"), 1)
 check("...and the tint follows the cursor",
       qml_binding("HoverIcon", "iconColor") or
@@ -760,9 +760,7 @@ print("   any other")
 backs = [b for b in icon_buttons if "iconArrowLeft" in b]
 check("every back arrow is one size",
       sorted({re.search(r"iconSize: (\d+)", b).group(1) for b in backs}), ["20"])
-# Two, not five: Address book, Networks and Manage tokens are sections of the Settings tab
-# now, and a section has nothing to go back FROM. Only the two pushed detail screens do.
-check("...on every screen there is to leave", len(backs), 2)
+check("...on every screen there is to leave", len(backs), 5)
 
 check("the four spinner-bearing claims",
       sorted(set(re.findall(r"beginClaim\((m_\w+)", code))),
@@ -945,22 +943,25 @@ check("the choice is counted before the call that can pump a stale reply in",
 check("...and the rule that drops one older than it is a pure function, run by a table",
       "adoptedTokenSort(reply, issuedAt, m_sortChoiceGen)" in fn_body("adoptTokenSort"), True)
 
-print("0o) Manage tokens: a SECTION of the Settings tab, listing what the BACKEND answered")
-print("    for a query. doctests/probe_manage_tokens.qml drives it.")
+print("0o) Manage tokens: a SCREEN pushed from the Settings tab, listing what the BACKEND")
+print("    answered for a query. doctests/probe_manage_tokens.qml drives it.")
+print("   the Settings tab is an INDEX: three rows that GO somewhere, the way a token row goes")
+print("   to a token. Each names its destination through one function, so the route into a")
+print("   screen and the work that route owes are in the same place.")
 settings = qml[qml.index('objectName: "settingsPage"'):qml.index("// ── token detail")]
-check("the Settings tab holds all three screens, as sections",
-      sorted(re.findall(r"body: (\w+Component)", settings)),
+check("the Settings tab offers all three screens",
+      sorted(re.findall(r"onClicked: root\.(open\w+)\(\)", settings)),
+      ["openAddressBook", "openManageTokens", "openNetworks"])
+check("...and each of those PUSHES, so the screen has somewhere to go back to",
+      sorted({m for m in re.findall(r"nav\.pushItem\((\w+Component)\)", qml)
+              if m in ("addressBookComponent", "networksComponent", "manageTokensComponent")}),
       ["addressBookComponent", "manageTokensComponent", "networksComponent"])
-print("   each body is behind a Loader keyed on its own section, so a closed one holds no")
-print("   item at all — three screens live in one tab only because two of them are not built")
-check("...each loaded only while its own section is open",
-      len(re.findall(r'expanded: settingsPage\.openSection === "', settings)), 3)
-print("   the read is keyed on the section being OPEN, not on the route that opened it. It")
-print("   used to sit in openManageTokens(), whose only caller was a button the Settings tab")
-print("   replaced — so the header click built the screen, asked for nothing, and left an")
-print("   em-dash standing. probe_manage_tokens now opens the way a user must and asserts it.")
-check("...and opening the section is what reads the offered set",
-      'onOpenSectionChanged: if (openSection === "tokens") root.searchTokens("")' in qml, True)
+print("   opening the catalogue is also what READS it. Keep the two together: when the read")
+print("   sat apart from the route, a route appeared that did not read, and the screen showed")
+print("   an em-dash for ever.")
+check("...and opening it reads, rather than showing the last answer",
+      in_order(qml_fn_body(qml_body, "openManageTokens"),
+               "nav.pushItem(manageTokensComponent)", 'root.searchTokens("")'), True)
 check("...from exactly one place, so no route can reach the screen without it",
       len([l for l in qml_lines
            if 'root.searchTokens("")' in l and not l.strip().startswith("//")]), 1)
@@ -1003,6 +1004,24 @@ check("...and the switch puts its binding back rather than keeping the press",
                "Qt.binding", "root.setTokenEnabled(modelData.address, want)"), True)
 check("...while a builtin, and the native token, cannot be pressed at all",
       "!manageRow.locked" in qml_binding("manageTokenToggle_", "enabled"), True)
+
+print("0o2) the token screen says WHERE a row's name and decimals came from, for every answer")
+print("     the backend can give. eth_wallet_backend's list_tokens documents the vocabulary:")
+print("     native | allowlist | custom | downloaded | embedded | unknown | enabled.")
+print("     The branch reading \"shipped\" matched none of them, and the else called four of")
+print("     them this wallet's own built-in list — which is what a row enabled from a token")
+print("     list wrongly showed, over a note saying this wallet downloads no lists at all.")
+_meta = " ".join(qml_item("tokenMetadataRow"))
+check("every metadataSource the backend documents has its own answer",
+      sorted(set(re.findall(r'metadataSource === "(\w+)"', _meta))),
+      ["allowlist", "custom", "downloaded", "embedded", "enabled", "native", "unknown"])
+print("     and the note beside it speaks only where the row leaves something unsaid — a")
+print("     name nothing decorated, or a snapshot of a list that has since dropped the row")
+_note = " ".join(qml_item("tokenListNote"))
+check("the note is conditional, not a standing claim",
+      sorted(set(re.findall(r'metadataSource === "(\w+)"', _note))), ["allowlist", "enabled"])
+check("...and no longer says this wallet downloads no token lists",
+      "does not download token lists" in qml, False)
 
 print("0p) Manage tokens says WHICH of its several nothings it is looking at. The reply")
 print("    carries three counts and an optional error, and the four answers they encode")
@@ -1232,9 +1251,9 @@ check("there is no Settings popup left to hold links to any of them",
 check("...nor three buttons in the chrome, which is what replaced it",
       [n for n in ("addressBookButton", "networksButton", "manageTokensButton")
        if n in qml_body], [])
-check("...each is a section of the Settings tab, reached by one named function",
-      all(f'root.openSettings("{k}")' in qml_body
-          for k in ["addressBook", "networks", "tokens"]), True)
+check("...each is a screen the Settings tab pushes, reached by one named function",
+      all(f"function open{n}()" in qml_body or f"function open{n}() {{" in qml_body
+          for n in ["AddressBook", "Networks", "ManageTokens"]), True)
 print()
 print("what the Tokens screen turns on and off is which tokens this wallet SHOWS. Where they")
 print("come from is device-wide and owned elsewhere, exactly as the endpoint is — so it asks")
@@ -1352,8 +1371,10 @@ check("chip on the token screen", props("chainChip").get("text"), "SEPOLIA · TE
 print("   the metadata row discriminates; the boolean it replaces said No for ETH forever")
 check("no explorer row anywhere", oid("tokenExplorerRow"), None)
 check("metadata row instead", props("tokenMetadataRow").get("value"), "Defined by the network")
-check("and the card says what the list is", props("tokenListNote").get("text"),
-      "does not download token lists", "contains")
+print("   and the note beside it is SILENT for a row the row above already explains. It was")
+print("   unconditional, and said this wallet downloads no token lists — over rows that had")
+print("   come from a downloaded one.")
+check("no note over the native currency", props("tokenListNote").get("visible"), False)
 
 print("9) a copy button puts the WHOLE value on the clipboard, not the shortened display")
 me=props("addressCopyButton").get("value")

@@ -215,21 +215,20 @@ Item {
     property var logos: ({ module: function (n) { return fake }, isViewModuleReady: function (n) { return true } })
 
     function assertScreen() {
-        console.log("Manage tokens is a SECTION of the Settings tab, named by the accordion")
-        console.log("header rather than by a title of its own, and built only while it is open")
-        check("the section is loaded", find(view.item, "manageTokensPage") !== null, true)
-        check("...named by its own header", find(view.item, "tokensSectionHeader").text, "Tokens")
-        check("...and carrying no back arrow, having nothing to go back from",
-              find(view.item, "manageTokensBackButton"), null)
+        console.log("Manage tokens is a SCREEN pushed from the Settings tab — under the tab")
+        console.log("strip, with its own title and its own way back")
+        check("the screen is on the stack", find(view.item, "manageTokensPage") !== null, true)
+        check("...under MetaMask's own title", find(view.item, "manageTokensTitle").text,
+              "Manage tokens")
+        check("...with a back arrow", find(view.item, "manageTokensBackButton") !== null, true)
 
         console.log("")
-        console.log("and opening it READ the catalogue. The header click is the only route a")
-        console.log("user has; a route that builds the screen without asking leaves the em-dash")
+        console.log("and opening it READ the catalogue. The Settings row is the only route a")
+        console.log("user has; a route that pushes the screen without asking leaves the em-dash")
         console.log("below standing for ever, because nothing else ever asks")
-        check("opening the section read the offered set", probe.searchCount() >= 1, true)
+        check("opening the screen read the offered set", probe.searchCount() >= 1, true)
         check("...the WHOLE of it, not a query", probe.lastSearch(), "")
-        console.log("   and the other two sections are NOT built: a closed Loader holds no item,")
-        console.log("   which is the whole reason three screens fit in one tab")
+        console.log("   and pushing one does not build the other two")
         check("the address book is not standing", find(view.item, "addressBookPage"), null)
         check("...nor the networks screen", find(view.item, "networksPage"), null)
         check("...and the field asks for what MetaMask asks for",
@@ -485,19 +484,6 @@ Item {
               find(view.item, "manageTokensUnknown").visible, false)
     }
 
-    function assertAnotherTabIsNotSearched() {
-        console.log("")
-        console.log("...and a chain change with the section still OPEN but the tab left behind")
-        console.log("spends no call either. The screen is built and its rows are current, so")
-        console.log("nothing about the section itself says nobody is looking at it — only the")
-        console.log("tab being on screen does")
-        // Proved still built before the negative: "no call went out" is true of a screen that
-        // was never opened, so without this the control passes on its own.
-        check("the section is still built", find(view.item, "manageTokensPage") !== null, true)
-        check("...but the tab is not the one showing", find(view.item, "pages").currentIndex, 0)
-        check("no call went out for it", searchesSince(), 0)
-    }
-
     function assertClosedScreenIsNotSearched() {
         console.log("")
         console.log("...and a chain change with the screen CLOSED spends no call: re-opening it")
@@ -505,7 +491,11 @@ Item {
         console.log("when the chain first arrives")
         // Proved closed before the negative is asserted: "no call went out" is true of a
         // screen that never opened, so without this the control passes on its own.
-        check("the section really closed", find(view.item, "manageTokensPage"), null)
+        //
+        // The STACK's depth, not the item's absence: a pop runs a 400ms transition and this
+        // probe ticks at 300ms, so the item is still in the scene for a moment after the screen
+        // has been left. Depth moves on the pop itself.
+        check("the screen really closed", find(view.item, "nav").depth, 1)
         check("no call went out", searchesSince(), 0)
     }
 
@@ -530,11 +520,10 @@ Item {
                 return
             item.ready = true
             fake.availableTokensJson = probe.catalogue(probe.chain)
-            // The route a USER has: the Settings tab, then the section header. Opening through
-            // openManageTokens() instead drove a function with no caller in the view, which is
-            // how a header click that built the screen and never read it went unnoticed.
+            // The route a USER has: the Settings tab, then the row. Driving openManageTokens()
+            // instead once hid a route that pushed the screen and never read it.
             item.selectTab(4)
-            find(view.item, "tokensSectionHeader").clicked()
+            find(view.item, "tokensEntry").clicked()
             // The delegates do not exist until the view has laid out, which the handler that
             // loaded it cannot wait for.
             settle.start()
@@ -625,19 +614,8 @@ Item {
                 probe.assertChainChangeReSearches()
             } else if (probe.phase === 16) {
                 probe.assertRowsReturn()
-                // Leave the section OPEN and step off the tab. The catalogue is still built,
-                // so only `settingsPage.visible` can tell that nobody is looking at it.
-                view.item.selectTab(0)
-                probe.searchesBefore = probe.searchCount()
-                fake.activeNetworkJson = JSON.stringify({ chainId: probe.chain,
-                                                          name: "Sepolia",
-                                                          nativeSymbol: "ETH", testnet: true })
-            } else if (probe.phase === 17) {
-                probe.assertAnotherTabIsNotSearched()
-                // Now close it too. Collapsing the SECTION, not popping a screen: back() leaves
-                // the nav stack alone here and would have left the catalogue open and searching.
-                view.item.selectTab(4)
-                find(view.item, "tokensSectionHeader").clicked()
+                // Leaving it is popping the SCREEN again, the way a token detail is left.
+                view.item.back()
             } else {
                 probe.searchesBefore = probe.searchCount()
                 fake.activeNetworkJson = JSON.stringify({ chainId: probe.chain,
