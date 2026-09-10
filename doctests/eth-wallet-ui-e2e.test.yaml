@@ -229,38 +229,45 @@ sections:
               find_value: "pages"
               property: "currentIndex"
               value: 4
-            - name: "...with nothing open, so no screen was built for it"
+            - name: "...and nothing is pushed over it yet"
               action: expect_property
-              find_value: "settingsPage"
-              property: "openSection"
-              value: ""
-            - name: "...and its three sections are named"
+              find_value: "nav"
+              property: "depth"
+              value: 1
+            - name: "...and its three rows are named"
               action: wait_for
               texts: ["Address book", "Networks"]
               timeout: 10000
               screenshot: "eth-wallet-ui-settings.png"
 
-            - name: "Opening a section builds it"
+            - name: "A row pushes its screen"
               # A LogosItemDelegate, so this one IS clickable — unlike the tab bar.
               action: click_object
-              find_value: "tokensSectionHeader"
-            - name: "...and the tab says which is open"
+              find_value: "tokensEntry"
+            - name: "...onto the pane under the strip"
               action: expect_property
-              find_value: "settingsPage"
-              property: "openSection"
-              value: "tokens"
-            - name: "...and the catalogue screen is really there now"
+              find_value: "nav"
+              property: "depth"
+              value: 2
+            - name: "...and the catalogue screen is really there"
               action: expect_property
               find_value: "manageTokensPage"
               property: "visible"
               value: true
-
-            - name: "Closing it again"
-              action: click_object
-              find_value: "tokensSectionHeader"
-            - name: "...leaves nothing open"
+            - name: "...with its own way back, which a section had no need of"
               action: expect_property
-              find_value: "settingsPage"
-              property: "openSection"
-              value: ""
-              screenshot: "eth-wallet-ui-tokens-section.png"
+              find_value: "manageTokensTitle"
+              property: "text"
+              value: "Manage tokens"
+              screenshot: "eth-wallet-ui-tokens-screen.png"
+
+            - name: "Going back"
+              action: click_object
+              find_value: "manageTokensBackButton"
+            - name: "...leaves the stack where it started"
+              # The stack's depth, not the item's absence: a pop runs a transition, so the
+              # screen is still in the scene for a moment after it has been left.
+              action: expect_property
+              find_value: "nav"
+              property: "depth"
+              value: 1

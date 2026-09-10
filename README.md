@@ -9,13 +9,12 @@ on. Testnets are visually distinct from mainnet. **Nothing but the account and t
 sits above the tab strip**: a button that opens a tab, on top of that tab, is two answers to
 one question.
 
-**Settings** holds the three screens that are not a wallet's daily work — the address book,
-the networks, and which tokens this wallet shows — as an accordion, exactly one open at a
-time. Each body is behind a `Loader`, so a closed section holds no item: that is what makes
-three screens affordable in one tab, and it is also what makes "is the catalogue in front of
-the user?" answerable — the question a network change asks before it re-queries. One at a
-time rather than three disclosures, because each body carries its own list and scrolls
-itself, and stacking them would need an outer scroller over inner ones.
+**Settings** is an index of the three screens that are not a wallet's daily work — the address
+book, the networks, and which tokens this wallet shows. Each row **goes** there, the way a
+token row goes to a token: the screen is pushed onto the same StackView a token or a
+transaction uses, which sits under the tab strip. So a settings screen is a place inside the
+Settings tab, with its own title and its own way back, and the account and the network stay
+visible above it.
 
 ## What this module cannot do
 
