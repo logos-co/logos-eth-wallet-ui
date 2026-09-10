@@ -110,13 +110,13 @@ int main()
 
     std::printf("\nand the send names the CONTRACT to the backend, not a bare symbol\n");
     expect("the request carries the address", "SendRequest.tokenAddress",
-           has("r.tokenAddress = sendDialog.tokenAddress"));
+           has("r.tokenAddress = sendPage.tokenAddress"));
     expect("...written in one place", "selectToken() sets both fields together",
            has("function selectToken(t)")
-               && !has("sendDialog.token = root.tokens[currentIndex].symbol"));
+               && !has("sendPage.token = root.tokens[currentIndex].symbol"));
     expect("...and the picker chooses a ROW", "never a symbol off the model",
-           has("onActivated: sendDialog.selectToken(root.tokens[currentIndex])"));
-    expect("the dialog finds its row by identity", "tokenIndex matches tokenKey",
+           has("onActivated: sendPage.selectToken(root.tokens[currentIndex])"));
+    expect("the section finds its row by identity", "tokenIndex matches tokenKey",
            has("if (root.tokenKey(root.tokens[i]) === k) return i"));
 
     std::printf("\ntwo rows sharing a symbol are tellable apart by a human, too\n");

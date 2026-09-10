@@ -241,8 +241,9 @@ Item {
     }
 
     // ── the send picker ───────────────────────────────────────────────────────────
-    function dialog() { return find(view.item, "sendDialog") }
-    function form() { var d = dialog(); return d ? d.contentItem : null }
+    // Send is a SECTION now: its controls sit in the ordinary item tree, so there is no
+    // contentItem hop between the page and them, and entering it is a tab change.
+    function form() { return find(view.item, "sendForm") }
     function picker() { return find(form(), "sendTokenPicker") }
 
     // What a human does: the row is chosen, and THEN the signal fires — which is the order the
@@ -372,12 +373,12 @@ Item {
                 probe.assertTellableApart()
                 probe.assertOrderSurvives()
                 probe.assertSendNamesTheContract()
-                probe.dialog().open()
+                view.item.selectTab(1)
             } else if (probe.phase === 2) {
                 probe.pick(2)
                 probe.priceFor(probe.lighter)
                 probe.assertQuotePricedContract()
-                probe.dialog().close()
+                view.item.selectTab(0)
                 view.item.openTokenDetail(probe.key(probe.lighter))
             } else if (probe.phase === 3) {
                 console.log("")

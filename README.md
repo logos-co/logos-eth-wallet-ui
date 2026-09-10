@@ -3,7 +3,7 @@
 Send ether on one Ethereum network at a time, with the full set of fee controls.
 
 Information design follows MetaMask: one question per screen, everything else behind a
-disclosure. Two tabs (Tokens, Activity), one action (Send), and **the active network visible
+disclosure. Three sections (Tokens, Send, Activity) and **the active network visible
 at all times** — a user must never be able to mistake which chain they are spending on.
 Testnets are visually distinct from mainnet.
 
@@ -26,10 +26,11 @@ that were only forwarded say so where they are shown, on the Activity tab and in
 
 Validation lives in the backend. Setting a priority fee above the max fee, or sending more
 than the balance covers, surfaces the **backend's** refusal verbatim — the UI adds no rule of
-its own, so the two cannot drift apart. Those refusals render **inside the Send dialog**: it
-is modal, so a message on the wallet's own error line sits behind the scrim where nobody is
-looking. The dialog closes on `pendingRequestId`, never on the click, so a submit that was
-refused stays on screen with its reason.
+its own, so the two cannot drift apart. Those refusals render **beside the control that caused
+them**, in the Send section: the wallet's own error line sits above the tab bar, so a send
+refused after a scroll down to Advanced would report itself off-screen. The section is left
+on `pendingRequestId`, never on the click, so a submit that was refused stays on screen with
+its reason.
 
 ## What a figure on screen belongs to
 
