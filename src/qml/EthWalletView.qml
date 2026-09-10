@@ -40,6 +40,14 @@ Item {
     // 1.5s and never names the value, so a test cannot assert on it without racing.
     property string lastCopiedValue: ""
 
+    // Seeded as well as fed. The signal is the only thing that MOVES `ready`, but a view
+    // built after ui-host handed over never sees one — and with no seed it latches false for
+    // the life of the tab: every control disabled, every list empty, nothing to retry.
+    // `isViewModuleReady` is a function call, so it cannot be a binding; SignerView carries
+    // the same two lines for the same reason.
+    Component.onCompleted: root.ready = root.backend !== null
+                                        && logos.isViewModuleReady("eth_wallet_ui")
+
     Connections {
         target: logos
         function onViewModuleReadyChanged(moduleName, isReady) {
@@ -51,9 +59,19 @@ Item {
     // the backend refused must stay on screen with its reason, which is the whole point of
     // moving the error inside the modal. At root scope because a Connections declared inside a
     // Popup that also sets contentItem is reparented into that contentItem.
+    // The main wallet view, as opposed to any screen pushed over it. One reading, so the two
+    // header rows cannot come to disagree about what "home" is.
+    readonly property bool homeChrome: nav !== null && nav.depth <= 1
+
     // What came back from asking another app to do something, when it is worth saying.
     // Empty is the normal state: a request that reached a provider hands the user over to
     // it, so this screen is not the one they are reading.
+    // True from the click until the backend has either taken the send or refused it. The
+    // gap is real work — pricing, a nonce reservation and the keystore's approval record —
+    // and it happens with the dialog still up and nothing moving, so a user cannot tell a
+    // slow send from a click that missed. Cleared by both outcomes below.
+    property bool sendSubmitting: false
+
     property string approvalNote: ""
     property string intentNote: ""
     // The outcome the user has already seen. Reset whenever a new send clears the backend's,
@@ -61,6 +79,12 @@ Item {
     property string dismissedOutcome: ""
 
     readonly property var sendOutcome: root.ready ? j(backend.lastSendOutcomeJson, "{}") : ({})
+    // The whole hash, never the shortened one: it is what goes on the clipboard and what
+    // addresses the detail screen.
+    readonly property string outcomeHash: root.sendOutcome.hash !== undefined
+                                          ? String(root.sendOutcome.hash) : ""
+
+    function dismissOutcome() { root.dismissedOutcome = root.backend.lastSendOutcomeJson }
     readonly property bool showOutcome: root.ready && !root.sendPending
         && backend.lastSendOutcomeJson !== ""
         && backend.lastSendOutcomeJson !== root.dismissedOutcome
@@ -85,21 +109,58 @@ Item {
     // still approvable, the user can approve from the Signer app by hand with no intent in
     // flight at all, and a host with no intent router answers `unavailable` locally. So this
     // callback never moves the send — it only explains a trip that did not happen.
+    // Codes that mean the intent path is CLOSED and no human is looking at the record. The
+    // keystore cannot tell "nobody is coming" from "someone is coming, slowly" — with a
+    // dispatch in flight the signer is often not even loaded yet, so early silence and
+    // absence look identical from there. This side knows, because the dispatch completed.
+    // Cancelling here is what lets the keystore's own timer be garbage collection for a dead
+    // requester rather than a clock racing a human.
+    //
+    // `cancelled` is on this list, and that is a decision rather than an omission. It means
+    // the user dismissed the chooser or walked away from the signer — they declined to route
+    // it. Leaving the record standing put them in front of a "Waiting for approval" dialog
+    // whose only button was "Cancel send": asked to say no a second time, with no other
+    // option on offer.
+    //
+    // `unavailable` is NOT, and must not be. It may mean the signer is merely unreachable BY
+    // INTENT while still openable by hand, and that manual path is the fallback this whole
+    // design rests on — withdrawing there would delete the record the user was just told to
+    // go and approve.
+    function intentPathIsClosed(error) {
+        return error === "bad_request" || error === "not_declared"
+            || error === "timeout" || error === "cancelled"
+    }
+
     function askToApprove() {
         var handle = root.ready ? root.backend.pendingApprovalHandle : ""
         if (handle === "") return
         root.approvalNote = ""
         logos.request("evm.signing.approve", ({ handle: handle }), function (res) {
-            if (res.ok || res.error === "cancelled") return
+            if (res.ok) return
+            // Declining is not a fault to report back at them; it is just the end of it.
+            if (res.error === "cancelled") { root.backend.cancelSend(); return }
             root.approvalNote = res.error === "unavailable"
                 ? "Approve this transaction in the Signer app to send it."
                 : "Could not reach a signer (" + res.error + ")."
+            // Withdraw the approval rather than leaving it to expire. The send is settled by
+            // `send_status` either way — this only decides whether the record dies now or
+            // sits until the keystore collects it.
+            if (root.intentPathIsClosed(res.error))
+                root.backend.cancelSend()
         })
     }
 
     Connections {
         target: root.ready ? root.backend : null
-        function onPendingRequestIdChanged() { if (root.sendPending) sendDialog.close() }
+        // Either outcome ends the wait: the backend took it (a request id appears) or
+        // refused it (an error does). Both have to clear, or a refusal leaves the button
+        // dead and the only way out is closing the dialog.
+        function onPendingRequestIdChanged() {
+            if (root.sendPending) { root.sendSubmitting = false; sendDialog.close() }
+        }
+        function onSendErrorChanged() {
+            if (root.backend.sendError.length > 0) root.sendSubmitting = false
+        }
 
         // The handle arrives with the request id, and asking is the whole point of having it.
         function onPendingApprovalHandleChanged() {
@@ -127,7 +188,11 @@ Item {
     readonly property var accounts: ready ? j(backend.accountsJson, "[]") : []
     // { "<lowercase hex, no 0x>": "<name>" }, relayed from the keystore.
     readonly property var accountLabels: ready ? j(backend.accountLabelsJson, "{}") : ({})
+    readonly property var accountWallets: ready ? j(backend.accountWalletsJson, "{}") : ({})
     readonly property var fees: ready ? j(backend.feeTiersJson, "{}") : ({})
+    readonly property bool feeTiersLoading: ready && backend.feeTiersLoading
+    // Same rule as the balances: unknown AND being read spins, unknown and idle does not.
+    readonly property bool feesPending: feeTiersLoading && root.fees.source === undefined
 
     // eth_rpc's verdict for the active chain, relayed by the backend. `blocking` true means
     // this view is deliberately showing no chain data at all.
@@ -141,9 +206,36 @@ Item {
     // throughout — an em-dash or a spinner, never a zero and never "none".
     readonly property bool scoped: ready && backend.scopedDataFresh
     readonly property bool dataLoading: ready && backend.dataLoading
+    readonly property bool balancesLoading: ready && backend.balancesLoading
+
+    // Neutral copies of five design-system icons. LogosIconButton colorizes its source, and
+    // colorization preserves luminance — so an SVG that ships #5C5C5C or #969696 stays dark
+    // whatever `iconColor` asks for, and reads as a disabled control. copy, check, close and
+    // grid already ship white; these five did not. Local rather than fixed upstream because
+    // those files are shared with Basecamp and the package manager, where the darker weight
+    // is what ships today. Delete these the day the design system normalises them.
+    readonly property url iconArrowLeft: Qt.resolvedUrl("assets/arrow-left.svg")
+
+    // `flat` hides the background entirely, so a flat icon button has NO hover feedback at
+    // all unless its tint reacts — and a control that never changes under the cursor reads as
+    // decoration. The design system's own LogosCopyButton is the only one that does this, and
+    // it looked like the odd one out in a row of three; it is the one that was right.
+    component HoverIcon: LogosIconButton {
+        flat: true
+        iconColor: isActive ? Theme.palette.text : Theme.palette.textTertiary
+    }
+    readonly property url iconList: Qt.resolvedUrl("assets/list.svg")
+    readonly property url iconRefresh: Qt.resolvedUrl("assets/refresh.svg")
+    readonly property url iconTrash: Qt.resolvedUrl("assets/trash.svg")
+    readonly property url iconTriangleDown: Qt.resolvedUrl("assets/triangle-down.svg")
+
     readonly property bool quoteLoading: ready && backend.quoteLoading
 
     readonly property bool balancesKnown: scoped && backend.balancesJson.length > 0
+    // Unknown AND being read is a spinner; unknown and not being read is an em-dash. The rep
+    // states that rule; the Tokens tab was the one screen that did not honour it. Gated on the
+    // balances leg, not the lane: the lane stays up through the history call that follows.
+    readonly property bool balancesPending: !balancesKnown && balancesLoading
     readonly property var balances: balancesKnown ? j(backend.balancesJson, "[]") : []
     // eth_rpc's label for the read behind the balances on screen — the ONLY thing here that
     // can be proof-backed. Withdrawn with them: a claim cannot outlive the figure it is about.
@@ -286,6 +378,40 @@ Item {
     readonly property string selected: ready ? backend.selectedAccount : ""
     // Destinations offered in the Send picker. You cannot mean to pick the account you are
     // sending from out of a list of recipients; typing it is still allowed, and warned about.
+    readonly property var contacts: ready ? j(backend.contactsJson, "[]") : []
+
+    function contactName(a) {
+        for (var i = 0; i < contacts.length; ++i)
+            if (sameHex(contacts[i].address, a)) return contacts[i].name || ""
+        return ""
+    }
+    function isContact(a) {
+        for (var i = 0; i < contacts.length; ++i)
+            if (sameHex(contacts[i].address, a)) return true
+        return false
+    }
+
+    // Who this account has actually paid, newest first and each address once. Read off the
+    // history it already has rather than stored: a second list of recipients would be a copy
+    // free to disagree with the transactions it was derived from.
+    //
+    // `to` is the RECIPIENT for both kinds, which is the field wanted here. It is not the
+    // transaction's own `to`: for an ERC-20 send that is the token contract, and offering a
+    // contract back as somewhere to send to is how a user burns funds into one. `rawTo` is
+    // the function for that, and it is deliberately not the one used here.
+    readonly property var recentRecipients: {
+        var seen = ({}), out = []
+        for (var i = 0; i < history.length; ++i) {
+            var a = history[i].to || ""
+            if (!a || !a.length) continue
+            var k = a.toLowerCase()
+            if (seen[k]) continue
+            seen[k] = true
+            out.push(a)
+        }
+        return out
+    }
+
     readonly property var otherAccounts: accounts.filter(function (a) {
         return typeof a === "string" && a.length > 0 && !root.sameHex(a, root.selected)
     })
@@ -310,6 +436,16 @@ Item {
         if (nav.depth > 1) nav.popToIndex(0, StackView.Immediate)
         nav.pushItem(txDetailComponent, { hash: hash })
     }
+    function openNetworks() {
+        if (nav.depth > 1) nav.popToIndex(0, StackView.Immediate)
+        nav.pushItem(networksComponent)
+    }
+
+    function openAddressBook() {
+        if (nav.depth > 1) nav.popToIndex(0, StackView.Immediate)
+        nav.pushItem(addressBookComponent)
+    }
+
     function openManageTokens() {
         if (nav.depth > 1) nav.popToIndex(0, StackView.Immediate)
         nav.pushItem(manageTokensComponent)
@@ -564,12 +700,45 @@ Item {
     // The name when there is one, the short address otherwise. Never an invented "Account 2":
     // a positional name RENUMBERS when an account is added or removed, which in an account
     // picker means the label silently comes to mean a different account.
-    function accountDisplay(a) { var n = accountLabel(a); return n.length ? n : shortAddr(a) }
+    function accountWallet(a) {
+        if (!a) return null
+        for (var key in accountWallets) if (sameHex(key, a)) return accountWallets[key]
+        return null
+    }
 
-    // "Treasury · 0x7099…79C8" when the address has a name, the short address alone otherwise.
-    function namedAddr(a) {
+    // Every name this wallet knows for an address, in the order they answer for it: the
+    // account's own, then the WALLET it was derived under, then the address book. Empty when
+    // it knows none.
+    //
+    // `#index` is the DERIVATION index, off the account's own path, and it is stable for the
+    // life of the account. A position in a list would not be: it renumbers when an account is
+    // added or removed, so the label would silently come to mean a different account — which
+    // is the whole reason nothing here invents "Account 2".
+    function displayName(a) {
         var n = accountLabel(a)
-        return (n.length ? n + " · " : "") + shortAddr(a)
+        if (n.length) return n
+        var w = accountWallet(a)
+        if (w && w.wallet)
+            return w.index !== undefined ? w.wallet + " #" + w.index : w.wallet
+        return contactName(a)
+    }
+
+    // ONE rule for showing an address anywhere in this wallet, and the name never REPLACES
+    // the address. A name is this wallet's own word for who that is and cannot be checked
+    // against what was signed; the address is what the name existed to save the user reading.
+    // So both, whenever a name is known at all: "Treasury (0x7099…79C8)".
+    function namedAddr(a) {
+        var n = displayName(a)
+        return n.length ? n + " (" + shortAddr(a) + ")" : shortAddr(a)
+    }
+
+    // What a CLOSED picker shows: the name, or the short address when there is none. Not
+    // both — the selected account's address is displayed beside the control, and a 220px box
+    // holding a name and an address elides, taking the address with it. The open list shows
+    // both, on two lines, which is what `AccountPicker` below is for.
+    function accountDisplay(a) {
+        var n = displayName(a)
+        return n.length ? n : shortAddr(a)
     }
 
     // Both are still `pending` on disk. Blocked means the chain was never asked at all —
@@ -791,6 +960,172 @@ Item {
     // Label left, value right. A non-empty copyValue swaps the value for a selectable one
     // with a copy button; the display string is pre-shortened because LogosSelectableText is
     // a TextEdit and clips rather than elides.
+    // A label, the name this wallet knows, and the address IN FULL underneath. Two lines,
+    // because one line holding both is a line something elides — and the name is ours to
+    // shorten while the address is not: 0xa1E2…247E already dropped 30 characters, and a
+    // container that trims it again leaves a string that identifies nothing.
+    //
+    // So the name elides and the address WRAPS. Used where there is room for the whole thing:
+    // a transaction's detail and the address book. A picker shows the short form instead, on
+    // its own line, where nothing further can cut it.
+    component NamedAddressRow: ColumnLayout {
+        id: nrow
+        property string label: ""
+        property string address: ""
+        signal copied(string value)
+
+        Layout.fillWidth: true
+        spacing: 2
+
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: Theme.spacing.medium
+            LogosText {
+                text: nrow.label
+                color: Theme.palette.textSecondary
+                font.pixelSize: Theme.typography.secondaryText
+                Layout.preferredWidth: 132
+            }
+            LogosText {
+                objectName: nrow.objectName.length > 0 ? nrow.objectName + "Name" : ""
+                Layout.fillWidth: true
+                visible: text.length > 0
+                textFormat: Text.PlainText
+                text: root.displayName(nrow.address)
+                horizontalAlignment: Text.AlignRight
+                elide: Text.ElideRight
+            }
+        }
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: Theme.spacing.small
+            Item { Layout.preferredWidth: 132 }
+            LogosSelectableText {
+                objectName: nrow.objectName.length > 0 ? nrow.objectName + "Address" : ""
+                Layout.fillWidth: true
+                text: nrow.address
+                color: Theme.palette.textSecondary
+                font.family: Theme.typography.mono
+                font.pixelSize: Theme.typography.secondaryText
+                // Wrapped, never elided. A detail screen has the room, and half an address is
+                // worse than an address on two lines.
+                wrapMode: Text.WrapAnywhere
+                horizontalAlignment: Text.AlignRight
+            }
+            LogosCopyButton {
+                // Named like the two buttons beside it in the address book row, which had one
+                // each while this had none — the only unlabelled control in the group.
+                ToolTip.text: "Copy"
+                ToolTip.visible: hovered
+                ToolTip.delay: 400
+                objectName: nrow.objectName.length > 0 ? nrow.objectName + "Copy" : ""
+                value: nrow.address
+                onCopied: function (v) { nrow.copied(v) }
+            }
+        }
+    }
+
+    // An account picker whose ROWS carry both halves without either cutting the other.
+    //
+    // A LogosComboBox row is one elided line, so "Name (0xa1E2…247E)" in it loses the
+    // address — already shortened from 42 characters to 11, and then trimmed again into
+    // something that identifies nothing. Two lines fixes that rather than choosing between
+    // them: the name may elide, because it is this wallet's own word and a user can widen the
+    // window; the short address may not, because there is nothing left to take.
+    //
+    // The model is ADDRESSES, not display strings. Names are resolved per row, so a rename
+    // lands without rebuilding the model — and the closed control asks the same resolver.
+    component AccountPicker: LogosComboBox {
+        id: picker
+        property var addresses: []
+        readonly property string currentAddress:
+            currentIndex >= 0 && currentIndex < addresses.length ? addresses[currentIndex] : ""
+
+        model: addresses
+        displayText: root.accountDisplay(picker.currentAddress)
+
+        // Overriding `delegate` replaces LogosComboBox's OWN, and with it the highlight and
+        // the pointer cursor that made a row look clickable. Both are restored here rather
+        // than left to the style: an ItemDelegate's default background is transparent, so
+        // without this the list is inert-looking text that happens to respond.
+        delegate: ItemDelegate {
+            id: accountItem
+            width: picker.popupListView ? picker.popupListView.width : picker.width
+            objectName: "accountRow_" + index
+            highlighted: picker.highlightedIndex === index
+            background: Rectangle {
+                color: accountItem.highlighted ? Theme.palette.surface : "transparent"
+            }
+            HoverHandler {
+                cursorShape: accountItem.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+            }
+            contentItem: ColumnLayout {
+                spacing: 0
+                LogosText {
+                    Layout.fillWidth: true
+                    objectName: "accountRowName_" + index
+                    visible: text.length > 0
+                    textFormat: Text.PlainText
+                    text: root.displayName(modelData)
+                    elide: Text.ElideRight
+                }
+                LogosText {
+                    Layout.fillWidth: true
+                    objectName: "accountRowAddress_" + index
+                    textFormat: Text.PlainText
+                    text: root.shortAddr(modelData)
+                    color: Theme.palette.textSecondary
+                    font.family: Theme.typography.mono
+                    font.pixelSize: Theme.typography.secondaryText
+                    // Never elided. It is already the mid-ellided form; a second cut leaves a
+                    // prefix that matches thousands of addresses.
+                    elide: Text.ElideNone
+                }
+            }
+        }
+    }
+
+    // A pick-one row for the recipient lists. Same two-line shape as the account picker's,
+    // and for the same reason — one line carrying a name and an address is a line that
+    // elides the address. The name may go; the short address may not.
+    component PickableAddress: ItemDelegate {
+        id: pick
+        property string address: ""
+        property string rowName: ""
+
+        // `hovered`, not `highlighted`: these live in a plain ListView, so nothing else is
+        // driving a highlighted index. Same reason as the account rows — an ItemDelegate
+        // draws no background of its own and would otherwise look inert.
+        background: Rectangle {
+            color: pick.hovered ? Theme.palette.surface : "transparent"
+        }
+        HoverHandler {
+            cursorShape: pick.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+        }
+
+        contentItem: ColumnLayout {
+            spacing: 0
+            LogosText {
+                Layout.fillWidth: true
+                objectName: pick.objectName.length > 0 ? pick.objectName + "Name" : ""
+                visible: text.length > 0
+                textFormat: Text.PlainText
+                text: pick.rowName.length > 0 ? pick.rowName : root.displayName(pick.address)
+                elide: Text.ElideRight
+            }
+            LogosText {
+                Layout.fillWidth: true
+                objectName: pick.objectName.length > 0 ? pick.objectName + "Address" : ""
+                textFormat: Text.PlainText
+                text: root.shortAddr(pick.address)
+                color: Theme.palette.textSecondary
+                font.family: Theme.typography.mono
+                font.pixelSize: Theme.typography.secondaryText
+                elide: Text.ElideNone
+            }
+        }
+    }
+
     component DetailRow: RowLayout {
         id: row
         property string label: ""
@@ -827,6 +1162,11 @@ Item {
                 font.family: row.mono ? Theme.typography.mono : Theme.typography.publicSans
             }
             LogosCopyButton {
+                // Named like the two buttons beside it in the address book row, which had one
+                // each while this had none — the only unlabelled control in the group.
+                ToolTip.text: "Copy"
+                ToolTip.visible: hovered
+                ToolTip.delay: 400
                 id: copyButton
                 // Named after its row, so a probe can assert the copy branch is really on
                 // screen rather than merely declared.
@@ -922,9 +1262,14 @@ Item {
                         LogosText {
                             textFormat: Text.PlainText
                             color: Theme.palette.textSecondary
-                            text: "To: " + root.shortAddr(modelData.to)
+                            text: "To: " + root.namedAddr(modelData.to)
                         }
                         LogosCopyButton {
+                            // Named like the two buttons beside it in the address book row, which had one
+                            // each while this had none — the only unlabelled control in the group.
+                            ToolTip.text: "Copy"
+                            ToolTip.visible: hovered
+                            ToolTip.delay: 400
                             objectName: "txToCopy_" + modelData.hash
                             value: modelData.to
                             onCopied: function (v) { root.lastCopiedValue = v }
@@ -947,17 +1292,22 @@ Item {
         anchors.margins: Theme.spacing.medium
         spacing: Theme.spacing.small
 
-        // ── header: account, address, and the chain chip that is always on screen ──
+        // ── header: the main view's chrome, and only the main view's ──
+        //
+        // All of it: the account it is about, the address, the chain the figures came from,
+        // and the three buttons that leave. A pushed screen is a place of its own with its
+        // own title and its own way back, and this row over the top of one is the previous
+        // screen still talking.
         RowLayout {
             Layout.fillWidth: true
+            visible: root.homeChrome
             spacing: Theme.spacing.small
 
-            LogosComboBox {
+            AccountPicker {
                 id: accountPicker
                 objectName: "accountPicker"
                 Layout.preferredWidth: 220
-                // Named like the Keystore app; the address sits beside the picker, not in it.
-                model: root.accounts.map(function (a) { return root.accountDisplay(a) })
+                addresses: root.accounts
                 enabled: root.ready && root.accounts.length > 0
                 onActivated: if (root.ready) root.backend.selectAccount(root.accounts[currentIndex])
 
@@ -966,19 +1316,62 @@ Item {
                 // different account from the address beside it is two answers to one question.
                 function syncIndex() { currentIndex = root.accountIndex(root.selected) }
                 Component.onCompleted: syncIndex()
-                onModelChanged: syncIndex()
+                onAddressesChanged: syncIndex()
             }
 
             // This picker only ever READS the account set — creating, importing and deleting
             // belong to whoever holds the keystore's custodian role. Asking for the
             // capability is how a wallet that holds no keys sends the user somewhere it
             // cannot go itself.
-            LogosButton {
+            //
+            // An icon, with the label moved to a tooltip: it sits between the picker and the
+            // address it names, where a word of chrome pushes the two apart. LogosIconButton
+            // carries no text of its own, so the tooltip is the only thing naming it and is
+            // not decoration.
+            HoverIcon {
                 objectName: "manageAccountsButton"
-                text: "Accounts"
+                size: 32
+                iconSize: 16
+                iconSource: LogosIcons.grid
+                ToolTip.text: "Accounts"
+                ToolTip.visible: hovered
+                ToolTip.delay: 400
                 onClicked: root.askFor("evm.accounts.manage",
                                        "No app on this device manages accounts.")
             }
+
+            Item { Layout.fillWidth: true }
+
+            // The three screens this wallet has, as buttons rather than a Settings popup.
+            // Each is a place with its own contents, and a dialog that only ever held links
+            // to them was a click in front of every one of them.
+            LogosButton {
+                objectName: "addressBookButton"
+                text: "Address book"
+                enabled: root.ready
+                onClicked: root.openAddressBook()
+            }
+            LogosButton {
+                objectName: "networksButton"
+                text: "Networks"
+                enabled: root.ready
+                onClicked: root.openNetworks()
+            }
+            LogosButton {
+                objectName: "manageTokensButton"
+                text: "Tokens"
+                enabled: root.ready
+                onClicked: root.openManageTokens()
+            }
+        }
+
+        // The selected account's address, and what network the figures above it are on.
+        // Under the buttons rather than among them: the buttons go somewhere, and these two
+        // say where you already are.
+        RowLayout {
+            Layout.fillWidth: true
+            visible: root.homeChrome
+            spacing: Theme.spacing.small
 
             // The one identifier a user hands out, so it is copyable wherever it appears.
             LogosSelectableText {
@@ -988,6 +1381,11 @@ Item {
                 font.family: Theme.typography.mono
             }
             LogosCopyButton {
+                // Named like the two buttons beside it in the address book row, which had one
+                // each while this had none — the only unlabelled control in the group.
+                ToolTip.text: "Copy"
+                ToolTip.visible: hovered
+                ToolTip.delay: 400
                 objectName: "addressCopyButton"
                 value: root.selected
                 onCopied: function (v) { root.lastCopiedValue = v }
@@ -995,8 +1393,7 @@ Item {
 
             Item { Layout.fillWidth: true }
 
-            // The active network, on every tab. Testnets are visually distinct so mainnet
-            // cannot be mistaken for one.
+            // Testnets are visually distinct so mainnet cannot be mistaken for one.
             LogosBadge {
                 objectName: "chainChip"
                 text: !root.netKnown ? "—"
@@ -1015,12 +1412,6 @@ Item {
                 visible: root.ready && chip !== "hidden"
                 text: root.chipText(chip)
                 color: root.chipColor(chip)
-            }
-
-            LogosButton {
-                objectName: "settingsButton"
-                text: "Settings"
-                onClicked: settingsDialog.open()
             }
         }
 
@@ -1099,15 +1490,38 @@ Item {
             }
         }
 
-        LogosText {
-            objectName: "errorLabel"
+        // The banner and the only way out of it. A failed first read otherwise left the
+        // wallet with no re-read a user could reach: nothing in this view calls `refresh`,
+        // the network retry covers a network read alone, and the receipt sweep cannot arm
+        // on a refusal.
+        RowLayout {
+            objectName: "errorRow"
             Layout.fillWidth: true
+            // A Layout nested in a Layout defaults to fillHeight TRUE — this row took the
+            // whole view and pushed everything below it off the bottom.
+            Layout.fillHeight: false
+            // Gated here rather than on each child: an invisible item is excluded from the
+            // layout, so with no error the row occupies nothing at all.
             visible: root.ready && root.backend.lastError.length > 0
-            // Backend-authored; may contain anything.
-            textFormat: Text.PlainText
-            wrapMode: Text.WordWrap
-            color: Theme.palette.error
-            text: root.ready ? root.backend.lastError : ""
+            spacing: 8
+
+            LogosText {
+                objectName: "errorLabel"
+                Layout.fillWidth: true
+                // Backend-authored; may contain anything.
+                textFormat: Text.PlainText
+                wrapMode: Text.WordWrap
+                color: Theme.palette.error
+                text: root.ready ? root.backend.lastError : ""
+            }
+            LogosButton {
+                objectName: "errorRetryButton"
+                enabled: root.ready
+                text: "Retry"
+                // `refresh` clears lastError on entry, so the banner and this button leave
+                // together and a second failure brings both back.
+                onClicked: root.backend.refresh()
+            }
         }
 
         LogosStackView {
@@ -1127,29 +1541,11 @@ Item {
                     anchors.fill: parent
                     spacing: Theme.spacing.small
 
-                    // ── balance + the one action ──
-                    RowLayout {
-                        Layout.alignment: Qt.AlignHCenter
-                        spacing: Theme.spacing.small
-                        LogosText {
-                            objectName: "primaryBalance"
-                            textFormat: Text.PlainText
-                            font.pixelSize: 34
-                            text: root.balanceDisplay(root.nativeToken)
-                                  + (root.nativeSymbol.length ? " " + root.nativeSymbol : "")
-                        }
-                        // Beside the em-dash, never instead of it: a bare dash at 34px reads as
-                        // breakage, and a spinner outliving its read reads as a hang.
-                        LogosSpinner {
-                            objectName: "balanceSpinner"
-                            Layout.alignment: Qt.AlignVCenter
-                            implicitWidth: 20
-                            implicitHeight: 20
-                            visible: !root.balancesKnown && root.dataLoading
-                            running: visible
-                            ringColor: Theme.palette.textSecondary
-                        }
-                    }
+                    // NO headline figure. A wallet's hero number is a PORTFOLIO total, and
+                    // this build has no prices and will not fetch any — so the only honest
+                    // candidate was one asset's balance at 34px, which reads as a total and
+                    // is not one. The same number is a row in the table below, under its own
+                    // symbol, where it means what it says.
 
                     LogosButton {
                         objectName: "openSendButton"
@@ -1205,13 +1601,12 @@ Item {
                                 }
                                 // `id`, not objectName alone: an objectName does not enter the
                                 // QML scope chain, so popupUnder() could not name it.
-                                LogosIconButton {
+                                HoverIcon {
                                     id: tokenSortButton
                                     objectName: "tokenSortButton"
-                                    flat: true
                                     size: 32
                                     iconSize: 16
-                                    iconSource: LogosIcons.list
+                                    iconSource: root.iconList
                                     enabled: root.ready
                                     onClicked: tokenSortMenu.popupUnder(tokenSortButton)
                                 }
@@ -1282,8 +1677,18 @@ Item {
 
                                         Item { Layout.fillWidth: true }
 
+                                        LogosSpinner {
+                                            objectName: "balanceSpinner_" + root.tokenKey(modelData)
+                                            Layout.alignment: Qt.AlignVCenter
+                                            implicitWidth: 16
+                                            implicitHeight: 16
+                                            visible: root.balancesPending
+                                            running: visible
+                                            ringColor: Theme.palette.textSecondary
+                                        }
                                         LogosText {
                                             objectName: "balance_" + root.tokenKey(modelData)
+                                            visible: !root.balancesPending
                                             textFormat: Text.PlainText
                                             text: root.balanceDisplay(modelData)
                                         }
@@ -1510,12 +1915,11 @@ Item {
 
                 RowLayout {
                     Layout.fillWidth: true
-                    LogosIconButton {
+                    HoverIcon {
                         objectName: "detailBackButton"
-                        flat: true
                         size: 32
                         iconSize: 20
-                        iconSource: LogosIcons.arrowLeft
+                        iconSource: root.iconArrowLeft
                         onClicked: root.back()
                     }
                     LogosText {
@@ -1559,7 +1963,7 @@ Item {
                         Layout.alignment: Qt.AlignVCenter
                         implicitWidth: 20
                         implicitHeight: 20
-                        visible: !root.balancesKnown && root.dataLoading
+                        visible: root.balancesPending
                         running: visible
                         ringColor: Theme.palette.textSecondary
                     }
@@ -1752,12 +2156,11 @@ Item {
 
                     RowLayout {
                         Layout.fillWidth: true
-                        LogosIconButton {
+                        HoverIcon {
                             objectName: "detailBackButton"
-                            flat: true
                             size: 32
                             iconSize: 20
-                            iconSource: LogosIcons.arrowLeft
+                            iconSource: root.iconArrowLeft
                             onClicked: root.back()
                         }
                         LogosText {
@@ -1770,12 +2173,11 @@ Item {
                         Item { Layout.fillWidth: true }
                         // Also offered on a settled row with no fee recorded: the sweep never
                         // re-polls a settled row, so only this can backfill an older one.
-                        LogosIconButton {
+                        HoverIcon {
                             objectName: "txDetailRefresh"
-                            flat: true
                             size: 32
                             iconSize: 18
-                            iconSource: LogosIcons.refresh
+                            iconSource: root.iconRefresh
                             // `txTo` present means a receipt was absorbed by a build carrying the
                             // fields below; an older settled row has a fee and would never have
                             // been offered the re-poll that backfills them.
@@ -1884,12 +2286,10 @@ Item {
                                 value: root.txMined(txPage.det, txPage.rec)
                             }
                             RowDivider {}
-                            DetailRow {
+                            NamedAddressRow {
                                 objectName: "txDetailFromRow"
                                 label: "From"
-                                mono: true
-                                value: root.namedAddr(txPage.rec.from)
-                                copyValue: txPage.rec.from || ""
+                                address: txPage.rec.from || ""
                                 onCopied: function (v) { root.lastCopiedValue = v }
                             }
                             // This card carries RAW transaction fields and nothing interpreted, so
@@ -1938,6 +2338,11 @@ Item {
                                     }
                                     Item { Layout.fillWidth: true }
                                     LogosCopyButton {
+                                        // Named like the two buttons beside it in the address book row, which had one
+                                        // each while this had none — the only unlabelled control in the group.
+                                        ToolTip.text: "Copy"
+                                        ToolTip.visible: hovered
+                                        ToolTip.delay: 400
                                         objectName: "txDetailDataCopy"
                                         visible: txPage.txInput.length > 0
                                         value: txPage.txInput
@@ -2028,20 +2433,16 @@ Item {
                                     // card below goes away and these are the ONLY rendering of
                                     // the recipient left — so they are copyable like every
                                     // other address here, not a truncated line.
-                                    DetailRow {
+                                    NamedAddressRow {
                                         objectName: "txDetailTransferFrom_" + index
                                         label: "From"
-                                        mono: true
-                                        value: root.namedAddr(modelData.from)
-                                        copyValue: modelData.from || ""
+                                        address: modelData.from || ""
                                         onCopied: function (v) { root.lastCopiedValue = v }
                                     }
-                                    DetailRow {
+                                    NamedAddressRow {
                                         objectName: "txDetailTransferTo_" + index
                                         label: "To"
-                                        mono: true
-                                        value: root.namedAddr(modelData.to)
-                                        copyValue: modelData.to || ""
+                                        address: modelData.to || ""
                                         onCopied: function (v) { root.lastCopiedValue = v }
                                     }
                                     LogosText {
@@ -2083,12 +2484,10 @@ Item {
                         contentItem: ColumnLayout {
                             spacing: Theme.spacing.tiny
 
-                            DetailRow {
+                            NamedAddressRow {
                                 objectName: "txDetailRecordedToRow"
                                 label: "Recorded recipient"
-                                mono: true
-                                value: root.namedAddr(txPage.rec.to)
-                                copyValue: txPage.rec.to || ""
+                                address: txPage.rec.to || ""
                                 onCopied: function (v) { root.lastCopiedValue = v }
                             }
                             LogosText {
@@ -2236,6 +2635,338 @@ Item {
     }
 
     // ── manage tokens ─────────────────────────────────────────────────────────────
+    // Which network this wallet is on, and who owns the endpoint it talks to.
+    //
+    // This was a popup with three links in it. A dialog whose whole content is links to
+    // other places is a click in front of each of them, so the places are the screens now
+    // and the popup is gone.
+    Component {
+        id: networksComponent
+
+        Item {
+            objectName: "networksPage"
+
+            ColumnLayout {
+                anchors.fill: parent
+                anchors.margins: Theme.spacing.medium
+                spacing: Theme.spacing.small
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    HoverIcon {
+                        objectName: "networksBack"
+                        size: 32
+                        iconSize: 20
+                        iconSource: root.iconArrowLeft
+                        onClicked: root.back()
+                    }
+                    LogosText { text: "Networks"; font.pixelSize: 20 }
+                    Item { Layout.fillWidth: true }
+                }
+
+                // Read-only here: eth_rpc's chains.json is DEVICE-WIDE and shared with every
+                // Logos wallet, so this wallet reports it and the Ethereum RPC app owns it.
+                // The button below asks for that app by capability rather than by name, so a
+                // second implementation of it would serve this just as well.
+                LogosText {
+                    objectName: "rpcSettingsNote"
+                    Layout.fillWidth: true
+                    wrapMode: Text.WordWrap
+                    textFormat: Text.PlainText
+                    color: Theme.palette.textSecondary
+                    text: "Endpoint: " + (root.net.rpcUrl && root.net.rpcUrl.length
+                                          ? root.net.rpcUrl : "not set")
+                          + "\nVerified routing: "
+                          + (root.vp.mode !== undefined ? root.vp.mode : "unknown")
+                          + "\n\nThese are shared with every Logos wallet on this device, and "
+                          + "are changed in the Ethereum RPC app."
+                }
+                LogosButton {
+                    objectName: "openRpcSettingsButton"
+                    text: "Change these"
+                    onClicked: root.askFor("evm.rpc.configure",
+                                           "Nothing on this device offers to change them.")
+                }
+                LogosText {
+                    objectName: "settingsIntentNote"
+                    Layout.fillWidth: true
+                    visible: root.intentNote.length > 0
+                    textFormat: Text.PlainText
+                    wrapMode: Text.WordWrap
+                    color: Theme.palette.textSecondary
+                    text: root.intentNote
+                }
+
+                LogosText {
+                    text: "Active network"
+                    color: Theme.palette.textSecondary
+                    Layout.topMargin: Theme.spacing.small
+                }
+                // One at a time, and the one in force is disabled rather than hidden: a
+                // selector that drops the current choice is a selector that cannot say what
+                // it is.
+                Repeater {
+                    model: root.networks
+                    LogosButton {
+                        objectName: "network_" + modelData.key
+                        Layout.fillWidth: true
+                        text: modelData.name + (modelData.testnet ? " (testnet)" : "")
+                        enabled: root.ready && modelData.chainId !== root.net.chainId
+                        onClicked: root.backend.setActiveChain(modelData.chainId)
+                    }
+                }
+                Item { Layout.fillHeight: true }
+            }
+        }
+    }
+
+    // The address book, and the ONE place it is edited. The Send picker offers these rows
+    // and can do nothing else to them: a control that both selects a recipient and deletes
+    // one is a control where a mis-tap during a transaction costs a saved address.
+    Component {
+        id: addressBookComponent
+
+        Item {
+            objectName: "addressBookPage"
+
+            ColumnLayout {
+                anchors.fill: parent
+                anchors.margins: Theme.spacing.medium
+                spacing: Theme.spacing.small
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    HoverIcon {
+                        objectName: "addressBookBack"
+                        size: 32
+                        iconSize: 20
+                        iconSource: root.iconArrowLeft
+                        onClicked: root.back()
+                    }
+                    LogosText { text: "Address book"; font.pixelSize: 20 }
+                    Item { Layout.fillWidth: true }
+                }
+
+                // These are COUNTERPARTIES. Saying so is worth a line: a user who reads this
+                // as "my accounts" would look here for one and conclude it had been lost.
+                LogosText {
+                    objectName: "addressBookNote"
+                    Layout.fillWidth: true
+                    textFormat: Text.PlainText
+                    wrapMode: Text.WordWrap
+                    color: Theme.palette.textSecondary
+                    text: "Names for addresses you send to. Your own accounts are managed in "
+                          + "the Keystore app and are always offered alongside these."
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: Theme.spacing.tiny
+                    LogosTextField {
+                        id: bookNewName
+                        objectName: "bookNewName"
+                        Layout.preferredWidth: 160
+                        placeholderText: "Name (optional)"
+                    }
+                    LogosTextField {
+                        id: bookNewAddress
+                        objectName: "bookNewAddress"
+                        Layout.fillWidth: true
+                        placeholderText: "Address (0x…)"
+                    }
+                    // Armed by an address alone: a name is optional, because an address worth
+                    // remembering is worth remembering before its owner has one.
+                    LogosButton {
+                        objectName: "bookAdd"
+                        text: "Add"
+                        enabled: root.ready && bookNewAddress.text.trim().length > 0
+                        onClicked: {
+                            root.backend.saveContact(bookNewAddress.text.trim(),
+                                                     bookNewName.text.trim())
+                            bookNewAddress.text = ""
+                            bookNewName.text = ""
+                        }
+                    }
+                }
+
+                // The backend's own words. This view does not parse an address, so a refusal
+                // has to come from the party that does, and be shown as it was given.
+                LogosText {
+                    objectName: "bookError"
+                    Layout.fillWidth: true
+                    visible: root.ready && root.backend.contactsError.length > 0
+                    textFormat: Text.PlainText
+                    wrapMode: Text.WordWrap
+                    color: Theme.palette.error
+                    text: root.ready ? root.backend.contactsError : ""
+                }
+
+                LogosText {
+                    objectName: "bookEmpty"
+                    Layout.fillWidth: true
+                    visible: root.contacts.length === 0
+                    textFormat: Text.PlainText
+                    color: Theme.palette.textSecondary
+                    text: "No saved addresses yet."
+                }
+
+                LogosListView {
+                    objectName: "bookList"
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    clip: true
+                    model: root.contacts
+                    delegate: LogosFrame {
+                        id: bookRow
+                        width: ListView.view.width
+                        // Held, not read through `modelData` from a handler: the model is a
+                        // plain array and a row's index moves when an earlier one is forgotten.
+                        readonly property var contact: modelData
+
+                        // READ-ONLY until asked. A name that is always an open field is a name
+                        // one stray keystroke rewrites, and this list is what a user checks a
+                        // recipient against — so editing is a mode you enter, confirm or
+                        // abandon, and leaving the screen abandons it.
+                        property bool editing: false
+
+                        function beginEdit() {
+                            bookNameField.text = bookRow.contact.name
+                            bookRow.editing = true
+                            bookNameField.textInput.forceActiveFocus()
+                        }
+                        function confirmEdit() {
+                            var name = bookNameField.text.trim()
+                            bookRow.editing = false
+                            // Unchanged is not a write. The backend would accept it happily,
+                            // but a re-read that moves nothing still rebuilds this list under
+                            // the pointer.
+                            if (name !== bookRow.contact.name)
+                                root.backend.saveContact(bookRow.contact.address, name)
+                        }
+                        function cancelEdit() {
+                            bookNameField.text = bookRow.contact.name
+                            bookRow.editing = false
+                        }
+
+                        // A frame, because the name and the address are one thing: without it
+                        // the address reads as orphaned rather than as what the name is for.
+                        contentItem: ColumnLayout {
+                            spacing: 2
+
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: Theme.spacing.tiny
+
+                                LogosText {
+                                    objectName: "bookName_" + index
+                                    Layout.fillWidth: true
+                                    visible: !bookRow.editing
+                                    textFormat: Text.PlainText
+                                    elide: Text.ElideRight
+                                    text: bookRow.contact.name.length > 0
+                                          ? bookRow.contact.name : "Unnamed"
+                                    // Dimmed when it is the placeholder rather than a name, so
+                                    // "Unnamed" cannot be mistaken for what someone called it.
+                                    color: bookRow.contact.name.length > 0
+                                           ? Theme.palette.text : Theme.palette.textTertiary
+                                }
+                                LogosTextField {
+                                    id: bookNameField
+                                    objectName: "bookNameField_" + index
+                                    Layout.fillWidth: true
+                                    visible: bookRow.editing
+                                    text: modelData.name
+                                    placeholderText: "Name"
+                                }
+
+                                HoverIcon {
+                                    objectName: "bookEdit_" + index
+                                    visible: !bookRow.editing
+                                    size: 32
+                                    iconSize: 16
+                                    iconSource: Qt.resolvedUrl("assets/edit.svg")
+                                    ToolTip.text: "Rename"
+                                    ToolTip.visible: hovered
+                                    ToolTip.delay: 400
+                                    onClicked: bookRow.beginEdit()
+                                }
+                                HoverIcon {
+                                    objectName: "bookConfirm_" + index
+                                    visible: bookRow.editing
+                                    size: 32
+                                    iconSize: 16
+                                    iconSource: LogosIcons.check
+                                    ToolTip.text: "Confirm"
+                                    ToolTip.visible: hovered
+                                    ToolTip.delay: 400
+                                    onClicked: bookRow.confirmEdit()
+                                }
+                                HoverIcon {
+                                    objectName: "bookCancel_" + index
+                                    visible: bookRow.editing
+                                    size: 32
+                                    iconSize: 16
+                                    iconSource: LogosIcons.close
+                                    ToolTip.text: "Cancel"
+                                    ToolTip.visible: hovered
+                                    ToolTip.delay: 400
+                                    onClicked: bookRow.cancelEdit()
+                                }
+
+                                // Copying and forgetting are about the ADDRESS, which editing a
+                                // name does not touch — but they leave while a rename is open
+                                // so the row offers one decision at a time.
+                                LogosCopyButton {
+                                    // Named like the two buttons beside it in the address book row, which had one
+                                    // each while this had none — the only unlabelled control in the group.
+                                    ToolTip.text: "Copy"
+                                    ToolTip.visible: hovered
+                                    ToolTip.delay: 400
+                                    objectName: "bookCopy_" + index
+                                    visible: !bookRow.editing
+                                    value: bookRow.contact.address
+                                    onCopied: function (v) { root.lastCopiedValue = v }
+                                }
+                                HoverIcon {
+                                    objectName: "bookForget_" + index
+                                    visible: !bookRow.editing
+                                    size: 32
+                                    iconSize: 16
+                                    iconSource: root.iconTrash
+                                    ToolTip.text: "Forget"
+                                    ToolTip.visible: hovered
+                                    ToolTip.delay: 400
+                                    onClicked: root.backend.forgetContact(bookRow.contact.address)
+                                }
+                            }
+
+                            // Enter confirms and Escape abandons, because a field with two
+                            // buttons beside it is still a field people press Enter in.
+                            Connections {
+                                target: bookNameField.textInput
+                                function onAccepted() { bookRow.confirmEdit() }
+                            }
+                            Keys.onEscapePressed: if (bookRow.editing) bookRow.cancelEdit()
+
+                            // IN FULL, and indented to the field's own text rather than the
+                            // frame's edge, so it sits under the name instead of beside it.
+                            LogosSelectableText {
+                                objectName: "bookAddress_" + index
+                                Layout.fillWidth: true
+                                Layout.leftMargin: Theme.spacing.small
+                                text: bookRow.contact.address
+                                color: Theme.palette.textSecondary
+                                font.family: Theme.typography.mono
+                                font.pixelSize: Theme.typography.secondaryText
+                                wrapMode: Text.WrapAnywhere
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     // Everything offered on the active chain, each row with a switch. The list is the
     // BACKEND's answer to a query — never the whole catalogue filtered here, because the
     // embedded Uniswap list is thousands of rows.
@@ -2277,12 +3008,11 @@ Item {
 
                 RowLayout {
                     Layout.fillWidth: true
-                    LogosIconButton {
+                    HoverIcon {
                         objectName: "manageTokensBackButton"
-                        flat: true
                         size: 32
                         iconSize: 20
-                        iconSource: LogosIcons.arrowLeft
+                        iconSource: root.iconArrowLeft
                         onClicked: root.back()
                     }
                     LogosText {
@@ -2293,6 +3023,25 @@ Item {
                         font.weight: Theme.typography.weightMedium
                     }
                     Item { Layout.fillWidth: true }
+                    // What THIS screen turns on and off is which tokens the wallet shows.
+                    // Where those tokens come from — the lists, their URLs, a custom one — is
+                    // DEVICE-WIDE and owned elsewhere, exactly as the endpoint is. So this
+                    // asks for that capability rather than naming the app that has it.
+                    LogosButton {
+                        objectName: "openTokenListsButton"
+                        text: "Token lists"
+                        onClicked: root.askFor("evm.token_lists.configure",
+                                               "Nothing on this device manages token lists.")
+                    }
+                    LogosText {
+                        objectName: "tokensIntentNote"
+                        Layout.maximumWidth: 260
+                        visible: root.intentNote.length > 0
+                        textFormat: Text.PlainText
+                        wrapMode: Text.WordWrap
+                        color: Theme.palette.textSecondary
+                        text: root.intentNote
+                    }
                     LogosSpinner {
                         objectName: "manageTokensSpinner"
                         implicitWidth: 20
@@ -2638,10 +3387,32 @@ Item {
             return 0
         }
 
+        // Everything the last send left behind, except which token is leaving. A dialog is
+        // not a draft: it reopens on a recipient and an amount the user typed for a DIFFERENT
+        // transaction, and the one that matters most — the address — is the one hardest to
+        // notice is stale. The token survives because the caller chose it on the way in.
+        //
+        // The fee overrides go too, and `advanced` closes over them. An override left armed
+        // under a collapsed disclosure prices the next send at the last one's gas.
+        function clearForm() {
+            toField.text = ""
+            amountField.text = ""
+            maxFeeField.text = ""
+            maxPriorityFeeField.text = ""
+            gasLimitField.text = ""
+            nonceField.text = ""
+            advanced.checked = false
+            tierGroup.selected = "normal"
+        }
+
         // The verdict can have moved since the last quote, so re-price on open: the numbers
         // shown must come from the mode the send would actually run under. The timer started
         // here is ask #4's periodic re-price, and it also clears any stale send error.
+        //
+        // Cleared BEFORE the re-price, so the quote prices the empty form rather than the
+        // previous one and is then withdrawn a frame later.
         onOpened: {
+            sendDialog.clearForm()
             tokenPicker.syncIndex()
             sendForm.reprice()
             if (root.ready) root.backend.setQuoteAutoRefresh(true)
@@ -2729,34 +3500,111 @@ Item {
                 // `id`, not objectName alone: an objectName does not enter the QML scope
                 // chain, so `popupUnder(toAccountsButton)` below was a ReferenceError that
                 // aborted the handler before the menu was ever asked to open.
-                LogosIconButton {
+                HoverIcon {
                     id: toAccountsButton
                     objectName: "toAccountsButton"
-                    flat: true
                     size: 32
                     iconSize: 16
-                    iconSource: LogosIcons.triangleDown
-                    // visible, not enabled: with one account there is nobody to offer, and a
-                    // control that can never work should not be on screen looking broken.
-                    visible: root.otherAccounts.length > 0
+                    iconSource: root.iconTriangleDown
+                    // Always offered now. It used to hide itself when there was no SECOND
+                    // account, which was right while my-accounts was all it held — the
+                    // address book and the add form are reachable with one account, or none.
                     onClicked: toAccountsMenu.popupUnder(toAccountsButton)
                 }
             }
 
+            // Three places an address can come from, and they are different KINDS of
+            // answer rather than one list with sections: who you have paid, who you chose to
+            // remember, and who you already are. A row writes into the field above rather
+            // than becoming a second source of truth — the free text stays authoritative.
             LogosMenu {
                 id: toAccountsMenu
                 objectName: "toAccountsMenu"
-                Instantiator {
-                    model: root.otherAccounts
-                    delegate: LogosMenuItem {
-                        // Indexed, not addressed: the harness cannot know the checksum
-                        // casing the keystore returns, and the label carries the address.
-                        objectName: "toAccount_" + index
-                        text: root.accountDisplay(modelData) + " — " + root.shortAddr(modelData)
-                        onTriggered: toField.text = modelData
+                implicitWidth: 420
+
+                function addressAt(tab, i) {
+                    if (tab === 0) return root.recentRecipients[i]
+                    if (tab === 1) return root.contacts[i].address
+                    return root.accounts[i]
+                }
+
+                ColumnLayout {
+                    width: parent.width
+                    spacing: Theme.spacing.tiny
+
+                    LogosTabBar {
+                        id: toTabs
+                        objectName: "toTabs"
+                        Layout.fillWidth: true
+                        LogosTabButton { objectName: "toTabRecent"; text: "Recents" }
+                        LogosTabButton { objectName: "toTabBook"; text: "Address book" }
+                        LogosTabButton { objectName: "toTabMine"; text: "My addresses" }
                     }
-                    onObjectAdded: function (i, o) { toAccountsMenu.insertItem(i, o) }
-                    onObjectRemoved: function (i, o) { toAccountsMenu.removeItem(o) }
+
+                    StackLayout {
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: 220
+                        currentIndex: toTabs.currentIndex
+
+                        // ── who this account has paid ──
+                        LogosListView {
+                            objectName: "toRecentList"
+                            clip: true
+                            model: root.recentRecipients
+                            delegate: PickableAddress {
+                                objectName: "toRecent_" + index
+                                width: ListView.view.width
+                                address: modelData
+                                onClicked: { toField.text = modelData; toAccountsMenu.close() }
+                            }
+                        }
+
+                        // ── who you chose to remember ──
+                        //
+                        // Read-only here. Managing the book from inside a send is a mis-tap
+                        // during a transaction costing a saved address, so this offers rows
+                        // and the Address book screen owns the rest.
+                        ColumnLayout {
+                            LogosListView {
+                                objectName: "toBookList"
+                                Layout.fillWidth: true
+                                Layout.fillHeight: true
+                                clip: true
+                                model: root.contacts
+                                delegate: PickableAddress {
+                                    objectName: "toContact_" + index
+                                    width: ListView.view.width
+                                    address: modelData.address
+                                    onClicked: {
+                                        toField.text = modelData.address
+                                        toAccountsMenu.close()
+                                    }
+                                }
+                            }
+                            LogosText {
+                                objectName: "toBookEmpty"
+                                Layout.fillWidth: true
+                                visible: root.contacts.length === 0
+                                textFormat: Text.PlainText
+                                wrapMode: Text.WordWrap
+                                color: Theme.palette.textSecondary
+                                text: "No saved addresses yet. Add them from the Address book."
+                            }
+                        }
+
+                        // ── who you already are ──
+                        LogosListView {
+                            objectName: "toMineList"
+                            clip: true
+                            model: root.accounts
+                            delegate: PickableAddress {
+                                objectName: "toAccount_" + index
+                                width: ListView.view.width
+                                address: modelData
+                                onClicked: { toField.text = modelData; toAccountsMenu.close() }
+                            }
+                        }
+                    }
                 }
             }
 
@@ -2815,8 +3663,18 @@ Item {
 
             // Where the numbers came from. A wallet quietly pricing off legacy gasPrice is how
             // an overpayment goes unnoticed, so the source is on screen rather than in a log.
+            // The read is asynchronous now, so this line has a "reading" state of its own.
+            LogosSpinner {
+                objectName: "feeSourceSpinner"
+                implicitWidth: 14
+                implicitHeight: 14
+                visible: root.feesPending
+                running: visible
+                ringColor: Theme.palette.textSecondary
+            }
             LogosText {
                 objectName: "feeSourceLabel"
+                visible: !root.feesPending
                 textFormat: Text.PlainText
                 color: Theme.palette.textSecondary
                 // Gated on the FIGURES like everything else here: `root.fees` is read under no
@@ -2973,11 +3831,24 @@ Item {
                 // Names the network, so the last click before a signature says where it lands.
                 // No close() here: the dialog closes on pendingRequestId, so a refusal stays
                 // on screen with its reason instead of vanishing behind the wallet.
+                LogosSpinner {
+                    objectName: "sendSubmitSpinner"
+                    Layout.alignment: Qt.AlignVCenter
+                    implicitWidth: 18
+                    implicitHeight: 18
+                    visible: root.sendSubmitting
+                    running: visible
+                    ringColor: Theme.palette.textSecondary
+                }
                 LogosButton {
                     objectName: "sendSubmitButton"
                     text: root.netKnown ? "Send on " + root.networkLabel() : "Send"
-                    enabled: root.ready && !root.sendPending && sendForm.q.ok === true
-                    onClicked: root.backend.submitSend(sendForm.formRequest)
+                    enabled: root.ready && !root.sendPending && !root.sendSubmitting
+                             && sendForm.q.ok === true
+                    onClicked: {
+                        root.sendSubmitting = true
+                        root.backend.submitSend(sendForm.formRequest)
+                    }
                 }
             }
         }
@@ -3034,86 +3905,58 @@ Item {
                     return "This send did not go out."
                 }
             }
-            // The hash is the receipt. Copyable wherever it appears, like the address.
-            LogosSelectableText {
-                objectName: "sendOutcomeHash"
-                visible: root.sendOutcome.hash !== undefined && root.sendOutcome.hash.length > 0
-                text: root.sendOutcome.hash !== undefined ? root.shortHash(root.sendOutcome.hash) : ""
-                color: Theme.palette.textSecondary
-                font.family: Theme.typography.mono
-            }
-            LogosButton {
-                objectName: "sendOutcomeDismiss"
-                text: "Done"
-                onClicked: root.dismissedOutcome = root.backend.lastSendOutcomeJson
-            }
-        }
-    }
-
-    // ── Settings, where the network selector is deliberately buried ────────────────
-    LogosDialog {
-        id: settingsDialog
-        objectName: "settingsDialog"
-        title: "Settings"
-        anchors.centerIn: parent
-        width: Math.min(parent.width - 40, 520)
-
-        contentItem: ColumnLayout {
-            spacing: Theme.spacing.small
-
-            // Read-only here: eth_rpc's chains.json is device-wide and shared with every
-            // Logos wallet, so the wallet reports it and the Ethereum RPC app owns it. The
-            // button below asks for that app by capability rather than by name, so a second
-            // implementation of it would serve this just as well.
-            LogosText {
-                objectName: "rpcSettingsNote"
-                Layout.fillWidth: true
-                wrapMode: Text.WordWrap
-                textFormat: Text.PlainText
-                color: Theme.palette.textSecondary
-                text: "Endpoint: " + (root.net.rpcUrl && root.net.rpcUrl.length ? root.net.rpcUrl : "not set")
-                      + "\nVerified routing: " + (root.vp.mode !== undefined ? root.vp.mode : "unknown")
-                      + "\n\nThese are shared with every Logos wallet on this device."
-            }
-            LogosButton {
-                objectName: "openRpcSettingsButton"
-                text: "Change these"
-                onClicked: {
-                    settingsDialog.close()
-                    root.askFor("evm.rpc.configure",
-                                "Nothing on this device offers to change them.")
+            // The hash is the receipt, so it is copyable here exactly as the address is in
+            // the header: shortened for reading, whole on the clipboard. A truncated hash a
+            // user retypes is worse than none.
+            RowLayout {
+                objectName: "sendOutcomeHashRow"
+                visible: root.outcomeHash.length > 0
+                spacing: Theme.spacing.small
+                LogosSelectableText {
+                    objectName: "sendOutcomeHash"
+                    text: root.shortHash(root.outcomeHash)
+                    color: Theme.palette.textSecondary
+                    font.family: Theme.typography.mono
+                }
+                LogosCopyButton {
+                    // Named like the two buttons beside it in the address book row, which had one
+                    // each while this had none — the only unlabelled control in the group.
+                    ToolTip.text: "Copy"
+                    ToolTip.visible: hovered
+                    ToolTip.delay: 400
+                    objectName: "sendOutcomeCopyButton"
+                    value: root.outcomeHash
+                    onCopied: function (v) { root.lastCopiedValue = v }
                 }
             }
-            LogosText {
-                objectName: "settingsIntentNote"
+
+            RowLayout {
                 Layout.fillWidth: true
-                visible: root.intentNote.length > 0
-                textFormat: Text.PlainText
-                wrapMode: Text.WordWrap
-                color: Theme.palette.textSecondary
-                text: root.intentNote
-            }
+                spacing: Theme.spacing.small
 
-            // A screen, not a section: the catalogue is a searchable list of thousands, and
-            // it does not fit inside a dialog that also holds the network selector.
-            LogosText { text: "Tokens"; color: Theme.palette.textSecondary }
-            LogosButton {
-                objectName: "manageTokensButton"
-                text: "Manage tokens"
-                enabled: root.ready
-                onClicked: { settingsDialog.close(); root.openManageTokens() }
-            }
-
-            LogosText { text: "Network"; color: Theme.palette.textSecondary }
-            Repeater {
-                model: root.networks
                 LogosButton {
-                    objectName: "network_" + modelData.key
-                    text: modelData.name + (modelData.testnet ? " (testnet)" : "")
-                    enabled: root.ready && modelData.chainId !== root.net.chainId
-                    onClicked: root.backend.setActiveChain(modelData.chainId)
+                    objectName: "sendOutcomeDismiss"
+                    text: "Done"
+                    onClicked: root.dismissOutcome()
+                }
+                Item { Layout.fillWidth: true }
+                // Only once the row is actually in history. `openTxDetail` refuses a hash it
+                // cannot find and refuses it SILENTLY, so an always-enabled button would
+                // close the receipt and go nowhere — and this is the one moment the row is
+                // still arriving, because the send settled a beat ago.
+                LogosButton {
+                    objectName: "sendOutcomeViewTx"
+                    visible: root.outcomeHash.length > 0
+                    enabled: root.txByHash(root.outcomeHash) !== null
+                    text: "View transaction"
+                    onClicked: {
+                        var h = root.outcomeHash
+                        root.dismissOutcome()
+                        root.openTxDetail(h)
+                    }
                 }
             }
         }
     }
+
 }

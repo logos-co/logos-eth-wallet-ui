@@ -65,8 +65,8 @@ Item {
     }
     function row(name) {
         return find(screen(), name) || ({ value: "<missing>", text: "<missing>",
-                                          copyValue: "<missing>", visible: "<missing>",
-                                          enabled: "<missing>" })
+                                          address: "<missing>", copyValue: "<missing>",
+                                          visible: "<missing>", enabled: "<missing>" })
     }
 
     property var rows: [{
@@ -164,7 +164,7 @@ Item {
     })
 
     property var fake: ({})
-    property var logos: ({ module: function (n) { return probe.fake } })
+    property var logos: ({ module: function (n) { return probe.fake }, isViewModuleReady: function (n) { return true } })
 
     Component.onCompleted: {
         probe.fake = {
@@ -239,9 +239,11 @@ Item {
         console.log("   still rendered, and every address on this screen is copyable")
         check("the recorded card is not on a settled send",
               row("txDetailRecordedCard").visible, false)
-        check("the recipient is a row of its own", row("txDetailTransferTo_0").value,
-              "0x0adB…D3A7")
-        check("...copyable in full, not a truncated label",
+        // IN FULL on this screen. A detail view has the room, and half an address is worse
+        // than an address on two lines — so the name elides here and the address never does.
+        check("the recipient is a row of its own, whole",
+              row("txDetailTransferTo_0").address, probe.them)
+        check("...and the copy button hands over the same string",
               row("txDetailTransferTo_0Copy").value, probe.them)
         check("...and that button is really on screen, not merely declared",
               row("txDetailTransferTo_0Copy").visible, true)
@@ -365,10 +367,10 @@ Item {
         console.log("F-6: the sender appears twice on the ERC-20 screen — the From row, off a")
         console.log("parsed Address, and the transfer's own From row, off a raw LOG TOPIC.")
         console.log("Those two arrive in different casings and used to be rendered in both")
-        var from = String(row("txDetailFromRow").value)
-        check("the From row is EIP-55", from, "0x8626…1199")
+        var from = String(row("txDetailFromRow").address)
+        check("the From row is EIP-55, in full", from, probe.me)
         check("...and the log-topic row spells the same address the same way",
-              row("txDetailTransferFrom_0").value, from)
+              row("txDetailTransferFrom_0").address, from)
         check("...and the two copy buttons hand over one string",
               row("txDetailTransferFrom_0Copy").value, row("txDetailFromRowCopy").value)
         console.log("   `txTo` reaches us in the node's own lowercase too, and the card now")
@@ -394,9 +396,10 @@ Item {
               row("txDetailInteractedRowCopy").value, probe.weth)
         check("nothing was decoded", row("txDetailTransfersCard").visible, false)
         check("so the recipient is recorded instead", row("txDetailRecordedCard").visible, true)
-        check("...as the address this wallet was asked to pay",
-              row("txDetailRecordedToRow").value, "0x0adB…D3A7")
-        check("...copyable in full", row("txDetailRecordedToRowCopy").value, probe.them)
+        check("...as the address this wallet was asked to pay, in full",
+              row("txDetailRecordedToRow").address, probe.them)
+        check("...and the copy button agrees with it",
+              row("txDetailRecordedToRowCopy").value, probe.them)
         check("...and labelled as our record, not the chain's",
               String(row("txDetailRecordedNote").text).indexOf("receipt has not been read") >= 0,
               true)

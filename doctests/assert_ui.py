@@ -350,9 +350,13 @@ print("   (the verdict can have moved since the last quote, so an open re-prices
 sites = [l.strip() for l in dialog.splitlines()
          if "reprice" in l and not l.strip().startswith("//")]
 check("the re-price hangs off the request and the open, nowhere else", len(sites), 3)
-check("and Submit is armed by a quote that priced THIS form",
+# `sendSubmitting` JOINED this binding rather than replacing anything in it: the gap between
+# the click and the shell's chooser is real work with the dialog still up, and a second click
+# in it would price and reserve a nonce twice.
+check("and Submit is armed by a quote that priced THIS form, and disarmed by a click in flight",
       qml_binding("sendSubmitButton", "enabled"),
-      "enabled: root.ready && !root.sendPending && sendForm.q.ok === true")
+      "enabled: root.ready && !root.sendPending && !root.sendSubmitting "
+      "&& sendForm.q.ok === true")
 print("   the token picker answers with the field beside it, as accountPicker already did:")
 print("   ComboBox resets currentIndex when its model is re-read, and sendDialog.token did not")
 print("   asserted against syncIndex's OWN body: onActivated three lines up carries the same")
@@ -553,8 +557,8 @@ print("   would be NOWHERE on the screen. It is rendered below instead, in the i
 print("   section, labelled as this wallet's own record rather than as chain data")
 check("the fallback wants an erc20 row with nothing decoded",
       qml_decl("recipientRecorded").endswith('"erc20" && txPage.transfers.length === 0'), True)
-check("...and what it shows is the recipient this wallet recorded",
-      qml_binding("txDetailRecordedToRow", "value"), "value: root.namedAddr(txPage.rec.to)")
+check("...and what it shows is the recipient this wallet recorded, in full",
+      qml_binding("txDetailRecordedToRow", "address"), 'address: txPage.rec.to || ""')
 check("...saying in as many words that no receipt has been read",
       "receipt has not been read yet" in qml_binding("txDetailRecordedNote", "text"), True)
 # A presence check is not a comparison: `txTo === undefined` asks whether a receipt was ever
@@ -599,13 +603,12 @@ check("...and an absent key is an empty list, not a claim",
 print("   once a receipt decodes a transfer the recorded-recipient card above goes away, so")
 print("   these rows are the ONLY rendering of the recipient left on a confirmed token send.")
 print("   The standing rule here is that every address is copyable, and that includes these")
+# The copy button is the component's now, keyed off the same address the row renders — so
+# what was two bindings that could disagree is one value, and the assertion follows it.
 for end in ["From", "To"]:
-    check(f"the transfer's {end} is a copyable row of its own",
-          qml_binding("txDetailTransfer%s_" % end, "copyValue"),
-          'copyValue: modelData.%s || ""' % end.lower())
-    check(f"...rendered by the same namer as every other address",
-          qml_binding("txDetailTransfer%s_" % end, "value"),
-          "value: root.namedAddr(modelData.%s)" % end.lower())
+    check(f"the transfer's {end} is a row of its own, carrying the whole address",
+          qml_binding("txDetailTransfer%s_" % end, "address"),
+          'address: modelData.%s || ""' % end.lower())
 
 print("   the ceiling appears beside a fee that was PAID. While pending the fee row already")
 print("   IS the ceiling, and one number under two labels explains nothing")
@@ -645,7 +648,13 @@ STILL_SYNC = {
     "list_tokens": "refresh()",
     "list_accounts": "refresh(), with the labels read that must land in the same turn",
     "get_account_labels": "refresh()",
-    "suggest_fees": "refresh()",
+    "get_account_wallets": "refresh(), beside the labels: an account nobody named borrows "
+                           "its wallet's, and the two have to land in the same turn or the "
+                           "picker renames itself between them",
+    "list_contacts": "refresh(), and after either write below — the backend orders the book, "
+                     "so the view re-reads rather than editing its published copy",
+    "save_contact": "the address book, which reaches no chain and writes one small file",
+    "forget_contact": "the address book",
     "set_active_chain": "a chain switch, which re-reads everything behind it anyway",
     "send": "the send path, whose ordering witness is taken around the call",
     "send_status": "the send poll",
@@ -655,7 +664,7 @@ STILL_SYNC = {
 called = set(re.findall(r"modules\(\)\.eth_wallet_backend\.(\w+)\(", code))
 sync = sorted(n for n in called
               if not n.endswith("AsyncResult") and not re.match(r"on[A-Z]", n))
-check("every synchronous backend call is one of the eleven inventoried here",
+check("every synchronous backend call is one of the fourteen inventoried here",
       sync, sorted(STILL_SYNC))
 check("...and the receipt re-read is no longer one of them", "refresh_tx_status" in sync, False)
 check("refreshTxStatus: claim, call, own the reply, re-read, lower the spinner",
@@ -664,9 +673,86 @@ check("refreshTxStatus: claim, call, own the reply, re-read, lower the spinner",
                "setTxStatusLoading(false)"), True)
 print("   every bare claim goes through beginClaim, which arms the lapse that lowers its")
 print("   spinner — a third one written without it fails this")
-check("the three spinner-bearing claims",
+print()
+print("   THE BALANCES LEG. `dataLoading` covers both legs of one lane and is released in the")
+print("   HISTORY callback, so a spinner derived from it spins beside the error the balances")
+print("   read already produced — for as long as the history leg takes. The leg has its own")
+print("   flag, and both screens that spin on it read the same rule.")
+check("the pending rule is the leg, not the lane",
+      qml_decl("balancesPending").endswith("!balancesKnown && balancesLoading"), True)
+check("...the Tokens tab spins on it",
+      qml_binding("balanceSpinner_", "visible"), "root.balancesPending", "in")
+check("...and so does the token detail, from the same rule",
+      qml_binding("tokenDetailBalanceSpinner", "visible"), "visible: root.balancesPending")
+check("the amount and its spinner are never both on screen",
+      qml_binding("balance_", "visible"), "!root.balancesPending", "in")
+check("the leg is raised at the lane and lowered by its own reply",
+      in_order(fn_body("loadBalancesAndHistory"), "beginLane(m_dataLane",
+               "setBalancesLoading(true)", "owns(slot)", "setBalancesLoading(false)"), True)
+print("   and by the lane that lapses, or a reply that never lands leaves it spinning for ever")
+lane_lowers = re.search(r"m_dataLane\.setLoading\s*=.*?\n    \};", code, re.S)
+check("...the lane lowers it too",
+      bool(lane_lowers) and "setBalancesLoading(false)" in lane_lowers.group(0), True)
+
+print()
+print("   and a refusal has a way out. Nothing else in this view calls refresh(), the network")
+print("   retry covers a network read alone, and the receipt sweep cannot arm on a refusal —")
+print("   so without this button a failed first read is a wallet the user cannot re-read.")
+check("the banner carries a retry", qml_binding("errorRetryButton", "onClicked"),
+      "onClicked: root.backend.refresh()")
+print("   and the gate is on the ROW, so the two cannot drift apart — and so the row")
+print("   occupies nothing when there is no error. It is also pinned to fillHeight false:")
+print("   a Layout nested in a Layout defaults to filling, which took the whole view once.")
+check("...the row carries the gate",
+      qml_binding("errorRow", "visible"), "visible: root.ready && root.backend.lastError.length > 0")
+check("...and does not claim the height", qml_binding("errorRow", "Layout.fillHeight"),
+      "Layout.fillHeight: false")
+
+print()
+print()
+print("   and no icon comes from the design system unless it ships NEUTRAL artwork.")
+print("   LogosIconButton colorizes its source and colorization preserves luminance, so a")
+print("   #5C5C5C or #969696 SVG stays dark whatever iconColor asks for — which is what made")
+print("   the back chevron and the trash read as disabled. The five dark ones are vendored")
+print("   into assets/ as white copies; delete them when the design system normalises.")
+check("only the neutral design-system icons are used directly",
+      sorted(set(re.findall(r"LogosIcons\.(\w+)", qml))), ["check", "close", "grid"])
+check("...and the vendored copies are all neutral",
+      sorted({f for p in (VIEW.parent / "assets").glob("*.svg")
+              for f in re.findall(r'fill="([^"]+)"', p.read_text())}),
+      ["none", "white"])
+
+print("   every icon button in this view is FLAT. Five shipped without it — the accounts")
+print("   button and the four address-book row buttons — and a chevron or a pencil sitting")
+print("   in a filled circle reads as a disabled control, which is what they were reported")
+print("   as. One rule over the whole file, so a sixth cannot drift in.")
+icon_buttons = re.findall(r"HoverIcon \{(?:[^{}]|\{[^{}]*\})*?\}", qml, re.S)
+print("   and every one of them reacts to the cursor. `flat` hides the background outright,")
+print("   so a flat icon button has NO hover feedback unless its tint moves — the design")
+print("   system's own copy button was the only one that did, and it looked like the odd one")
+print("   out in a row of three. It was the one that was right.")
+check("no icon button is a bare LogosIconButton",
+      re.findall(r"^\s*LogosIconButton \{", qml, re.M), [])
+check("...they all come from the one hover-aware rule", len(icon_buttons), 13)
+check("...which is stated once", qml.count("component HoverIcon:"), 1)
+check("...and the tint follows the cursor",
+      qml_binding("HoverIcon", "iconColor") or
+      re.search(r"iconColor: isActive \? Theme\.palette\.text : Theme\.palette\.textTertiary", qml)
+      is not None, True)
+print("   and the copy button says what it is, like the two beside it did")
+check("every copy button carries a tooltip",
+      [b for b in re.findall(r"LogosCopyButton \{(?:[^{}]|\{[^{}]*\})*?\}", qml, re.S)
+       if "ToolTip.text" not in b], [])
+print("   and every back arrow is the same size, so leaving one screen looks like leaving")
+print("   any other")
+backs = [b for b in icon_buttons if "iconArrowLeft" in b]
+check("every back arrow is one size",
+      sorted({re.search(r"iconSize: (\d+)", b).group(1) for b in backs}), ["20"])
+check("...on every screen there is to leave", len(backs), 5)
+
+check("the four spinner-bearing claims",
       sorted(set(re.findall(r"beginClaim\((m_\w+)", code))),
-      ["m_detailsInFlight", "m_tokenToggleInFlight", "m_txStatusInFlight"])
+      ["m_detailsInFlight", "m_feesInFlight", "m_tokenToggleInFlight", "m_txStatusInFlight"])
 check("...and the button it drives says it is running",
       "!root.txStatusLoading" in qml_binding("txDetailRefresh", "enabled"), True)
 
@@ -1011,9 +1097,9 @@ requested = sorted(set(re.findall(r'(?:logos\.request|askFor)\(\s*"([^"]+)"',
                                   VIEW.read_text())))
 check("every intent asked for is declared", [i for i in requested if i not in declared], [])
 check("...and every intent declared is asked for", [i for i in declared if i not in requested], [])
-check("the four hops are the whole list", declared,
+check("the five hops are the whole list", declared,
       ["evm.accounts.manage", "evm.rpc.configure", "evm.signing.approve",
-       "evm.verified_routing.operate"])
+       "evm.token_lists.configure", "evm.verified_routing.operate"])
 
 print()
 print("`uses` entries are OBJECTS. A bare string array parses, declares nothing, and every")
@@ -1023,6 +1109,129 @@ check("no entry is a bare string",
       [e for e in META.get("uses", []) if not isinstance(e, dict)], [])
 check("...and each names a single provider",
       sorted({e.get("cardinality") for e in META.get("uses", [])}), ["single"])
+
+print()
+print("the Send form is cleared ON OPEN, and BEFORE the re-price — a quote priced from the")
+print("previous form is a quote withdrawn a frame later, and the order is the whole point.")
+print("A probe cannot see this: with no overlay a Popup never opens and `onOpened` never")
+print("fires, so what runs it is only assertable here.")
+opened = qml_fn_body(qml_body, "onOpened") if False else " ".join(qml_item("sendDialog"))
+check("onOpened clears the form before it prices it",
+      in_order(opened, "onOpened", "sendDialog.clearForm()", "sendForm.reprice()"), True)
+check("...and clearing empties the recipient, the amount and every fee override",
+      all(f in qml_fn_body(qml_body, "clearForm")
+          for f in ["toField.text", "amountField.text", "maxFeeField.text",
+                    "maxPriorityFeeField.text", "gasLimitField.text", "nonceField.text",
+                    "advanced.checked"]), True)
+
+print()
+print("the recipient picker offers three sources and writes into the field rather than")
+print("becoming a second one. Its rows live in a Popup with no delegates instantiated while")
+print("it is closed, so the wiring is assertable here and the LISTS are asserted in the probe.")
+# Against the whole view: `qml_item` stops at the next objectName, and this block is made
+# almost entirely of them.
+for tab in ["toTabRecent", "toTabBook", "toTabMine"]:
+    check(f"  {tab} is offered", tab in qml_body, True)
+check("Recents is bound to the derived list, not to history directly",
+      "model: root.recentRecipients" in qml_body, True)
+check("the book is bound to the backend's, in the backend's order",
+      "model: root.contacts" in qml_body, True)
+check("saving and forgetting ASK the backend rather than editing the published copy",
+      "root.backend.saveContact(" in qml_body and "root.backend.forgetContact(" in qml_body, True)
+
+print()
+print("and the Send picker only PICKS. A control that both chooses a recipient and deletes")
+print("one is a control where a mis-tap during a transaction costs a saved address, so every")
+print("write lives on the Address book screen and none of them is reachable from the form.")
+picker = qml_body[qml_body.index('objectName: "toAccountsMenu"'):
+                  qml_body.index('objectName: "selfSendWarning"')]
+book = qml_body[qml_body.index("id: addressBookComponent"):
+                qml_body.index("id: manageTokensComponent")]
+check("the picker writes nothing to the book",
+      "saveContact(" in picker or "forgetContact(" in picker, False)
+check("...and it offers all three sources",
+      all(t in picker for t in ["toTabRecent", "toTabBook", "toTabMine"]), True)
+check("the address book screen is where both writes live",
+      "saveContact(" in book and "forgetContact(" in book, True)
+check("...and renaming goes through the same upsert an add does, not a second path",
+      book.count("root.backend.saveContact("), 2)
+
+print()
+print("one rule for showing an address, and the name never replaces it: a name is this")
+print("wallet's own word for who that is and cannot be checked against what was signed.")
+check("namedAddr always carries the short address",
+      qml_fn_body(qml_body, "namedAddr").count("shortAddr(a)"), 2)
+# The CLOSED picker is the one place a name stands without its address, and deliberately:
+# the selected account's address is rendered beside the control, and 220px holding both is
+# 220px that elides the address. The open list carries both, on two lines.
+check("...and the closed picker shows a name alone, falling back to the short address",
+      "return n.length ? n : shortAddr(a)" in qml_fn_body(qml_body, "accountDisplay"), True)
+check("...while its rows carry both, resolved per row rather than baked into the model",
+      "model: addresses" in qml_body and "text: root.displayName(modelData)" in qml_body, True)
+print()
+print("the account chrome is HOME chrome: it is about the selected account, which a pushed")
+print("screen is not about — and a button naming a screen you are already on is worse than")
+print("no button. The chain chip is the exception, and deliberately: a detail screen still")
+print("shows figures, and which chain they came from is not something to leave behind.")
+# Gated as two ROWS on one reading rather than control by control: five `visible` bindings
+# saying the same thing are five that can come to disagree, and the chip was the one that
+# did — it followed the user onto a settings screen, over a page with its own title.
+check("the header is gated on one reading of what home is",
+      qml_body.count("visible: root.homeChrome"), 2)
+check("...and no control carries a second opinion about it",
+      "visible: nav.depth <= 1" in qml_body, False)
+check("...which is the StackView's depth, read once",
+      qml_decl("homeChrome").endswith("nav !== null && nav.depth <= 1"), True)
+check("there is no Settings popup left to hold links to any of them",
+      "settingsDialog" in qml_body, False)
+check("...and each button opens a screen rather than a dialog",
+      all(f"root.open{n}()" in qml_body for n in ["AddressBook", "Networks", "ManageTokens"]),
+      True)
+print()
+print("what the Tokens screen turns on and off is which tokens this wallet SHOWS. Where they")
+print("come from is device-wide and owned elsewhere, exactly as the endpoint is — so it asks")
+print("for the capability rather than naming the app that has it.")
+check("the Tokens screen offers the way to the lists",
+      'root.askFor("evm.token_lists.configure"' in qml_body, True)
+
+print()
+print("overriding a design-system delegate replaces its background too, so a row that looks")
+print("inert is the default rather than the accident. Both custom rows draw their own.")
+picker_body = qml_body[qml_body.index("component AccountPicker"):
+                       qml_body.index("component PickableAddress")]
+pick_body = qml_body[qml_body.index("component PickableAddress"):
+                     qml_body.index("component DetailRow")]
+check("the account rows highlight with the combo's own highlighted index",
+      "highlighted: picker.highlightedIndex === index" in picker_body, True)
+check("...and draw a background for it",
+      "accountItem.highlighted ? Theme.palette.surface" in picker_body, True)
+check("the recipient rows highlight on hover, having no highlighted index to follow",
+      "pick.hovered ? Theme.palette.surface" in pick_body, True)
+check("...and both say they are clickable",
+      picker_body.count("PointingHandCursor") == 1 and pick_body.count("PointingHandCursor") == 1,
+      True)
+
+print()
+print("no address is elided TWICE. A mid-ellided address has already lost 30 characters, and")
+print("a container that trims it again leaves a prefix matching thousands of addresses. So")
+print("wherever a name and an address share a row they are on separate lines: the name may")
+print("elide, the address may not.")
+for comp, addr_line in [("AccountPicker", "accountRowAddress_"),
+                        ("PickableAddress", "Address")]:
+    body = qml_body[qml_body.index("component %s" % comp):]
+    body = body[:body.index("\n    component ")] if "\n    component " in body else body
+    check(f"  {comp}'s address line is never elided", "elide: Text.ElideNone" in body, True)
+check("a detail row's address wraps instead of eliding, and is the WHOLE address",
+      "wrapMode: Text.WrapAnywhere" in qml_body[qml_body.index("component NamedAddressRow"):
+                                                qml_body.index("component DetailRow")], True)
+check("...and it is the address itself, never a shortened copy",
+      "text: nrow.address" in qml_body, True)
+check("the address book screen shows the whole address too",
+      "text: bookRow.contact.address" in qml_body, True)
+
+check("...and it resolves accounts, wallets AND the address book",
+      all(f in qml_fn_body(qml_body, "displayName")
+          for f in ["accountLabel(a)", "accountWallet(a)", "contactName(a)"]), True)
 
 if "--grep-only" in sys.argv:
     print()
@@ -1365,7 +1574,9 @@ print("24) the eth_rpc controls are GONE from Settings, replaced by a read-only 
 for n in ["rpcUrlField","saveRpcButton","verifiedProxySwitch","verifiedModeUnknown",
           "verifiedTestnetWarning","tokenListUrlField","saveTokenListButton","tokenListStatus"]:
     check(f"{n} removed", oid(n), None)
-call("callMethod",{"objectId":oid("settingsButton"),"method":"clicked","args":[]}); time.sleep(1)
+# A SCREEN now, not a dialog: Settings held nothing but links to other places, so the
+# places are the screens and the popup is gone.
+call("callMethod",{"objectId":oid("networksButton"),"method":"clicked","args":[]}); time.sleep(1)
 check("the note names the endpoint", props("rpcSettingsNote").get("text"), "Endpoint:", "contains")
 check("and says who owns it", props("rpcSettingsNote").get("text"), "Ethereum RPC app", "contains")
 print("   control: the network selector STAYS — that is wallet state, not eth_rpc config")
@@ -1379,7 +1590,7 @@ check("network selector still here", oid("network_sepolia") is not None, True)
 # ─────────────────────────────────────────────────────────────────────────────
 
 print("25) an ACCOUNT switch never leaves the previous account's figures on screen")
-call("callMethod",{"objectId":oid("settingsDialog"),"method":"close","args":[]}); time.sleep(0.6)
+call("callMethod",{"objectId":oid("networksBack"),"method":"clicked","args":[]}); time.sleep(0.6)
 settle()
 accts = ev("accounts") or []
 if len(accts) < 2:

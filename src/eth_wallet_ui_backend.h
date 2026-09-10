@@ -27,6 +27,8 @@ public:
     EthWalletUiBackend();
 
     void refresh() override;
+    void saveContact(QString address, QString name) override;
+    void forgetContact(QString address) override;
     void selectAccount(QString address) override;
     void setActiveChain(int chainId) override;
     void quote(QString requestJson) override;
@@ -125,6 +127,7 @@ private:
     /// Re-enter on a clean event-loop stack. Required from event callbacks: calling out
     /// synchronously from an IPC callback blocks the thread that would deliver the reply.
     void refreshSoon();
+    void loadContacts();
 
     bool m_inFlight = false;
     /// One outstanding re-read of a network that could not be read. Withdrawing the chain
@@ -168,6 +171,7 @@ private:
     /// One enable/disable at a time. A bare claim: a second toggle should be ignored while the
     /// first is in flight, not queued behind it and applied to a row that has since moved.
     InFlight m_tokenToggleInFlight;
+    InFlight m_feesInFlight;
     /// Whether anything queued behind the live quote was a user edit. Carried separately, or a
     /// keystroke arriving behind a timer tick replays as a tick and its refusal is swallowed.
     bool m_quoteAgainInteractive = false;

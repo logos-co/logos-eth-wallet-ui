@@ -35,7 +35,13 @@ constexpr int kTokenSearchLimit = 200;
 EthWalletUiBackend::EthWalletUiBackend()
 {
     m_dataLane.budgetMs = kTwoCallBudgetMs;
-    m_dataLane.setLoading = [this](bool on) { setDataLoading(on); };
+    m_dataLane.setLoading = [this](bool on) {
+        setDataLoading(on);
+        // A lane going down without the balances reply having landed means that reply was
+        // lost. A spinner is not an answer, so the leg comes down with it.
+        if (!on)
+            setBalancesLoading(false);
+    };
     m_dataLane.rerun = [this] { loadBalancesAndHistory(); };
 
     m_quoteLane.budgetMs = kOneCallBudgetMs;
@@ -348,6 +354,7 @@ void EthWalletUiBackend::loadAccounts()
     // account that just left the keystore is on screen with nothing selected beside it.
     const QString reply = modules().eth_wallet_backend.list_accounts();
     const QString labels = modules().eth_wallet_backend.get_account_labels();
+    const QString wallets = modules().eth_wallet_backend.get_account_wallets();
     if (failed(reply, QStringLiteral("accounts")))
         return;
     setAccountsJson(member(reply, "accounts"));
@@ -356,6 +363,14 @@ void EthWalletUiBackend::loadAccounts()
     // is cosmetic, and flickering an account's identity is worse than showing a stale one.
     if (replyOk(labels))
         setAccountLabelsJson(member(labels, "labels"));
+    // Same rule as the names above: a failed read keeps what was on screen. A picker that
+    // drops back to bare addresses for one refresh is a picker whose rows change identity.
+    if (replyOk(wallets))
+        setAccountWalletsJson(member(wallets, "wallets"));
+    // The address book is neither scoped to an account nor to a chain, so it is read here
+    // with the roster rather than in loadBalancesAndHistory: it does not change when either
+    // moves, and re-reading it there would cost a call per selection.
+    loadContacts();
 
     const QJsonArray list = QJsonDocument::fromJson(accountsJson().toUtf8()).array();
     const bool stillThere = std::any_of(list.begin(), list.end(), [this](const QJsonValue &v) {
@@ -375,11 +390,13 @@ void EthWalletUiBackend::loadBalancesAndHistory()
         publishScope(s);
         setSweep(false);
         setDataLoading(false);
+        setBalancesLoading(false);
         return;
     }
     quint64 slot = 0;
     if (!beginLane(m_dataLane, &slot))
         return;
+    setBalancesLoading(true);
 
     const quint64 gen = m_dataGen;
     const quint64 sortGen = m_sortChoiceGen;
@@ -390,6 +407,9 @@ void EthWalletUiBackend::loadBalancesAndHistory()
         [this, gen, sortGen, who, slot](logos::AsyncResult<QString> bal) {
             if (!m_dataLane.owns(slot))
                 return;
+            // Unconditionally, and ahead of the generation check: a reply for a superseded
+            // selection still finishes this leg, and the history call goes out next.
+            setBalancesLoading(false);
             if (gen == m_dataGen) {
                 const QString reply = bal.ok() ? bal.value : QString();
                 // Not scope-gated: the order is one persisted setting, not a chain-scoped one,
@@ -440,10 +460,26 @@ void EthWalletUiBackend::setSweep(bool due)
 
 void EthWalletUiBackend::loadFeeTiers()
 {
-    const QString reply = modules().eth_wallet_backend.suggest_fees();
-    ScopedState s = scopeSnapshot();
-    applyFeeTiers(s, reply);
-    publishScope(s);
+    // ASYNC, and on its own claim rather than the data lane: this is a second cold handshake
+    // to the same node, in flight beside the balances read and unable to share its connection.
+    // Run last in every refresh() and synchronous, it froze the GUI thread for the backend's
+    // whole fees allowance. Not moved to the Send dialog's open path instead — that would
+    // relocate the same freeze onto a click.
+    quint64 slot = 0;
+    if (!beginClaim(m_feesInFlight, &slot, [this](bool on) { setFeeTiersLoading(on); }))
+        return;
+    const quint64 gen = m_dataGen;
+    modules().eth_wallet_backend.suggest_feesAsyncResult(
+        [this, gen, slot](logos::AsyncResult<QString> res) {
+            m_feesInFlight.release(slot);
+            if (!m_feesInFlight.isCurrent(slot) || gen != m_dataGen)
+                return;
+            ScopedState s = scopeSnapshot();
+            applyFeeTiers(s, res.ok() ? res.value : QString());
+            publishScope(s);
+            setFeeTiersLoading(false);
+        },
+        Timeout(kCallBudgetMs));
 }
 
 void EthWalletUiBackend::refresh()
@@ -750,6 +786,39 @@ void EthWalletUiBackend::chooseTokenSort(QString order)
     if (failed(reply, QStringLiteral("token order")))
         return;
     setTokenSort(order);
+}
+
+// Both writers re-read the book rather than editing the published copy: the backend orders
+// it, and a view that inserted a row itself would show an order the next read undoes.
+void EthWalletUiBackend::saveContact(QString address, QString name)
+{
+    const QString reply = modules().eth_wallet_backend.save_contact(address, name);
+    if (!replyOk(reply)) {
+        setContactsError(replyError(reply));
+        return;
+    }
+    setContactsError(QString());
+    loadContacts();
+}
+
+void EthWalletUiBackend::forgetContact(QString address)
+{
+    const QString reply = modules().eth_wallet_backend.forget_contact(address);
+    if (!replyOk(reply)) {
+        setContactsError(replyError(reply));
+        return;
+    }
+    setContactsError(QString());
+    loadContacts();
+}
+
+void EthWalletUiBackend::loadContacts()
+{
+    const QString reply = modules().eth_wallet_backend.list_contacts();
+    // A failed read KEEPS the book that is on screen, exactly as the account names do: an
+    // empty picker tab is indistinguishable from "you have no contacts", and it is not that.
+    if (replyOk(reply))
+        setContactsJson(member(reply, "contacts"));
 }
 
 void EthWalletUiBackend::searchTokens(QString query)

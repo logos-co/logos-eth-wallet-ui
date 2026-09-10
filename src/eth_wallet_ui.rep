@@ -19,7 +19,16 @@ class EthWalletUi
     // unknown and being read — a read that failed falls back to an em-dash, never to a
     // spinner that never stops.
     PROP(bool dataLoading=false READONLY)
+    // The BALANCES leg alone. `dataLoading` covers both legs of the same lane and stays up
+    // through the history call, so a spinner derived from it would keep spinning beside the
+    // error the balances read already produced. This one goes down the moment the amounts
+    // are answered, either way — a refusal is a finish.
+    PROP(bool balancesLoading=false READONLY)
     PROP(bool quoteLoading=false READONLY)
+    // The fee tiers. Its read used to be synchronous and untimed on the GUI thread, so a slow
+    // node froze the whole view for as long as the backend's own allowance — which grew when
+    // that read started seeding eth_rpc.
+    PROP(bool feeTiersLoading=false READONLY)
 
     // { chainId, key, name, nativeSymbol, testnet, rpcUrl, verifiedProxyMode, verifiedProxy }.
     // `rpcUrl` is READ-ONLY here: eth_rpc owns the device-wide endpoint and the Ethereum RPC
@@ -38,6 +47,19 @@ class EthWalletUi
     // no entry is shown by address — never by an invented "Account 2", which RENUMBERS when an
     // account is added or removed.
     PROP(QString accountLabelsJson="{}" READONLY)
+
+    // `{ "<address>": { wallet, index? } }` — the WALLET an account was derived under, so a
+    // picker can name an account its owner never named. Kept apart from the labels above
+    // because a wallet name is shared by every account under it; `index` is what separates
+    // them, and it is the derivation index rather than a position, so it never renumbers.
+    PROP(QString accountWalletsJson="{}" READONLY)
+
+    // The address book: `[{ address, name }]`, already ordered by the backend so a picker
+    // shows it as it comes. COUNTERPARTIES, not accounts this wallet holds keys for.
+    PROP(QString contactsJson="[]" READONLY)
+    // A refusal from the last save or forget, on its own line rather than the wallet's:
+    // a rejected nickname must not blank the error explaining a send that did not go out.
+    PROP(QString contactsError="" READONLY)
 
     // Balances for the selected account on the active network. EMPTY means "not read yet",
     // which the view must render as an em-dash — never as a zero, and never as the previous
@@ -160,6 +182,11 @@ class EthWalletUi
     // generated setter for a PROP already owns setTokenSort(), and a SLOT may not collide
     // with it. Answered by a tokenSort change, not by an event.
     SLOT(void chooseTokenSort(QString order))
+
+    // Add or rename. An empty name is allowed — saving an address before naming its owner is
+    // the common case from a send form.
+    SLOT(void saveContact(QString address, QString name))
+    SLOT(void forgetContact(QString address))
     // Search the catalogue offered on the active chain. The query goes to the BACKEND: the
     // embedded Uniswap list is thousands of rows and may not be pulled into the view to be
     // filtered there.

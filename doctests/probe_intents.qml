@@ -50,6 +50,8 @@ Item {
         return null
     }
 
+    function root() { return view.item }
+
     function node(name) {
         return find(view.item, name) || ({ text: "<missing>", visible: "<missing>" })
     }
@@ -110,7 +112,7 @@ Item {
     }
 
     property var logos: ({
-        module: function (n) { return fake },
+        module: function (n) { return fake }, isViewModuleReady: function (n) { return true },
         request: function (intent, params, cb) {
             var r = probe.requests
             r.push({ intent: intent, params: params })
@@ -134,6 +136,7 @@ Item {
         property string accountsJson: JSON.stringify([probe.me])
         property string selectedAccount: probe.me
         property string accountLabelsJson: "{}"
+        property string accountWalletsJson: "{}"
         property string balancesJson: "[]"
         property string balancesRoute: "direct"
         property string tokensJson: "[]"
@@ -141,6 +144,9 @@ Item {
         property bool availableTokensLoading: false
         property bool tokenToggleBusy: false
         property string tokenToggleError: ""
+        // Empty until the send settles, exactly as the real one is: `pollSend` refreshes
+        // history a beat AFTER publishing the outcome, which is the window the receipt's
+        // "View transaction" button has to survive.
         property string historyJson: "[]"
         property string blockedChainsJson: "[]"
         property bool sweepingReceipts: false
@@ -159,7 +165,10 @@ Item {
         property string pendingApprovalHandle: ""
         property string lastSendOutcomeJson: ""
 
-        function cancelSend() {}
+        // Counted, because withdrawing a record the user may still approve by hand is the
+        // one way this callback can do real damage.
+        property int cancelCalls: 0
+        function cancelSend() { fake.cancelCalls++ }
         function selectAccount(a) {}
         function chooseTokenSort(o) {}
     }
@@ -230,6 +239,141 @@ Item {
             check("  " + code + " is named on screen", inDialog("pendingDialog", "pendingLabel").text,
                   "Could not reach a signer (" + code + ").")
         }
+    }
+
+    function assertAClosedPathWithdrawsTheRecord() {
+        console.log("")
+        console.log("the codes that mean the intent path is CLOSED. The keystore cannot tell")
+        console.log("'nobody is coming' from 'someone is coming, slowly' — with a dispatch in")
+        console.log("flight the signer is often not loaded yet, so silence and absence look")
+        console.log("identical there. This side knows, so it withdraws the record instead of")
+        console.log("leaving a clock to race a human")
+        for (var i = 0; i < 4; ++i) {
+            var code = ["bad_request", "not_declared", "timeout", "cancelled"][i]
+            var before = fake.cancelCalls
+            fake.pendingApprovalHandle = ""
+            fake.pendingApprovalHandle = probe.handle
+            probe.answer({ ok: false, data: undefined, error: code })
+            check("  " + code + " withdraws it", fake.cancelCalls - before, 1)
+        }
+    }
+
+    function assertTheFallbackCodesLeaveItAlone() {
+        console.log("")
+        console.log("...and the ONE that must not. `unavailable` may mean the signer is merely")
+        console.log("unreachable BY INTENT while still openable by hand, and that manual path")
+        console.log("is the fallback the whole design rests on — withdrawing here would delete")
+        console.log("the record the user was just told to go and approve")
+        var before = fake.cancelCalls
+        fake.pendingApprovalHandle = ""
+        fake.pendingApprovalHandle = probe.handle
+        probe.answer({ ok: false, data: undefined, error: "unavailable" })
+        check("  unavailable leaves the record standing", fake.cancelCalls - before, 0)
+        console.log("")
+        console.log("nor does success: the send is settled by send_status, and withdrawing an")
+        console.log("approval the human just granted would be the worst outcome of all")
+        var b = fake.cancelCalls
+        fake.pendingApprovalHandle = ""
+        fake.pendingApprovalHandle = probe.handle
+        probe.answer({ ok: true, data: {}, error: "" })
+        check("  ok leaves it standing", fake.cancelCalls - b, 0)
+    }
+
+    function assertTheReceiptCarriesTheWholeHash() {
+        console.log("")
+        console.log("the receipt offers the hash to copy. SHORTENED on screen, WHOLE on the")
+        console.log("clipboard — a truncated hash a user retypes is worse than no hash")
+        fake.pendingApprovalHandle = ""
+        fake.pendingRequestId = ""
+        fake.historyJson = "[]"
+        fake.lastSendOutcomeJson = JSON.stringify({ status: "broadcast", hash: probe.txHash })
+
+        check("shown short", inDialog("sendOutcomeDialog", "sendOutcomeHash").text,
+              "0x9a3c0000…00000001")
+        check("...but copied whole",
+              inDialog("sendOutcomeDialog", "sendOutcomeCopyButton").value, probe.txHash)
+        check("...and there is nothing to copy when there is no hash",
+              root().outcomeHash.length > 0, true)
+    }
+
+    function assertViewTransactionWaitsForTheRow() {
+        console.log("")
+        console.log("`openTxDetail` refuses a hash it cannot find, and refuses it SILENTLY. The")
+        console.log("row arrives a beat after the outcome does, so an always-enabled button")
+        console.log("would close the receipt and go nowhere in exactly the window it is used")
+        // Existence, not `visible` — see the header: a popup's visible reads false here
+        // whatever its binding says, so asserting it would pass for both answers.
+        check("the button is there, because there is a hash",
+              find(find(view.item, "sendOutcomeDialog").contentItem,
+                   "sendOutcomeViewTx") !== null, true)
+        check("...but not yet armed, because history has not caught up",
+              inDialog("sendOutcomeDialog", "sendOutcomeViewTx").enabled, false)
+
+        fake.historyJson = JSON.stringify([{
+            hash: probe.txHash, chainId: 11155111, from: probe.me,
+            to: "0x0adBc7B2D1A2b7C8E9F0A1b2c3d4e5f60718D3A7", value: "1000000000000000",
+            kind: "native", status: "pending", timestamp: 1756600000, nonce: 7
+        }])
+        check("...and it arms the moment the row lands",
+              inDialog("sendOutcomeDialog", "sendOutcomeViewTx").enabled, true)
+    }
+
+    function assertViewTransactionLandsOnTheRow() {
+        console.log("")
+        console.log("pressing it closes the receipt and opens that transaction. Both: leaving")
+        console.log("the dialog up over the screen it just opened is the obvious way to get")
+        console.log("this half right and still ship something unusable")
+        probe.pressInDialog("sendOutcomeDialog", "sendOutcomeViewTx")
+        check("the receipt is gone", root().showOutcome, false)
+        var nav = find(view.item, "nav")
+        check("...and a detail screen was pushed", nav !== null && nav.depth > 1, true)
+    }
+
+    function assertTheSubmitWaitEndsBothWays() {
+        console.log("")
+        console.log("the gap between the click and the chooser is real work — pricing, a nonce")
+        console.log("reservation, the keystore record — with the dialog still up. Both ways out")
+        console.log("have to clear it: a refusal that left the flag set would leave the button")
+        console.log("dead with no way back except closing the dialog")
+        view.item.sendSubmitting = true
+        fake.pendingRequestId = "snd_x"
+        check("the backend taking it ends the wait", view.item.sendSubmitting, false)
+
+        view.item.sendSubmitting = true
+        fake.pendingRequestId = ""
+        fake.sendError = "insufficient funds"
+        check("...and so does it refusing", view.item.sendSubmitting, false)
+        fake.sendError = ""
+    }
+
+    function assertAnUnnamedAccountBorrowsItsWalletName() {
+        console.log("")
+        console.log("an account nobody named, in a wallet somebody did. `#index` is the")
+        console.log("DERIVATION index off the account's own path, not a position in this list —")
+        console.log("a position renumbers when an account is added or removed, and the label")
+        console.log("would then quietly come to mean a different account")
+        fake.accountWalletsJson = JSON.stringify({
+            "0x8626f6940E2eb28930eFb4CeF49B2d1F2C9C1199": { wallet: "Status Throwaway", index: 0 }
+        })
+        check("it borrows the wallet's name and says where in it",
+              view.item.displayName(probe.me), "Status Throwaway #0")
+        // The name never REPLACES the address ANYWHERE it has room for both — that is
+        // `namedAddr`, the rule the activity list and every detail row use. The closed
+        // account picker is the one exception, and a deliberate one: it is 220px with an
+        // elide of its own, so both in it means the address is what gets cut.
+        check("...and the general rule carries the address with it",
+              view.item.namedAddr(probe.me), "Status Throwaway #0 (0x8626…1199)")
+        check("...while the closed picker shows the name alone, beside the address",
+              view.item.accountDisplay(probe.me), "Status Throwaway #0")
+
+        console.log("")
+        console.log("...but its OWN name always wins, and an account in an unnamed wallet")
+        console.log("falls back to the address rather than inventing anything")
+        fake.accountLabelsJson = JSON.stringify({ "8626f6940e2eb28930efb4cef49b2d1f2c9c1199": "Payroll" })
+        check("its own name wins", view.item.displayName(probe.me), "Payroll")
+        fake.accountLabelsJson = "{}"
+        fake.accountWalletsJson = "{}"
+        check("and with neither, the address", view.item.accountDisplay(probe.me).indexOf("0x"), 0)
     }
 
     function assertNoHandleAsksNothing() {
@@ -347,17 +491,31 @@ Item {
 
     function assertRpcSettingsHop() {
         console.log("")
-        console.log("the endpoint hop lives behind Settings, whose own comment used to")
-        console.log("explain why the button could not exist")
-        var dlg = find(view.item, "settingsDialog")
-        if (dlg && dlg.open)
-            dlg.open()
-        if (!probe.pressInDialog("settingsDialog", "openRpcSettingsButton"))
+        console.log("the endpoint hop lives on the Networks screen. It used to be behind a")
+        console.log("Settings popup whose whole content was links to other places — a click")
+        console.log("in front of each of them, and gone now")
+        view.item.openNetworks()
+        var nav = find(view.item, "nav")
+        var page = nav ? nav.currentItem : null
+        var btn = page ? find(page, "openRpcSettingsButton") : null
+        if (!btn) {
+            probe.failures++
+            console.log("  FAIL  openRpcSettingsButton is not on the Networks screen")
             return
+        }
+        // A pushed screen, not a popup: its children are really instantiated, so this is a
+        // press rather than an assertion about a binding.
+        btn.clicked()
         check("rpc endpoints", probe.lastRequest().intent, "evm.rpc.configure")
         check("...with no payload", JSON.stringify(probe.lastRequest().params), "{}")
         probe.answer({ ok: true, data: {}, error: "" })
+        check("...and the network selector is on that screen too, not in a dialog",
+              find(page, "network_sepolia") !== null || root_networksEmpty(), true)
     }
+
+    // The probe's fake publishes no network list, so the selector legitimately has no rows.
+    // Saying so beats an assertion that passes for the wrong reason.
+    function root_networksEmpty() { return view.item.networks.length === 0 }
 
     Loader {
         id: view
@@ -375,9 +533,16 @@ Item {
             probe.assertSilenceIsTheNormalOutcome()
             probe.assertUnavailableRestoresTheOldInstruction()
             probe.assertEveryOtherCodeNamesItself()
+            probe.assertAClosedPathWithdrawsTheRecord()
+            probe.assertTheFallbackCodesLeaveItAlone()
+            probe.assertTheSubmitWaitEndsBothWays()
+            probe.assertAnUnnamedAccountBorrowsItsWalletName()
             probe.assertNoHandleAsksNothing()
             probe.assertTheOutcomeExplainsTheTrip()
             probe.assertTheReceiptCanBeReadAndDismissed()
+            probe.assertTheReceiptCarriesTheWholeHash()
+            probe.assertViewTransactionWaitsForTheRow()
+            probe.assertViewTransactionLandsOnTheRow()
             probe.assertNavigationHopsNameCapabilities()
             probe.assertRpcSettingsHop()
 
