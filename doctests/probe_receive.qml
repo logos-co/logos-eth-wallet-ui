@@ -19,6 +19,9 @@ Item {
     height: 700
 
     readonly property string me: "0x8626f6940E2eb28930eFb4CeF49B2d1F2C9C1199"
+    // Past every version's byte capacity, so QrGen.modules throws and qrModules answers null
+    // for a payload that is NOT empty — the one state the two null causes have to be told apart in.
+    readonly property string unencodable: "0x" + "ab".repeat(3000)
     readonly property string other: "0x0adBc7B2D1A2b7C8E9F0A1b2c3d4e5f60718D3A7"
 
     property int failures: 0
@@ -262,8 +265,11 @@ Item {
         var copy = onScreen("receiveAddressCopyButton")
         check("it is there", copy.visible, true)
         check("...offering the whole address, not the elided one", copy.value, probe.me)
+        // Searched from the SAME root as the button above, or the two can never collide and
+        // this passes whatever they are named: onScreen() looks inside walletHome, and the
+        // header's copy button is declared outside it.
         check("...and the header's button is a different object",
-              copy === find(view.item, "addressCopyButton"), false)
+              find(screen(), "addressCopyButton"), null)
         check("...which is still on screen while this page is open",
               find(view.item, "addressCopyButton") !== null, true)
     }
@@ -296,6 +302,19 @@ Item {
         check("the code is back", onScreen("receiveQrBox").visible, true)
         check("...for the account now selected", onScreen("receivePage").payload, probe.me)
         check("...and the note stood down", onScreen("receiveUnavailable").visible, false)
+
+        console.log("")
+        console.log("and an address the encoder REFUSES is a different sentence. `qr` is null")
+        console.log("for both, but the address line keys off the payload — so one message for")
+        console.log("both states prints \"no account is selected\" under a visible address")
+        fake.selectedAccount = probe.unencodable
+        check("still nothing encoded", onScreen("receivePage").qr, null)
+        check("...but the address is on screen", onScreen("receiveAddress").visible, true)
+        check("...so the note says why, rather than denying there is an account",
+              onScreen("receiveUnavailable").text,
+              "This address could not be encoded, so there is no code to show.")
+        fake.selectedAccount = probe.me
+        check("...and it recovers", onScreen("receiveQrBox").visible, true)
     }
 
     Loader {

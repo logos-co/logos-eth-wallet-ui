@@ -5,8 +5,8 @@ Send ether on one Ethereum network at a time, with the full set of fee controls.
 Information design follows MetaMask: one question per screen, everything else behind a
 disclosure. Four sections (Tokens, Send, Receive, Activity) and **the active network
 visible at all times** — a user must never be able to mistake which chain they are spending
-on. Testnets are visually distinct from mainnet. Nothing sits above the tab strip: a button
-that opens a tab, on top of that tab, is two answers to one question.
+on. Testnets are visually distinct from mainnet. No action button sits above the tab strip: a
+button that opens a tab, on top of that tab, is two answers to one question.
 
 ## What this module cannot do
 

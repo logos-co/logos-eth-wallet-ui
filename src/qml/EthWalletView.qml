@@ -9,8 +9,8 @@ import "qrcodegen.js" as QrGen
 // The Ethereum wallet.
 //
 // Information design follows MetaMask: one question per screen, everything else behind a
-// disclosure. Two tabs, one action, and the active network visible at all times — a user must
-// never be able to mistake which chain they are spending on.
+// disclosure. Four sections, no action button above the tab strip, and the active network
+// visible at all times — a user must never be able to mistake which chain they are spending on.
 //
 // This view holds no secret. It requests signatures and reads which accounts exist; the vault
 // password is taken only by evm_signer_ui, and seed phrases only ever reach evm_keystore_ui.
@@ -2416,7 +2416,13 @@ Item {
                                     visible: !receivePage.qr
                                     textFormat: Text.PlainText
                                     color: Theme.palette.textSecondary
-                                    text: "No account is selected, so there is nothing to receive to."
+                                    // `qr` is null for BOTH an empty selection and an encoder that
+                                    // threw, and the address line beside this one keys off the
+                                    // payload — so saying "no account" under a visible address is a
+                                    // screen contradicting itself.
+                                    text: receivePage.payload.length > 0
+                                          ? "This address could not be encoded, so there is no code to show."
+                                          : "No account is selected, so there is nothing to receive to."
                                 }
 
                                 // The WHOLE address, wrapped rather than shortened: this screen is where a

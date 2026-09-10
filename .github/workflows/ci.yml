@@ -3,9 +3,10 @@ name: CI
 # The offline half of this view's suite — the half that needs no app.
 #
 # What runs: the seven C++ tables over the pure headers in src/, the JS table
-# over the view's own QR encoder, the eight QML probes that load the real view
-# against a fabricated backend, and the source assertions in assert_ui.py
-# --grep-only.
+# over the view's own QR encoder, the zbar decode of the codes it renders (the
+# one check here with a non-Qt system dependency), the eight QML probes that
+# load the real view against a fabricated backend, and the source assertions in
+# assert_ui.py --grep-only.
 #
 # What does NOT run, and why: sections 1 and up of assert_ui.py, and
 # assert_live_accounts.py. Both drive a live logos-standalone-app over the QML
@@ -128,9 +129,11 @@ jobs:
             grep -q -- "--- $p.qml" /tmp/tables.log \
               || { echo "::error::probe never ran: $p"; exit 1; }
           done
-          # Eight tables and eight probes each sign off with one RESULT line, and
-          # a probe that reaches its last phase is the only thing that prints
-          # one. A header with silence under it counts here and passes nothing.
+          # Eight tables, the zbar decode, and eight probes each sign off with one
+          # RESULT line, and a probe that reaches its last phase is the only thing
+          # that prints one. A header with silence under it counts here and passes
+          # nothing. 8 + 1 + 8 = 17 — do NOT "correct" this to 16, the decode is
+          # the seventeenth and the floor is what keeps it in the run.
           n=$(grep -c "RESULT: ALL PASS" /tmp/tables.log)
           echo "sections that reported: $n"; [ "$n" -ge 17 ]
           n=$(grep -c "  PASS  " /tmp/tables.log)
