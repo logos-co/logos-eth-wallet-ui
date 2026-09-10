@@ -197,6 +197,9 @@ def joined(lines, i):
         out.append(s)
     return " ".join(out)
 
+def indent(line):
+    return len(line) - len(line.lstrip())
+
 def qml_item(name):
     """The lines of the item declaring `objectName: name`, up to the next objectName."""
     for i, l in enumerate(qml_lines):
@@ -370,7 +373,7 @@ print("   the token picker answers with the field beside it, as accountPicker al
 print("   ComboBox resets currentIndex when its model is re-read, and sendPage.token did not")
 print("   asserted against syncIndex's OWN body: onActivated three lines up carries the same")
 print("   substring, and syncIndex is what re-asserts on a MODEL change — the defect described")
-picker = re.search(r'objectName: "sendTokenPicker"(.*?)\n {36}\}', send, re.S)
+picker = re.search(r'objectName: "sendTokenPicker"(.*?)\n {32}\}', send, re.S)
 sync = qml_fn_body(picker.group(1) if picker else "", "syncIndex")
 check("sendTokenPicker re-asserts its index on a model change",
       bool(picker) and "onModelChanged: syncIndex()" in picker.group(1), True)
@@ -1208,19 +1211,22 @@ check("...and the closed picker shows a name alone, falling back to the short ad
 check("...while its rows carry both, resolved per row rather than baked into the model",
       "model: addresses" in qml_body and "text: root.displayName(modelData)" in qml_body, True)
 print()
-print("the account chrome is HOME chrome: it is about the selected account, which a pushed")
-print("screen is not about — and a button naming a screen you are already on is worse than")
-print("no button. The chain chip is the exception, and deliberately: a detail screen still")
-print("shows figures, and which chain they came from is not something to leave behind.")
-# Gated as two ROWS on one reading rather than control by control: five `visible` bindings
-# saying the same thing are five that can come to disagree, and the chip was the one that
-# did — it followed the user onto a settings screen, over a page with its own title.
-check("the header is gated on one reading of what home is",
-      qml_body.count("visible: root.homeChrome"), 2)
-check("...and no control carries a second opinion about it",
-      "visible: nav.depth <= 1" in qml_body, False)
-check("...which is the StackView's depth, read once",
-      qml_decl("homeChrome").endswith("nav !== null && nav.depth <= 1"), True)
+print("the account chrome and the tab strip STAY over a pushed screen. A detail screen")
+print("replaces only the pane UNDER the strip, so it is a place inside the tab it opened")
+print("from — and which account and which chain its figures belong to is the last thing to")
+print("leave behind. The chrome used to be gated on stack depth, back when a pushed screen")
+print("covered the whole view and brought its own title with it.")
+check("nothing hides the chrome on stack depth",
+      [l.strip() for l in qml_lines
+       if "visible:" in l and ("homeChrome" in l or "nav.depth" in l)], [])
+# The structural claim, not the absence of a binding: a strip INSIDE the stack is replaced
+# along with the page, which is the arrangement this replaces. Named, not counted — the Send
+# form has a strip of its own (Recents / Address book / My addresses) and it SHOULD be nested.
+_i_tabs = next(i for i, l in enumerate(qml_lines) if l.strip() == "id: tabs")
+_i_nav = next(i for i, l in enumerate(qml_lines) if l.strip() == "LogosStackView {")
+check("...because the strip it drives is declared outside the StackView", _i_tabs < _i_nav, True)
+check("...as its sibling, at the same level",
+      indent(qml_lines[_i_tabs - 1]), indent(qml_lines[_i_nav]))
 check("there is no Settings popup left to hold links to any of them",
       "settingsDialog" in qml_body, False)
 check("...nor three buttons in the chrome, which is what replaced it",
