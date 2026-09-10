@@ -244,6 +244,13 @@ sections:
               # A LogosItemDelegate, so this one IS clickable — unlike the tab bar.
               action: click_object
               find_value: "tokensEntry"
+            # A click is DELIVERED, not executed: the inspector returns once the event is
+            # posted, and the handler behind it runs on the app's own loop. Reading straight
+            # after asks a question the app has not reached yet — which is what failed here,
+            # on a loaded runner, having passed every time locally.
+            - name: "let the click be handled"
+              action: sleep
+              ms: 1500
             - name: "...onto the pane under the strip"
               action: expect_property
               find_value: "nav"
@@ -264,6 +271,9 @@ sections:
             - name: "Going back"
               action: click_object
               find_value: "manageTokensBackButton"
+            - name: "let the pop be handled"
+              action: sleep
+              ms: 1500
             - name: "...leaves the stack where it started"
               # The stack's depth, not the item's absence: a pop runs a transition, so the
               # screen is still in the scene for a moment after it has been left.
