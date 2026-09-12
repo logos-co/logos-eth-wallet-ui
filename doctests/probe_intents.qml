@@ -111,20 +111,45 @@ Item {
             cb(res)
     }
 
-    property var logos: ({
-        module: function (n) { return fake }, isViewModuleReady: function (n) { return true },
-        request: function (intent, params, cb) {
+    // A QtObject, not a JS object: `intentRequested` has to be a REAL signal for the view's
+    // `Connections { target: logos }` to bind to, or the provider half measures nothing.
+    property var logos: shell
+    property var responses: []
+    QtObject {
+        id: shell
+        signal intentRequested(string requestId, string intent, var params, string requesterName)
+        function module(n) { return fake }
+        function isViewModuleReady(n) { return true }
+        function request(intent, params, cb) {
             var r = probe.requests
             r.push({ intent: intent, params: params })
             probe.requests = r
             probe.reply = cb
         }
-    })
+        function respond(requestId, ok, data, error) {
+            var r = probe.responses
+            r.push({ requestId: requestId, ok: ok, data: data, error: error })
+            probe.responses = r
+        }
+    }
+    function lastResponse() {
+        return probe.responses.length ? probe.responses[probe.responses.length - 1]
+                                      : ({ requestId: "<none>", ok: "<none>", error: "<none>", data: {} })
+    }
+    // What the fake backend was asked to review, accept or decline.
+    property var reviewed: []
+    property int accepted: 0
+    property int declined: 0
 
     QtObject {
         id: fake
 
         property string lastError: ""
+        property string intentSendJson: ""
+        property bool intentSendPricing: false
+        function reviewIntentSend(json) { var r = probe.reviewed; r.push(JSON.parse(json)); probe.reviewed = r }
+        function acceptIntentSend() { probe.accepted++ }
+        function declineIntentSend() { probe.declined++; fake.intentSendJson = "" }
         property bool scopedDataFresh: true
         property bool dataLoading: false
         property bool quoteLoading: false
@@ -517,6 +542,112 @@ Item {
     // Saying so beats an assertion that passes for the wrong reason.
     function root_networksEmpty() { return view.item.networks.length === 0 }
 
+    // ── the other direction: this wallet PROVIDES evm.transactions.send ──────────
+    //
+    // An app hands over calls and a purpose. The backend reviews and prices them, the human
+    // sees them before the signer does, and the app is answered once — with every hash, or
+    // with why not. The backend is fabricated, so what is asserted is the VIEW's half: what
+    // it asks the backend, what it shows, and what it tells the shell.
+    function assertAnotherAppsSendIsReviewedAndAnswered() {
+        console.log("")
+        console.log("another app asks this wallet to send. The request reaches the backend for")
+        console.log("review with the shell's id and the requester's attested name")
+        var root = view.item
+        fake.pendingRequestId = ""
+        fake.lastSendOutcomeJson = ""
+        var calls = [{ to: "0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45", value: "0x0", data: "0x5ae401dc",
+                       label: "Swap USDC for ETH on Uniswap V3" }]
+        shell.intentRequested("req_7", "evm.transactions.send",
+                              ({ purpose: "Swap 1000 USDC for ETH on Uniswap", calls: calls }), "uniswap_ui")
+        check("the backend is asked to review it", probe.reviewed.length, 1)
+        check("...under the shell's id", probe.reviewed[0].requestId, "req_7")
+        check("...naming the requester the shell attested", probe.reviewed[0].requester, "uniswap_ui")
+        check("...with the payload untouched", probe.reviewed[0].params.calls[0].data, "0x5ae401dc")
+        check("nothing is answered yet", probe.responses.length, 0)
+
+        console.log("   the backend publishes what it checked, and the dialog shows all of it")
+        fake.intentSendJson = JSON.stringify({ requestId: "req_7", requester: "uniswap_ui", chainId: 11155111,
+                                               from: probe.me, purpose: "Swap 1000 USDC for ETH on Uniswap",
+                                               tier: "normal", calls: calls })
+        check("the review is open", root.intentSendOpen, true)
+        check("who asked", inDialog("intentSendDialog", "intentSendRequester").value, "uniswap_ui")
+        check("what they claim it is for", inDialog("intentSendDialog", "intentSendPurpose").value,
+              "Swap 1000 USDC for ETH on Uniswap")
+        check("the call, with its label and contract", inDialog("intentSendDialog", "intentSendCall_0").text,
+              "1. Swap USDC for ETH on Uniswap V3 · 0x68b3…Fc45")
+        check("...and its calldata, whole", inDialog("intentSendDialog", "intentSendCallData_0").text, "0x5ae401dc")
+        fake.intentSendPricing = true
+        check("while the sender prices it, the fee line says so", inDialog("intentSendDialog", "intentSendFee").text, "Pricing…")
+        check("...and the send button waits", inDialog("intentSendDialog", "intentSendAccept").enabled, false)
+        fake.intentSendPricing = false
+        fake.intentSendJson = JSON.stringify(Object.assign(JSON.parse(fake.intentSendJson),
+                                                           { fee: { ok: true, feeCeilingWeiDisplay: "0.0004", valueWeiDisplay: "1.5", nativeSymbol: "ETH" } }))
+        check("the fee is a ceiling, never a price", inDialog("intentSendDialog", "intentSendFee").text,
+              "Network fee at most 0.0004 ETH")
+        check("the ether the calls carry is the sender's sum, in ether, never bare wei",
+              inDialog("intentSendDialog", "intentSendValue").value, "1.5 ETH")
+        check("...and the button offers the send on the named network",
+              inDialog("intentSendDialog", "intentSendAccept").text, "Send on Sepolia (testnet)")
+
+        console.log("   the human says yes: the backend sends, and the request becomes the wallet's")
+        console.log("   own pending send — same signer hand-off — while the app waits")
+        pressInDialog("intentSendDialog", "intentSendAccept")
+        check("accept reaches the backend", probe.accepted, 1)
+        fake.intentSendJson = ""
+        fake.pendingRequestId = "snd_7"; fake.pendingApprovalHandle = probe.handle
+        check("the signer is asked for the same send", probe.lastRequest().intent, "evm.signing.approve")
+        check("...and the app is still waiting", probe.responses.length, 0)
+        probe.answer({ ok: true })
+        fake.lastSendOutcomeJson = JSON.stringify({ status: "broadcast", hash: "0xb", hashes: ["0xa", "0xb"] })
+        fake.pendingRequestId = ""; fake.pendingApprovalHandle = ""
+        check("the outcome answers the app", probe.responses.length, 1)
+        check("...ok", probe.lastResponse().ok, true)
+        check("...with every hash", JSON.stringify(probe.lastResponse().data.hashes), JSON.stringify(["0xa", "0xb"]))
+        check("...and the status", probe.lastResponse().data.status, "broadcast")
+        check("...and the id is spent", root.intentSendRequestId, "")
+
+        console.log("   declining answers `cancelled` and clears the review")
+        root.dismissOutcome(); fake.lastSendOutcomeJson = ""
+        shell.intentRequested("req_8", "evm.transactions.send", ({ purpose: "p", calls: calls }), "some_app")
+        fake.intentSendJson = JSON.stringify({ requestId: "req_8", requester: "some_app", chainId: 11155111,
+                                               from: probe.me, purpose: "p", tier: "normal", calls: calls })
+        pressInDialog("intentSendDialog", "intentSendDecline")
+        check("the backend clears it", probe.declined, 1)
+        check("the app hears cancelled", probe.lastResponse().error, "cancelled")
+        check("...for its own request", probe.lastResponse().requestId, "req_8")
+
+        console.log("   a refusal by the backend is passed on with its code and detail")
+        shell.intentRequested("req_9", "evm.transactions.send", ({ purpose: "p", calls: [] }), "some_app")
+        fake.intentSendJson = JSON.stringify({ requestId: "req_9", requester: "some_app", error: "bad_request", detail: "no calls" })
+        check("bad_request reaches the app", probe.lastResponse().error, "bad_request")
+        check("...with the reason", probe.lastResponse().data.detail, "no calls")
+        check("...and the review is not open", root.intentSendOpen, false)
+
+        console.log("   a rejection by the human is the app's answer too")
+        shell.intentRequested("req_10", "evm.transactions.send", ({ purpose: "p", calls: calls }), "some_app")
+        fake.intentSendJson = JSON.stringify({ requestId: "req_10", requester: "some_app", chainId: 11155111,
+                                               from: probe.me, purpose: "p", tier: "normal", calls: calls })
+        pressInDialog("intentSendDialog", "intentSendAccept")
+        fake.intentSendJson = ""
+        fake.pendingRequestId = "snd_10"; fake.pendingApprovalHandle = probe.handle
+        probe.answer({ ok: true })
+        fake.lastSendOutcomeJson = JSON.stringify({ status: "rejected" })
+        fake.pendingRequestId = ""; fake.pendingApprovalHandle = ""
+        check("rejected, in the sender's word", probe.lastResponse().error, "rejected")
+        check("...not ok", probe.lastResponse().ok, false)
+
+        console.log("   a second request over an open review ends the first")
+        root.dismissOutcome(); fake.lastSendOutcomeJson = ""
+        shell.intentRequested("req_11", "evm.transactions.send", ({ purpose: "p", calls: calls }), "app_a")
+        shell.intentRequested("req_12", "evm.transactions.send", ({ purpose: "p", calls: calls }), "app_b")
+        check("the first is answered cancelled", probe.lastResponse().requestId, "req_11")
+        check("...as such", probe.lastResponse().error, "cancelled")
+        check("...and the second is the one under review", root.intentSendRequestId, "req_12")
+        fake.intentSendJson = JSON.stringify({ requestId: "req_12", requester: "app_b", chainId: 11155111,
+                                               from: probe.me, purpose: "p", tier: "normal", calls: calls })
+        pressInDialog("intentSendDialog", "intentSendDecline")
+    }
+
     Loader {
         id: view
         anchors.fill: parent
@@ -545,6 +676,7 @@ Item {
             probe.assertViewTransactionLandsOnTheRow()
             probe.assertNavigationHopsNameCapabilities()
             probe.assertRpcSettingsHop()
+            probe.assertAnotherAppsSendIsReviewedAndAnswered()
 
             console.log("")
             console.log(probe.failures ? "RESULT: FAILURES" : "RESULT: ALL PASS")

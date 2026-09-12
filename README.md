@@ -41,6 +41,26 @@ refused after a scroll down to Advanced would report itself off-screen. The sect
 on `pendingRequestId`, never on the click, so a submit that was refused stays on screen with
 its reason.
 
+## Sending for another app
+
+This wallet **provides** `evm.transactions.send`, the intent a QML-only dapp raises when it has
+no module client of its own. The app hands over `calls` — `[{ to, value?, data?, gasLimit?,
+label?, meta? }]`, at most eight — and a `purpose` in its own words; `chainId`, `from` and
+`tier` are optional and must agree with the wallet as it stands. The request is checked by
+`checkIntentSend` in `src/eth_wallet_ui_intent.h` (run by `doctests/test_intent_send.cpp`), and a
+payload no retry fixes is refused `bad_request` with the reason; a wallet already waiting on a
+send, or with no account or network selected, answers `busy`.
+
+What passes is put in front of the human **before** the signer sees it: who asked (the name
+the shell attested), what they claim it is for, every call with its contract, value and
+calldata, and the fee ceiling `tx_sender_module` priced. Declining answers the app `cancelled`.
+Sending hands the calls to `tx_sender_module` — the same sender the wallet's own sends go
+through — and from there it is the wallet's own pending send: the same poll, the same
+`evm.signing.approve` hand-off, the same outcome dialog. The app is answered once, when the
+send has settled: `ok` with every hash for a broadcast, or the sender's word — `rejected`,
+`cancelled`, `failed`, `stuck` — for anything else. The rows land in Activity as calls, titled
+with the labels the app gave them and stamped with its name.
+
 ## What a figure on screen belongs to
 
 Every balance, transaction row, token, quote and route label means something only against the

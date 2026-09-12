@@ -762,9 +762,14 @@ check("every back arrow is one size",
       sorted({re.search(r"iconSize: (\d+)", b).group(1) for b in backs}), ["20"])
 check("...on every screen there is to leave", len(backs), 5)
 
-check("the four spinner-bearing claims",
+check("the five spinner-bearing claims",
       sorted(set(re.findall(r"beginClaim\((m_\w+)", code))),
-      ["m_detailsInFlight", "m_feesInFlight", "m_tokenToggleInFlight", "m_txStatusInFlight"])
+      ["m_detailsInFlight", "m_feesInFlight", "m_intentPriceInFlight", "m_tokenToggleInFlight",
+       "m_txStatusInFlight"])
+print("   the pricing of another app's request is the fifth: its spinner is the dialog's fee")
+print("   line, and its send button waits on it")
+check("...and the send button waits on the pricing",
+      "!root.intentSendPricing" in qml_binding("intentSendAccept", "enabled"), True)
 check("...and the button it drives says it is running",
       "!root.txStatusLoading" in qml_binding("txDetailRefresh", "enabled"), True)
 

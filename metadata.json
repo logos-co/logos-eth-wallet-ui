@@ -10,18 +10,85 @@
   "main": "eth_wallet_ui_plugin",
   "icon": "src/icons/eth_wallet.png",
   "view": "qml/EthWalletView.qml",
-  "dependencies": ["eth_wallet_backend"],
-  "uses": [
-    { "intent": "evm.signing.approve", "cardinality": "single" },
-    { "intent": "evm.accounts.manage", "cardinality": "single" },
-    { "intent": "evm.rpc.configure", "cardinality": "single" },
-    { "intent": "evm.verified_routing.operate", "cardinality": "single" },
-    { "intent": "evm.token_lists.configure", "cardinality": "single" }
+  "dependencies": [
+    "eth_wallet_backend",
+    "tx_sender_module"
   ],
-  "codegen": { "rep": "src/eth_wallet_ui.rep" },
+  "uses": [
+    {
+      "intent": "evm.signing.approve",
+      "cardinality": "single"
+    },
+    {
+      "intent": "evm.accounts.manage",
+      "cardinality": "single"
+    },
+    {
+      "intent": "evm.rpc.configure",
+      "cardinality": "single"
+    },
+    {
+      "intent": "evm.verified_routing.operate",
+      "cardinality": "single"
+    },
+    {
+      "intent": "evm.token_lists.configure",
+      "cardinality": "single"
+    }
+  ],
+  "provides": [
+    {
+      "intent": "evm.transactions.send",
+      "params": [
+        {
+          "name": "calls",
+          "type": "array",
+          "required": true,
+          "description": "The transactions to send, in order: [{ to, value?, data?, gasLimit?, label?, meta? }]"
+        },
+        {
+          "name": "purpose",
+          "type": "string",
+          "required": true,
+          "description": "What the human is told the bundle is for, in the requester's words"
+        },
+        {
+          "name": "chainId",
+          "type": "number",
+          "required": false,
+          "description": "Must be the wallet's active network; absent means it"
+        },
+        {
+          "name": "from",
+          "type": "string",
+          "required": false,
+          "description": "One of the wallet's accounts; absent means the selected one"
+        },
+        {
+          "name": "tier",
+          "type": "string",
+          "required": false,
+          "description": "slow, normal or fast; absent means normal"
+        }
+      ]
+    }
+  ],
+  "codegen": {
+    "rep": "src/eth_wallet_ui.rep"
+  },
   "nix": {
     "external_libraries": [],
-    "packages": { "build": [], "runtime": ["qt6.qtdeclarative"] },
-    "cmake": { "find_packages": [], "extra_sources": [], "extra_include_dirs": [], "extra_link_libraries": [] }
+    "packages": {
+      "build": [],
+      "runtime": [
+        "qt6.qtdeclarative"
+      ]
+    },
+    "cmake": {
+      "find_packages": [],
+      "extra_sources": [],
+      "extra_include_dirs": [],
+      "extra_link_libraries": []
+    }
   }
 }

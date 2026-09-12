@@ -71,6 +71,39 @@ Item {
 
     property string approvalNote: ""
     property string intentNote: ""
+
+    // ── another app's transactions: this wallet PROVIDES evm.transactions.send ──
+    //
+    // The shell's id for the request being serviced, held here because the view is the one
+    // that answers the shell: the backend reviews, prices and sends, and publishes what it
+    // decided in `intentSendJson`; every answer to the requester goes through answerIntent.
+    // Empty when nothing is being serviced.
+    property string intentSendRequestId: ""
+    readonly property var intentSend: root.ready ? j(backend.intentSendJson, "{}") : ({})
+    readonly property bool intentSendOpen: root.ready && backend.intentSendJson !== ""
+                                           && root.intentSend.error === undefined
+    readonly property bool intentSendPricing: root.ready && backend.intentSendPricing
+
+    function answerIntent(ok, data, error) {
+        var id = root.intentSendRequestId
+        if (id === "") return
+        root.intentSendRequestId = ""
+        logos.respond(id, ok, data, error)
+    }
+
+    Connections {
+        target: logos
+        function onIntentRequested(requestId, intent, params, requesterName) {
+            if (intent !== "evm.transactions.send") return
+            // One review at a time. A request arriving over another ends the first: its
+            // requester is told, and the human is shown the newest ask rather than a stack.
+            if (root.intentSendRequestId !== "") root.answerIntent(false, ({}), "cancelled")
+            root.intentSendRequestId = requestId
+            root.backend.reviewIntentSend(JSON.stringify({ requestId: requestId,
+                                                           requester: requesterName,
+                                                           params: params }))
+        }
+    }
     // The outcome the user has already seen. Reset whenever a new send clears the backend's,
     // so two identical outcomes in a row still each get a receipt.
     property string dismissedOutcome: ""
@@ -161,6 +194,11 @@ Item {
                 // is a quote for a send nobody is making.
                 root.selectTab(3)
                 sendPage.clearForm()
+            } else if (root.intentSendRequestId !== "" && root.backend.lastSendOutcomeJson !== ""
+                       && !root.intentSendOpen) {
+                // The outcome is published a beat BEFORE the id clears; whichever lands
+                // second is the one that answers, and this is that one.
+                root.answerIntentFromOutcome()
             }
         }
         function onSendErrorChanged() {
@@ -176,7 +214,37 @@ Item {
         // stops counting as read.
         function onLastSendOutcomeJsonChanged() {
             if (root.backend.lastSendOutcomeJson === "") root.dismissedOutcome = ""
+            // The send another app asked for has settled: it is answered with every hash,
+            // or with the sender's word for why not. Only once the pending id has cleared —
+            // the outcome is published a beat before it, and both must agree.
+            if (root.backend.lastSendOutcomeJson !== "" && root.intentSendRequestId !== ""
+                    && !root.sendPending && !root.intentSendOpen)
+                root.answerIntentFromOutcome()
         }
+        // A request the backend refused is answered with its code and the reason, and the
+        // record is cleared; a request it accepted stays on screen until the human decides.
+        function onIntentSendJsonChanged() {
+            // Parsed HERE, off the property itself: a handler on the change signal can run
+            // before the `intentSend` binding has been refreshed, and would then read the
+            // record it replaced.
+            var r = root.j(root.backend.intentSendJson, "{}")
+            if (r.error === undefined || root.intentSendRequestId === "") return
+            if (r.requestId !== undefined && r.requestId !== root.intentSendRequestId) return
+            root.answerIntent(false, ({ detail: r.detail || "" }), String(r.error))
+            root.backend.declineIntentSend()
+        }
+    }
+
+    // The outcome record is the wallet's own; `answerFromOutcome` in the C++ half is the rule
+    // this mirrors, kept in step by the table that runs it.
+    function answerIntentFromOutcome() {
+        var o = root.j(root.backend.lastSendOutcomeJson, "{}")
+        if (o.status === undefined) return
+        var data = ({ status: o.status })
+        if (o.hash !== undefined) data.hash = o.hash
+        if (o.hashes !== undefined) data.hashes = o.hashes
+        if (o.reason !== undefined) data.reason = o.reason
+        root.answerIntent(o.status === "broadcast", data, o.status === "broadcast" ? "" : String(o.status))
     }
 
     // The picker follows the backend's selection, including the re-select loadAccounts makes
@@ -4116,6 +4184,136 @@ Item {
         }
     }
 
+
+    // ── another app asks to send ─────────────────────────────────────────────────
+    //
+    // What the app handed over, in full, before anything is asked of the signer: who asked
+    // (attested by the shell), what they claim it is for, every call with its contract and
+    // value, and the fee ceiling the sender priced. Declining answers the app `cancelled`;
+    // sending makes it the wallet's own pending send, and the app hears the outcome.
+    LogosDialog {
+        objectName: "intentSendDialog"
+        title: "An app asks to send"
+        anchors.centerIn: parent
+        width: 480
+        visible: root.intentSendOpen
+        contentItem: ColumnLayout {
+            spacing: Theme.spacing.small
+            DetailRow {
+                objectName: "intentSendRequester"
+                label: "Asked by"
+                value: root.intentSend.requester !== undefined && String(root.intentSend.requester).length
+                       ? String(root.intentSend.requester) : "an app the shell did not name"
+            }
+            DetailRow {
+                objectName: "intentSendPurpose"
+                label: "Purpose (claimed)"
+                value: root.intentSend.purpose !== undefined ? String(root.intentSend.purpose) : ""
+            }
+            DetailRow {
+                objectName: "intentSendFrom"
+                label: "From"
+                mono: true
+                value: root.namedAddr(root.intentSend.from || "")
+            }
+            DetailRow {
+                objectName: "intentSendNetwork"
+                label: "Network"
+                value: root.networkLabel()
+            }
+            LogosText {
+                text: "Transactions to approve"
+                color: Theme.palette.textSecondary
+                font.pixelSize: Theme.typography.secondaryText
+            }
+            Repeater {
+                model: root.intentSend.calls !== undefined ? root.intentSend.calls : []
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    spacing: 0
+                    // No raw wei here: the ether every call carries is summed by the sender and
+                    // shown in the native unit on the Value row below.
+                    LogosText {
+                        objectName: "intentSendCall_" + index
+                        Layout.fillWidth: true
+                        textFormat: Text.PlainText
+                        wrapMode: Text.WordWrap
+                        text: (index + 1) + ". " + (modelData.label || "") + " · " + root.namedAddr(modelData.to)
+                              + (modelData.value !== undefined && String(modelData.value) !== "0"
+                                 && String(modelData.value) !== "0x0" ? " · carries ether" : "")
+                    }
+                    LogosText {
+                        objectName: "intentSendCallData_" + index
+                        Layout.fillWidth: true
+                        visible: modelData.data !== undefined && String(modelData.data).length > 2
+                        textFormat: Text.PlainText
+                        elide: Text.ElideMiddle
+                        color: Theme.palette.textSecondary
+                        font.family: Theme.typography.mono
+                        font.pixelSize: Theme.typography.secondaryText
+                        text: modelData.data !== undefined ? String(modelData.data) : ""
+                    }
+                }
+            }
+            DetailRow {
+                objectName: "intentSendValue"
+                visible: root.intentSend.fee !== undefined && root.intentSend.fee.valueWeiDisplay !== undefined
+                label: "Ether sent"
+                value: root.intentSend.fee !== undefined && root.intentSend.fee.valueWeiDisplay !== undefined
+                       ? root.intentSend.fee.valueWeiDisplay + " " + (root.intentSend.fee.nativeSymbol || root.nativeSymbol)
+                       : ""
+            }
+            LogosText {
+                objectName: "intentSendFee"
+                Layout.fillWidth: true
+                textFormat: Text.PlainText
+                wrapMode: Text.WordWrap
+                color: root.intentSend.feeError !== undefined ? Theme.palette.error : Theme.palette.text
+                text: root.intentSendPricing ? "Pricing…"
+                    : root.intentSend.fee !== undefined && root.intentSend.fee.feeCeilingWeiDisplay !== undefined
+                      ? "Network fee at most " + root.intentSend.fee.feeCeilingWeiDisplay + " "
+                        + (root.intentSend.fee.nativeSymbol || root.nativeSymbol)
+                    : root.intentSend.feeError !== undefined ? "Fee: " + root.intentSend.feeError : ""
+            }
+            LogosText {
+                objectName: "intentSendNote"
+                Layout.fillWidth: true
+                wrapMode: Text.WordWrap
+                color: Theme.palette.textSecondary
+                font.pixelSize: Theme.typography.secondaryText
+                text: "The signer asks once for all of them. Nothing is sent until it says yes, "
+                      + "and the app is told how it ended."
+            }
+            LogosText {
+                objectName: "intentSendError"
+                visible: root.intentSend.sendError !== undefined
+                Layout.fillWidth: true
+                textFormat: Text.PlainText
+                wrapMode: Text.WordWrap
+                color: Theme.palette.error
+                text: root.intentSend.sendError !== undefined ? String(root.intentSend.sendError) : ""
+            }
+            RowLayout {
+                Layout.fillWidth: true
+                LogosButton {
+                    objectName: "intentSendDecline"
+                    text: "Decline"
+                    onClicked: {
+                        root.backend.declineIntentSend()
+                        root.answerIntent(false, ({}), "cancelled")
+                    }
+                }
+                Item { Layout.fillWidth: true }
+                LogosButton {
+                    objectName: "intentSendAccept"
+                    variant: LogosButton.Variant.Primary
+                    text: root.netKnown ? "Send on " + root.networkLabel() : "Send"
+                    enabled: root.ready && !root.sendPending && !root.intentSendPricing
+                    onClicked: root.backend.acceptIntentSend()
+                }
+            }
+        }
+    }
 
     // ── pending approval ──────────────────────────────────────────────────────────
     LogosDialog {

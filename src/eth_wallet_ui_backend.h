@@ -6,6 +6,7 @@
 
 #include "eth_wallet_ui_apply.h"
 #include "eth_wallet_ui_guard.h"
+#include "eth_wallet_ui_intent.h"
 #include "eth_wallet_ui_scope.h"
 #include "rep_eth_wallet_ui_source.h"
 #include "logos_ui_plugin_context.h"
@@ -43,6 +44,9 @@ public:
     void chooseTokenSort(QString order) override;
     void searchTokens(QString query) override;
     void setTokenEnabled(QString address, bool enabled) override;
+    void reviewIntentSend(QString requestJson) override;
+    void acceptIntentSend() override;
+    void declineIntentSend() override;
 
     /// The two halves of the selection, overridden onto publishSelection() below. Overriding
     /// rather than shadowing is what makes the withdrawal unavoidable: a handler that
@@ -172,6 +176,10 @@ private:
     /// first is in flight, not queued behind it and applied to a row that has since moved.
     InFlight m_tokenToggleInFlight;
     InFlight m_feesInFlight;
+    /// One pricing of another app's request at a time, and one acceptance: both are bare
+    /// claims, because the dialog's buttons are disabled while either is held.
+    InFlight m_intentPriceInFlight;
+    InFlight m_intentSendInFlight;
     /// Whether anything queued behind the live quote was a user edit. Carried separately, or a
     /// keystroke arriving behind a timer tick replays as a tick and its refusal is swallowed.
     bool m_quoteAgainInteractive = false;

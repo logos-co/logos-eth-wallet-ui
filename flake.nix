@@ -8,6 +8,13 @@
     eth_wallet_backend = {
       url = "github:logos-co/logos-eth-wallet-backend";
       inputs.logos-module-builder.follows = "logos-module-builder";
+      # One sender, one lidl: the backend sends through the same module this view hands an
+      # app's transactions to, and two pins of it would generate two clients for one name.
+      inputs.tx_sender_module.follows = "tx_sender_module";
+    };
+    tx_sender_module = {
+      url = "github:logos-co/logos-evm-tx-sender-module";
+      inputs.logos-module-builder.follows = "logos-module-builder";
     };
   };
 

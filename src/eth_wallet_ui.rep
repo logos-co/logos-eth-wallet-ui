@@ -149,11 +149,21 @@ class EthWalletUi
     // ours. Empty exactly when `pendingRequestId` is.
     PROP(QString pendingApprovalHandle="" READONLY)
 
-    // How the last send ended: `{ status, hash?, reason? }`, or empty before the first one.
+    // How the last send ended: `{ status, hash?, hashes?, reason? }`, or empty before the first
+    // one. `hashes` is every transaction of the send: a bundle another app asked for is more
+    // than one, and the app is answered with all of them.
     // Set as `pendingRequestId` clears, because that is the instant the waiting dialog
     // disappears — and the shell may be returning the user here at exactly that moment, so
     // something has to be left on screen that explains the trip.
     PROP(QString lastSendOutcomeJson="" READONLY)
+
+    // A request from ANOTHER APP to send transactions from this wallet, under review:
+    // `{ requestId, requester, chainId, from, purpose, calls, fee?, error? }`. Empty when
+    // nothing is being reviewed. The app never sees a key: it hands over calls, the human
+    // sees them here first, and the same signer approval follows as for the wallet's own send.
+    PROP(QString intentSendJson="" READONLY)
+    // The sender is pricing the request above. Down when `fee` or `error` lands.
+    PROP(bool intentSendPricing=false READONLY)
 
     SLOT(void refresh())
     SLOT(void selectAccount(QString address))
@@ -177,6 +187,14 @@ class EthWalletUi
     SLOT(void refreshVerifiedProxy())
     // Sweep this account's still-pending transactions for receipts.
     SLOT(void refreshPending())
+
+    // Put another app's request on screen and price it. The JSON is
+    // `{ requestId, requester, params }` as the intent bridge delivered it.
+    SLOT(void reviewIntentSend(QString requestJson))
+    // The human said yes: the calls go to the sender, and the send is then the wallet's own
+    // pending send — same poll, same signer hand-off, same outcome dialog.
+    SLOT(void acceptIntentSend())
+    SLOT(void declineIntentSend())
 
     // Persist the token order. Named apart from the `tokenSort` property it moves: the
     // generated setter for a PROP already owns setTokenSort(), and a SLOT may not collide
