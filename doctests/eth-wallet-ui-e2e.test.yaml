@@ -16,10 +16,10 @@ sections:
   - title: "Build the pieces"
     step: true
     text: |
-      The wallet UI is one plugin over five modules. `eth_wallet_backend` is a
-      dependency of the view; `eth_rpc_module`, `fee_module`, `keystore_module`
-      and `token_list_module` are dependencies of *it*, and only one level is
-      bundled — so the rest are staged here rather than assumed.
+      The wallet UI is one plugin over six modules. `eth_wallet_backend` is a
+      dependency of the view; `eth_rpc_module`, `fee_module`, `keystore_module`,
+      `token_list_module` and `tx_sender_module` are dependencies of *it*, and
+      only one level is bundled — so the rest are staged here rather than assumed.
 
       `capability_module` is not bundled with the standalone host either. Without
       it every token handshake times out and every call is refused, and the view
@@ -77,6 +77,13 @@ sections:
       - title: "All three really produced modules"
         check_file: "result-tokens/modules"
 
+      - title: "Build the sender"
+        run: "nix build 'github:logos-co/logos-evm-tx-sender-module#install' --no-write-lock-file -o result-sender"
+        code_block: "nix build 'github:logos-co/logos-evm-tx-sender-module#install' --no-write-lock-file -o result-sender"
+
+      - title: "The sender really produced modules"
+        check_file: "result-sender/modules"
+
       - title: "Build capability_module"
         run: "nix build 'github:logos-co/logos-capability-module#install' --no-write-lock-file -o result-capability"
         code_block: "nix build 'github:logos-co/logos-capability-module#install' --no-write-lock-file -o result-capability"
@@ -93,6 +100,7 @@ sections:
           cp -r result-rpc/modules/*        tree/modules/
           cp -r result-fee/modules/*        tree/modules/
           cp -r result-tokens/modules/*     tree/modules/
+          cp -r result-sender/modules/*     tree/modules/
           cp -r result-capability/modules/* tree/modules/
           cp -r result-ui/plugins/*         tree/plugins/
           # Store paths are 0555; a later copy into them fails without this.
@@ -105,11 +113,13 @@ sections:
           cp -r result-rpc/modules/*      tree/modules/
           cp -r result-fee/modules/*      tree/modules/
           cp -r result-tokens/modules/*   tree/modules/
+          cp -r result-sender/modules/*   tree/modules/
           cp -r result-ui/plugins/*       tree/plugins/
         expect_contains:
           - "eth_wallet_backend"
           - "keystore_module"
           - "eth_rpc_module"
+          - "tx_sender_module"
           - "eth_wallet_ui"
 
   - title: "The five sections, over a real backend"

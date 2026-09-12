@@ -328,7 +328,7 @@ view's own QR encoder, which need no app either; `doctests/run_tables.sh` runs a
 each file also carries its own one-line invocation.
 
 `doctests/eth-wallet-ui-e2e.test.yaml` is the other half, and the only one that runs what
-actually ships: it builds the plugin and the five modules under it, stands a real
+actually ships: it builds the plugin and the six modules under it, stands a real
 `logos-standalone-app` up, and drives the view over the QML inspector. Everything above runs
 the view against a **fabricated** backend, so none of it can say whether the built plugin
 loads and finds the real `eth_wallet_backend`. It is hermetic — no chain, no funded key: the

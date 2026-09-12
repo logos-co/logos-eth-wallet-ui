@@ -837,10 +837,29 @@ Item {
     }
     // Ask #9: the row's own title carries what left the account. Bounded, because eighteen
     // decimal places would blow the row; the screen beneath it shows every digit.
+    //
+    // A CALL is another app's transaction from this account — a swap, an approval — recorded
+    // by the same sender this wallet uses. Its title is the label that app gave it, verbatim,
+    // and the ether it carried only when it carried any: "Sent 0 ETH" would describe a swap
+    // as a transfer of nothing.
     function txTitle(rec) {
+        if (rec.kind === "call") {
+            var title = rec.label && rec.label.length ? rec.label : "Contract call"
+            if (rec.valueDisplay !== undefined && rec.valueDisplay !== "0")
+                title += " · " + rec.valueDisplay + " " + (rec.valueSymbol || "")
+            return title
+        }
         if (rec.valueDisplay !== undefined)
             return "Sent " + rec.valueDisplay + " " + (rec.valueSymbol || "")
         return rec.valueSymbol ? "Sent " + rec.valueSymbol : "Sent"
+    }
+
+    // Who asked the sender for a call row, as the runtime attested it. Empty for this
+    // wallet's own rows: naming ourselves on every transfer would be noise, and the wallet
+    // is the one origin the user did not have to be told.
+    function txOrigin(rec) {
+        if (rec.kind !== "call") return ""
+        return rec.origin && rec.origin.length ? "via " + rec.origin : "via another app"
     }
 
     // Every digit of a figure, for a copy button. Absent leaves the button off: copying an
@@ -956,7 +975,7 @@ Item {
     function rawToDisplay(rec) {
         var a = rawTo(rec)
         if (!a.length) return "—"
-        if (rec.kind === "erc20" && rec.interactedWithSymbol !== undefined)
+        if (rec.kind !== "native" && rec.interactedWithSymbol !== undefined)
             return rec.interactedWithSymbol + " · " + shortAddr(a)
         return namedAddr(a)
     }
@@ -1330,7 +1349,17 @@ Item {
                             color: Theme.palette.textSecondary
                             text: root.txTime(modelData)
                         }
+                        // Another app's call names who asked, where a transfer names whom
+                        // it paid: the contract it called is on the screen beneath.
                         LogosText {
+                            objectName: "txOrigin_" + modelData.hash
+                            visible: modelData.kind === "call"
+                            textFormat: Text.PlainText
+                            color: Theme.palette.textSecondary
+                            text: root.txOrigin(modelData)
+                        }
+                        LogosText {
+                            visible: modelData.kind !== "call"
                             textFormat: Text.PlainText
                             color: Theme.palette.textSecondary
                             text: "To: " + root.namedAddr(modelData.to)
@@ -1338,6 +1367,7 @@ Item {
                         LogosCopyButton {
                             // Named like the two buttons beside it in the address book row, which had one
                             // each while this had none — the only unlabelled control in the group.
+                            visible: modelData.kind !== "call"
                             ToolTip.text: "Copy"
                             ToolTip.visible: hovered
                             ToolTip.delay: 400
@@ -3021,20 +3051,42 @@ Item {
                             }
                             DetailRow {
                                 objectName: "txDetailInteractedRow"
-                                visible: txPage.rec.kind === "erc20"
+                                visible: txPage.rec.kind !== "native"
                                 label: "Interacted with"
                                 mono: true
                                 value: root.rawToDisplay(txPage.rec)
                                 copyValue: root.rawTo(txPage.rec)
                                 onCopied: function (v) { root.lastCopiedValue = v }
                             }
+                            // A call another app made from this account: who asked, in the
+                            // runtime's words, and what it claimed the call was for, in its
+                            // own. Both backend-authored, both plain text.
+                            RowDivider { visible: txPage.rec.kind === "call" }
+                            DetailRow {
+                                objectName: "txDetailOriginRow"
+                                visible: txPage.rec.kind === "call"
+                                label: "Asked by"
+                                value: txPage.rec.origin && txPage.rec.origin.length
+                                       ? txPage.rec.origin : "another app"
+                            }
+                            RowDivider { visible: txPage.rec.kind === "call"
+                                                  && txPage.rec.purpose !== undefined
+                                                  && txPage.rec.purpose.length > 0 }
+                            DetailRow {
+                                objectName: "txDetailPurposeRow"
+                                visible: txPage.rec.kind === "call"
+                                         && txPage.rec.purpose !== undefined
+                                         && txPage.rec.purpose.length > 0
+                                label: "Purpose (claimed)"
+                                value: txPage.rec.purpose || ""
+                            }
                             // The bytes the contract was actually called with — wrapped, not
                             // elided, because they are the point of the row rather than a label
                             // for it. A native send has no calldata and gets no row.
-                            RowDivider { visible: txPage.rec.kind === "erc20" }
+                            RowDivider { visible: txPage.rec.kind !== "native" }
                             ColumnLayout {
                                 objectName: "txDetailDataRow"
-                                visible: txPage.rec.kind === "erc20"
+                                visible: txPage.rec.kind !== "native"
                                 Layout.fillWidth: true
                                 spacing: Theme.spacing.tiny
 

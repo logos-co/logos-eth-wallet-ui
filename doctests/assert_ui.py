@@ -557,12 +557,12 @@ print("   erc20 send gets no \"To\" row at all, because the transaction has no s
 check("the plain-send row is gated on the kind the backend recorded",
       qml_binding("txDetailToRow", "visible"), 'visible: txPage.rec.kind === "native"')
 check("...and the contract row on the other one",
-      qml_binding("txDetailInteractedRow", "visible"), 'visible: txPage.rec.kind === "erc20"')
+      qml_binding("txDetailInteractedRow", "visible"), 'visible: txPage.rec.kind !== "native"')
 check("both render the SAME field, so neither can be the other's interpretation",
       qml_binding("txDetailToRow", "value") == qml_binding("txDetailInteractedRow", "value")
       == "value: root.rawToDisplay(txPage.rec)", True)
 check("the calldata goes with the contract row, and nowhere else",
-      qml_binding("txDetailDataRow", "visible"), 'visible: txPage.rec.kind === "erc20"')
+      qml_binding("txDetailDataRow", "visible"), 'visible: txPage.rec.kind !== "native"')
 print("   the regression this opens: with \"To\" gone from the card, an erc20 send whose")
 print("   receipt has not landed decodes no transfers — and the recipient the user typed")
 print("   would be NOWHERE on the screen. It is rendered below instead, in the interpreted")

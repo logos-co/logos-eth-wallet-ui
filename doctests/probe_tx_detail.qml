@@ -27,6 +27,12 @@ Item {
     readonly property string doneHash: "0x5c22000000000000000000000000000000000000000000000000000000000003"
     readonly property string failedHash: "0x3e44000000000000000000000000000000000000000000000000000000000004"
     readonly property string freshHash: "0x2f88000000000000000000000000000000000000000000000000000000000005"
+    readonly property string callHash: "0x1d66000000000000000000000000000000000000000000000000000000000006"
+    readonly property string router: "0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45"
+    // A SwapRouter02 multicall(deadline, bytes[]) with nothing in it: the selector and three
+    // words, which is the 100 bytes the Data row must count.
+    readonly property string swapInput: "0x5ae401dc" + "0".repeat(56) + "68b6a7d0"
+        + "0".repeat(62) + "40" + "0".repeat(64)
     // A real transfer(address,uint256) to `them` for the same amount: selector plus two
     // 32-byte words, which is the 68 bytes the Data row must count.
     readonly property string ercInput: "0xa9059cbb0000000000000000000000000adbc7b2d1a2b7c8e"
@@ -153,6 +159,25 @@ Item {
         valueDisplay: "<0.00001", valueExact: "0.000001", nativeSymbol: "ETH",
         stalled: false, unresolved: false, verificationBlocked: false,
         txInput: probe.ercInput
+    }, {
+        // A CALL another app made from this account through the same sender: the second leg
+        // of a Uniswap swap, carrying the label that app gave it, the origin the runtime
+        // attested, and no ether at all. Same day as the row above, so still two headings.
+        hash: probe.callHash, chainId: 11155111, from: probe.me, to: probe.router,
+        value: "0", kind: "call", status: "confirmed", timestamp: 1756690500,
+        nonce: 31, gasLimit: 210000, gasUsed: "143210", gasUsedPercent: 68,
+        effectiveGasPrice: "1200000000", effectiveGasPriceDisplay: "1.2",
+        maxPriorityFeePerGas: "1000000000", maxPriorityFeePerGasDisplay: "1",
+        gasPriceUnit: "gwei", blockNumber: 25890000,
+        feeWei: "171852000000000", feeWeiDisplay: "0.00017", feeWeiExact: "0.000171852",
+        feeCeilingWei: "420000000000000", feeCeilingWeiDisplay: "0.00042",
+        feeCeilingWeiExact: "0.00042",
+        valueSymbol: "ETH", valueDecimals: 18, valueDisplay: "0", valueExact: "0",
+        nativeSymbol: "ETH", stalled: false, unresolved: false, verificationBlocked: false,
+        txTo: probe.router, interactedWithDiffers: false,
+        label: "Swap 10 USDC for at least 0.0033 WETH", origin: "uniswap_ui",
+        purpose: "Swap 10 USDC for WETH on Uniswap", leg: 1, legs: 2,
+        meta: { kind: "swap" }, txInput: probe.swapInput
     }]
 
     // A HALF answer, which is the normal case: the block landed and the transaction leg did
@@ -413,7 +438,38 @@ Item {
         check("...and copyable whole", row("txDetailDataCopy").value, probe.ercInput)
     }
 
-    // The Activity list the screens above were opened from. Five rows over two days, so the
+    function assertCallScreen() {
+        console.log("")
+        console.log("a CALL another app made from this account. The wallet did not build it and")
+        console.log("cannot interpret it, so the screen carries what the sender recorded: the")
+        console.log("app's own label as the title, the origin the runtime attested, the purpose")
+        console.log("that app claimed, the contract, and the bytes it was called with")
+        check("the title is the app's label, verbatim", row("txDetailTitle").text,
+              "Swap 10 USDC for at least 0.0033 WETH")
+        check("no To row: this transaction paid nobody", row("txDetailToRow").visible, false)
+        check("the contract it called is on the raw card", row("txDetailInteractedRow").visible,
+              true)
+        check("...bare, because no token table names a router",
+              row("txDetailInteractedRow").value, "0x68b3…Fc45")
+        check("...and copyable whole", row("txDetailInteractedRow").copyValue, probe.router)
+        check("who asked, as the runtime attested it", row("txDetailOriginRow").value,
+              "uniswap_ui")
+        check("...and it is shown", row("txDetailOriginRow").visible, true)
+        check("what that app claimed, labelled as a claim", row("txDetailPurposeRow").label,
+              "Purpose (claimed)")
+        check("...verbatim", row("txDetailPurposeRow").value,
+              "Swap 10 USDC for WETH on Uniswap")
+        check("the calldata is the point of the row", row("txDetailDataRow").visible, true)
+        check("...counted", row("txDetailDataLabel").text, "Data · 100 bytes")
+        check("...and shown whole", row("txDetailDataValue").text, probe.swapInput)
+        check("no transfers were decoded, and we do not say \"none\"",
+              row("txDetailTransfersCard").visible, false)
+        check("...and nothing is recorded in their place: the wallet recorded no recipient",
+              row("txDetailRecordedCard").visible, false)
+        check("the fee that was paid", row("txDetailFeeRow").value, "0.00017 ETH")
+    }
+
+    // The Activity list the screens above were opened from. Six rows over two days, so the
     // heading the delegate computes against its neighbour must appear exactly twice.
     function assertActivityHeadings() {
         console.log("")
@@ -465,6 +521,21 @@ Item {
         check("and each row carries its own time",
               find(view.item, "txTime_" + probe.ethHash).text,
               Qt.formatDateTime(new Date(probe.rows[1].timestamp * 1000), "HH:mm"))
+        console.log("   a call row is titled by the app that made it and names that app where")
+        console.log("   a transfer names its recipient; a transfer of nothing is not a transfer")
+        check("the call row's title is the label", find(view.item, "txTitle_" + probe.callHash).text,
+              "Swap 10 USDC for at least 0.0033 WETH")
+        check("...with no \"0 ETH\" appended",
+              String(find(view.item, "txTitle_" + probe.callHash).text).indexOf("0 ETH"), -1)
+        check("...and the origin beneath it", find(view.item, "txOrigin_" + probe.callHash).text,
+              "via uniswap_ui")
+        check("...shown", find(view.item, "txOrigin_" + probe.callHash).visible, true)
+        check("while a transfer's row shows none",
+              find(view.item, "txOrigin_" + probe.ethHash).visible, false)
+        check("...and keeps its recipient line",
+              find(view.item, "txToCopy_" + probe.ethHash).visible, true)
+        check("...which the call row does not carry",
+              find(view.item, "txToCopy_" + probe.callHash).visible, false)
     }
 
     // A heading that dated itself off `new Date()` had no binding dependency at all, and the
@@ -474,7 +545,7 @@ Item {
     function assertHeadingsAge() {
         console.log("")
         console.log("the headings read a ticker on the root, not the wall clock. Nothing below")
-        console.log("touches the model: the same five rows are on screen throughout")
+        console.log("touches the model: the same six rows are on screen throughout")
         var head = find(view.item, "txDay_" + probe.ercHash)
         var key = Qt.formatDate(new Date(probe.rows[0].timestamp * 1000), "yyyy-MM-dd")
         var dated = Qt.formatDate(new Date(probe.rows[0].timestamp * 1000), "MMM d, yyyy")
@@ -513,6 +584,8 @@ Item {
             probe.assertNativeScreen()
             item.openTxDetail(probe.freshHash)
             probe.assertFreshErc20Screen()
+            item.openTxDetail(probe.callHash)
+            probe.assertCallScreen()
             probe.assertATabClickLeavesThePushedScreen()
             // The list itself, which needs a layout pass the handler it is asserted from
             // cannot wait for: its delegates do not exist until the view has laid out.
