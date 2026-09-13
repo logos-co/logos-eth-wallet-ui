@@ -72,7 +72,13 @@ fi
 echo
 echo "=== qr_scan.sh"
 # Structure and parameters are checked next door; this is the only step that asks a READER
-# whether the code decodes. zbar absent is a failure, not a skip.
+# whether the code decodes. zbar absent is a failure, not a skip. Off PATH, a zbar already in
+# the nix store serves (CI's own `nix shell nixpkgs#zbar` leaves one behind).
+if ! command -v zbarimg >/dev/null 2>&1; then
+    for z in /nix/store/*-zbar-*/bin/zbarimg; do
+        "$z" --version >/dev/null 2>&1 && { export PATH="$(dirname "$z"):$PATH"; break; }
+    done
+fi
 if command -v zbarimg >/dev/null 2>&1; then
     ./qr_scan.sh || rc=1
 else
