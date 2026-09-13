@@ -449,11 +449,35 @@ Item {
     // on screen are the built-ins, and no query will find more.
     readonly property bool catalogueEmptyForChain:
         availableForChain && !availableFailed && availableListed === 0
-    // The query matched more than came back. Never silent: a user narrowing a search has to
-    // know the rows in front of them are a slice.
-    readonly property bool availableCut:
-        availableForChain && !availableFailed && availableTotal >= 0 && availableShown >= 0
-        && availableTotal > availableShown
+    // The answer has more pages than are on screen. Its own word for it, `hasMore`, rather
+    // than a count comparison: the rows held are every page fetched so far, and the next one
+    // loads as the list scrolls. Never silent: the user is told the rows are a slice.
+    readonly property bool availableHasMore:
+        availableForChain && !availableFailed && available.hasMore === true
+
+    // The rows the Manage tokens list draws, appended a page at a time. A ListView handed a
+    // NEW array scrolls back to its top, and a page lands while the user is at the bottom —
+    // so the model behind the screen only grows in place, and starts over for a new answer.
+    ListModel { id: availableModel }
+    onAvailableTokensChanged: syncAvailableModel()
+    function syncAvailableModel() {
+        var rows = root.availableTokens
+        var grows = root.available.appended === true && availableModel.count > 0
+                    && availableModel.count <= rows.length
+        if (!grows) availableModel.clear()
+        for (var i = availableModel.count; i < rows.length; ++i)
+            availableModel.append(root.tokenRow(rows[i]))
+    }
+    // One row with every role present: a ListModel types a role on first sight, and the
+    // native row has no address.
+    function tokenRow(t) {
+        return { symbol: String(t.symbol || ""), name: String(t.name || ""),
+                 decimals: typeof t.decimals === "number" ? t.decimals : -1,
+                 address: typeof t.address === "string" ? t.address : "",
+                 native: t.native === true, enabled: t.enabled === true, builtin: t.builtin === true,
+                 source: typeof t.source === "string" ? t.source : "",
+                 logoURI: typeof t.logoURI === "string" ? t.logoURI : "" }
+    }
 
     // Account × chain × token × request. The backend withdraws it when any of them moves.
     readonly property var quote: scoped ? j(backend.quoteJson, "{}") : ({})
@@ -3975,18 +3999,19 @@ Item {
                           + "the tokens built into this wallet are offered here."
                 }
 
-                // The answer was cut. Never silent: a user narrowing a search is entitled to
-                // know the rows in front of them are a slice of what matched.
+                // More pages than are on screen. Never silent: a user narrowing a search is
+                // entitled to know the rows in front of them are a slice of what matched, and
+                // that the rest is a scroll away.
                 LogosText {
                     objectName: "manageTokensCountNote"
                     Layout.fillWidth: true
                     wrapMode: Text.WordWrap
                     textFormat: Text.PlainText
-                    visible: root.availableCut
+                    visible: root.availableHasMore
                     color: Theme.palette.textSecondary
                     font.pixelSize: Theme.typography.secondaryText
                     text: "Showing " + root.availableShown + " of " + root.availableTotal
-                          + " matches — keep typing to narrow."
+                          + " matches — scroll for more, or keep typing to narrow."
                 }
 
                 // A call is running with rows already on screen, which therefore answer the
@@ -4073,21 +4098,35 @@ Item {
                         objectName: "manageTokensList"
                         anchors.fill: parent
                         visible: root.availableTokens.length > 0
-                        model: root.availableTokens
+                        model: availableModel
                         spacing: 0
+                        // The next page, asked for once per answer as its end comes into
+                        // view; the backend ignores the ask while a call is live or once the
+                        // answer is complete, so this is at most one call per page.
+                        property int askedAt: -1
+                        onContentYChanged: {
+                            if (!root.availableHasMore || root.availableLoading) return
+                            if (contentHeight - contentY - height > 240) return
+                            if (askedAt === root.availableShown) return
+                            askedAt = root.availableShown
+                            if (root.ready) root.backend.loadMoreTokens()
+                        }
                         delegate: Item {
                             id: manageRow
-                            objectName: "manageTokenRow_" + root.tokenKey(modelData)
+                            // The ListModel row, read by role. A ListModel delegate has no
+                            // manageRow.row on Qt 6.9.
+                            readonly property var row: model
+                            objectName: "manageTokenRow_" + root.tokenKey(row)
                             width: ListView.view ? ListView.view.width : 0
                             implicitHeight: 56
 
                             // The backend's answer for this row, which the switch shows. The
                             // press moves `checked` on its own, so this is what puts it back.
-                            readonly property bool isOn: modelData.enabled === true
+                            readonly property bool isOn: manageRow.row.enabled === true
                             // A builtin is offered on every chain that has it and cannot be
                             // turned off; the native token is not a token_list entry at all.
-                            readonly property bool locked: modelData.builtin === true
-                                                           || modelData.native === true
+                            readonly property bool locked: manageRow.row.builtin === true
+                                                           || manageRow.row.native === true
 
                             RowLayout {
                                 anchors.fill: parent
@@ -4095,23 +4134,23 @@ Item {
                                 spacing: Theme.spacing.small
 
                                 TokenGlyph {
-                                    symbol: modelData.symbol
-                                    logoSource: root.localLogo(modelData)
+                                    symbol: manageRow.row.symbol
+                                    logoSource: root.localLogo(manageRow.row)
                                 }
 
                                 ColumnLayout {
                                     spacing: 0
                                     LogosText {
                                         textFormat: Text.PlainText
-                                        text: modelData.symbol
+                                        text: manageRow.row.symbol
                                         font.weight: Theme.typography.weightMedium
                                     }
                                     RowLayout {
                                         spacing: Theme.spacing.tiny
                                         LogosText {
-                                            objectName: "manageTokenName_" + root.tokenKey(modelData)
+                                            objectName: "manageTokenName_" + root.tokenKey(manageRow.row)
                                             textFormat: Text.PlainText
-                                            text: modelData.name
+                                            text: manageRow.row.name
                                             color: Theme.palette.textSecondary
                                             font.pixelSize: Theme.typography.secondaryText
                                         }
@@ -4121,8 +4160,8 @@ Item {
                                         // an address this build carries and one a bundled
                                         // directory offered.
                                         LogosBadge {
-                                            objectName: "manageTokenSource_" + root.tokenKey(modelData)
-                                            readonly property string src: root.tokenSource(modelData)
+                                            objectName: "manageTokenSource_" + root.tokenKey(manageRow.row)
+                                            readonly property string src: root.tokenSource(manageRow.row)
                                             text: root.tokenSourceLabel(src)
                                             color: root.tokenSourceColor(src)
                                         }
@@ -4131,10 +4170,10 @@ Item {
                                         // so the catalogue may not offer two rows a reader
                                         // cannot tell apart.
                                         LogosText {
-                                            objectName: "manageTokenContract_" + root.tokenKey(modelData)
+                                            objectName: "manageTokenContract_" + root.tokenKey(manageRow.row)
                                             visible: text.length > 0
                                             textFormat: Text.PlainText
-                                            text: root.disambiguator(modelData, root.availableDupSymbols)
+                                            text: root.disambiguator(manageRow.row, root.availableDupSymbols)
                                             color: Theme.palette.textSecondary
                                             font.pixelSize: Theme.typography.secondaryText
                                         }
@@ -4149,15 +4188,15 @@ Item {
                                 // row matched on its symbol advertised an enabled namesake's
                                 // holding as its own.
                                 LogosText {
-                                    objectName: "manageTokenBalance_" + root.tokenKey(modelData)
+                                    objectName: "manageTokenBalance_" + root.tokenKey(manageRow.row)
                                     textFormat: Text.PlainText
-                                    text: root.balanceDisplay(modelData)
-                                          + " " + modelData.symbol
+                                    text: root.balanceDisplay(manageRow.row)
+                                          + " " + manageRow.row.symbol
                                     color: Theme.palette.textSecondary
                                 }
 
                                 LogosSwitch {
-                                    objectName: "manageTokenToggle_" + root.tokenKey(modelData)
+                                    objectName: "manageTokenToggle_" + root.tokenKey(manageRow.row)
                                     checked: manageRow.isOn
                                     enabled: root.ready && !manageRow.locked
                                              && !root.tokenToggleBusy
@@ -4167,7 +4206,7 @@ Item {
                                         // Put it back: the row shows what the BACKEND says,
                                         // not what was pressed, until the re-read lands.
                                         checked = Qt.binding(function () { return manageRow.isOn })
-                                        root.setTokenEnabled(modelData.address, want)
+                                        root.setTokenEnabled(manageRow.row.address, want)
                                     }
                                 }
                             }

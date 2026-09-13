@@ -43,6 +43,7 @@ public:
     void refreshPending() override;
     void chooseTokenSort(QString order) override;
     void searchTokens(QString query) override;
+    void loadMoreTokens() override;
     void setTokenEnabled(QString address, bool enabled) override;
     void reviewIntentSend(QString requestJson) override;
     void acceptIntentSend() override;
@@ -172,6 +173,9 @@ private:
     /// keystroke arriving behind a live call searches for what was typed LAST, not first.
     QString m_tokenQuery;
     int m_tokenQueryChain = 0;
+    /// The first row the next call asks for: 0 for a new question, the rows on screen for its
+    /// next page.
+    int m_tokenOffset = 0;
     /// One enable/disable at a time. A bare claim: a second toggle should be ignored while the
     /// first is in flight, not queued behind it and applied to a row that has since moved.
     InFlight m_tokenToggleInFlight;

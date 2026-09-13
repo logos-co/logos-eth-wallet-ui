@@ -26,7 +26,8 @@ constexpr int kQuotePollMs = 12000;
 // The cut on one catalogue search. The embedded list runs to thousands of rows and no screen
 // can be scrolled through that; the reply says how many matched BEFORE the cut, so the count
 // on screen is the honest one either way.
-constexpr int kTokenSearchLimit = 200;
+// Rows per page of the catalogue. The rest follows as the list scrolls; nothing is cut.
+constexpr int kTokenSearchPage = 100;
 
 } // namespace
 
@@ -267,6 +268,7 @@ void EthWalletUiBackend::onContextReady()
         if (chainId != shown().chainId)
             return;
         refreshSoon();
+        m_tokenOffset = 0;
         runTokenSearch();
     });
     // Device-wide and chainless. The rows are BUILT in this order, so adopting it is what
@@ -830,9 +832,23 @@ void EthWalletUiBackend::searchTokens(QString query)
     // A new query is a new question; the refusal belonged to the previous one.
     setTokenToggleError(QString());
     m_tokenQuery = query;
+    m_tokenOffset = 0;
     // The chain the query is FOR, taken now: the reply is checked against the chain on screen
     // when it lands, and a search issued for one chain may not answer for another.
     m_tokenQueryChain = shown().chainId;
+    runTokenSearch();
+}
+
+void EthWalletUiBackend::loadMoreTokens()
+{
+    // The next page of the answer on screen. Nothing while a call is live — the view asks
+    // again as it scrolls — and nothing once the answer said it was complete.
+    if (m_tokenSearchLane.busy())
+        return;
+    const QJsonObject cur = parseObject(availableTokensJson());
+    if (!cur.value(QStringLiteral("hasMore")).toBool())
+        return;
+    m_tokenOffset = cur.value(QStringLiteral("tokens")).toArray().size();
     runTokenSearch();
 }
 
@@ -843,20 +859,27 @@ void EthWalletUiBackend::runTokenSearch()
         return;
     const quint64 gen = m_dataGen;
     const quint64 sortGen = m_sortChoiceGen;
+    const int offset = m_tokenOffset;
+    const QString query = m_tokenQuery;
     // ASYNC deliberately, and the query goes to the BACKEND: the embedded Uniswap list is
     // thousands of rows, so matching it here would mean pulling all of them across the wire.
     modules().eth_wallet_backend.list_available_tokensAsyncResult(
-        m_tokenQueryChain, m_tokenQuery, kTokenSearchLimit,
-        [this, gen, sortGen, slot](logos::AsyncResult<QString> res) {
+        m_tokenQueryChain, m_tokenQuery, offset, kTokenSearchPage,
+        [this, gen, sortGen, slot, offset, query](logos::AsyncResult<QString> res) {
             m_tokenSearchLane.release(slot);
             if (!m_tokenSearchLane.owns(slot))
                 return;
             const QString reply = res.ok() ? res.value : QString();
-            if (gen == m_dataGen && answersFor(reply, shown())) {
+            // A page for a question the user has since changed adds nothing: the re-run
+            // queued behind this call asks the new one from its first row.
+            const bool stalePage = offset > 0 && query != m_tokenQuery;
+            if (gen == m_dataGen && answersFor(reply, shown()) && !stalePage) {
                 adoptTokenSort(reply, sortGen);
-                // The reply VERBATIM, so the screen can tell an empty catalogue from a
-                // catalogue that could not be read — it carries `listed` and `listError`.
-                setAvailableTokensJson(replyOk(reply) ? reply : QString());
+                // The first page VERBATIM, so the screen can tell an empty catalogue from a
+                // catalogue that could not be read — it carries `listed` and `listError`. A
+                // later page is appended onto it; the pure merge decides whether it fits.
+                setAvailableTokensJson(offset == 0 ? (replyOk(reply) ? reply : QString())
+                                                   : mergeTokenPage(availableTokensJson(), reply, offset));
                 failed(reply, QStringLiteral("token list"));
             }
             handOnLane(m_tokenSearchLane);
