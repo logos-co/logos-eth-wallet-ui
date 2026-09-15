@@ -122,10 +122,6 @@ Item {
         property string balancesJson: probe.alphaFirst
         property string balancesRoute: "direct"
         property string tokensJson: probe.tokens
-        property string availableTokensJson: ""
-        property bool availableTokensLoading: false
-        property bool tokenToggleBusy: false
-        property string tokenToggleError: ""
         property string historyJson: "[]"
         property string blockedChainsJson: "[]"
         property bool sweepingReceipts: false

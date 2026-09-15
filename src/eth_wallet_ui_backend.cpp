@@ -23,12 +23,6 @@ constexpr int kMaxSilentPolls = 3;
 // block, so a faster poll cannot learn anything new. It also clears eth_rpc's 5s verdict TTL
 // above, so a tick does not collide with the verified-proxy probe.
 constexpr int kQuotePollMs = 12000;
-// The cut on one catalogue search. The embedded list runs to thousands of rows and no screen
-// can be scrolled through that; the reply says how many matched BEFORE the cut, so the count
-// on screen is the honest one either way.
-// Rows per page of the catalogue. The rest follows as the list scrolls; nothing is cut.
-constexpr int kTokenSearchPage = 100;
-
 } // namespace
 
 // Wired here rather than in onContextReady: a lane entered before its spinner and its re-run
@@ -53,11 +47,6 @@ EthWalletUiBackend::EthWalletUiBackend()
         runQuote(m_quoteRequest, wasEdit);
     };
 
-    m_tokenSearchLane.budgetMs = kOneCallBudgetMs;
-    m_tokenSearchLane.setLoading = [this](bool on) { setAvailableTokensLoading(on); };
-    // Reads m_tokenQuery rather than a captured one: a keystroke queued behind a live call
-    // must search for what was typed LAST, not for what started the call it is waiting on.
-    m_tokenSearchLane.rerun = [this] { runTokenSearch(); };
 }
 
 bool EthWalletUiBackend::failed(const QString &reply, const QString &context)
@@ -255,14 +244,11 @@ void EthWalletUiBackend::onContextReady()
     // move without this view doing anything. The count in the payload is advisory — a rename
     // does not move it — so it is discarded and the whole selection is re-read.
     modules().eth_wallet_backend.onAccounts_changed([this](int) { refreshSoon(); });
-    // The set of tokens OFFERED on a chain moves without this view asking — a toggle it made
-    // itself, and a custom token another app imported into token_list. Chain-scoped, so a
-    // move on any in-scope network changes the multi-chain Tokens view.
+    // The set of tokens OFFERED on a chain moves without this view asking. Token Lists owns
+    // membership; Wallet only refreshes its multi-chain portfolio when that shared state moves.
     modules().eth_wallet_backend.onTokens_changed([this](int chainId) {
         Q_UNUSED(chainId);
         refreshSoon();
-        m_tokenOffset = 0;
-        runTokenSearch();
     });
     // Device-wide and chainless. The rows are BUILT in this order, so adopting it is what
     // makes an order chosen in another wallet instance visible here.
@@ -309,7 +295,7 @@ void EthWalletUiBackend::loadNetwork()
         m_refreshAgain = true;
 
     // Compose every enabled in-scope chain's offered rows. The local cursor is irrelevant to
-    // this view; it is used only by Send and Manage tokens.
+    // this view; it is used only by Send.
     const quint64 sortGen = m_sortChoiceGen;
     QJsonArray tokens;
     QString sortReply;
@@ -834,94 +820,6 @@ void EthWalletUiBackend::loadContacts()
     // empty picker tab is indistinguishable from "you have no contacts", and it is not that.
     if (replyOk(reply))
         setContactsJson(member(reply, "contacts"));
-}
-
-void EthWalletUiBackend::searchTokens(QString query)
-{
-    // A new query is a new question; the refusal belonged to the previous one.
-    setTokenToggleError(QString());
-    m_tokenQuery = query;
-    m_tokenOffset = 0;
-    // The chain the query is FOR, taken now: the reply is checked against the chain on screen
-    // when it lands, and a search issued for one chain may not answer for another.
-    m_tokenQueryChain = shown().chainId;
-    runTokenSearch();
-}
-
-void EthWalletUiBackend::loadMoreTokens()
-{
-    // The next page of the answer on screen. Nothing while a call is live — the view asks
-    // again as it scrolls — and nothing once the answer said it was complete.
-    if (m_tokenSearchLane.busy())
-        return;
-    const QJsonObject cur = parseObject(availableTokensJson());
-    if (!cur.value(QStringLiteral("hasMore")).toBool())
-        return;
-    m_tokenOffset = cur.value(QStringLiteral("tokens")).toArray().size();
-    runTokenSearch();
-}
-
-void EthWalletUiBackend::runTokenSearch()
-{
-    quint64 slot = 0;
-    if (!beginLane(m_tokenSearchLane, &slot))
-        return;
-    const quint64 gen = m_dataGen;
-    const quint64 sortGen = m_sortChoiceGen;
-    const int offset = m_tokenOffset;
-    const QString query = m_tokenQuery;
-    // ASYNC deliberately, and the query goes to the BACKEND: the embedded Uniswap list is
-    // thousands of rows, so matching it here would mean pulling all of them across the wire.
-    modules().eth_wallet_backend.list_available_tokensAsyncResult(
-        m_tokenQueryChain, m_tokenQuery, offset, kTokenSearchPage,
-        [this, gen, sortGen, slot, offset, query](logos::AsyncResult<QString> res) {
-            m_tokenSearchLane.release(slot);
-            if (!m_tokenSearchLane.owns(slot))
-                return;
-            const QString reply = res.ok() ? res.value : QString();
-            // A page for a question the user has since changed adds nothing: the re-run
-            // queued behind this call asks the new one from its first row.
-            const bool stalePage = offset > 0 && query != m_tokenQuery;
-            if (gen == m_dataGen && answersFor(reply, shown()) && !stalePage) {
-                adoptTokenSort(reply, sortGen);
-                // The first page VERBATIM, so the screen can tell an empty catalogue from a
-                // catalogue that could not be read — it carries `listed` and `listError`. A
-                // later page is appended onto it; the pure merge decides whether it fits.
-                setAvailableTokensJson(offset == 0 ? (replyOk(reply) ? reply : QString())
-                                                   : mergeTokenPage(availableTokensJson(), reply, offset));
-                failed(reply, QStringLiteral("token list"));
-            }
-            handOnLane(m_tokenSearchLane);
-        },
-        Timeout(kCallBudgetMs));
-}
-
-void EthWalletUiBackend::setTokenEnabled(QString address, bool enabled)
-{
-    quint64 slot = 0;
-    if (address.isEmpty())
-        return;
-    if (!beginClaim(m_tokenToggleInFlight, &slot, [this](bool on) { setTokenToggleBusy(on); }))
-        return;
-    setTokenToggleError(QString());
-    const quint64 gen = m_dataGen;
-    modules().eth_wallet_backend.set_token_enabledAsyncResult(shown().chainId, address, enabled,
-        [this, gen, slot](logos::AsyncResult<QString> res) {
-            m_tokenToggleInFlight.release(slot);
-            if (!m_tokenToggleInFlight.isCurrent(slot))
-                return;
-            const QString reply = res.ok() ? res.value : QString();
-            if (gen == m_dataGen) {
-                // Onto the toggle's OWN line rather than lastError: the switch springs back to
-                // whatever the backend still says, and the refusal is the only account of why.
-                // Disabling a builtin is refused, and this is where that has to be readable.
-                if (!replyOk(reply)) {
-                    setTokenToggleError(refusal(reply, QStringLiteral("token")));
-                }
-            }
-            setTokenToggleBusy(false);
-        },
-        Timeout(kCallBudgetMs));
 }
 
 // ── another app's transactions: evm.transactions.send ────────────────────────────────

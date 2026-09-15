@@ -35,7 +35,7 @@ inline QString unknownVerdict(int chainId, const QString &why)
     return QString::fromUtf8(QJsonDocument(v).toJson(QJsonDocument::Compact));
 }
 
-/// Keep the UI-local Send/Manage-token chain while it remains in scope; otherwise use the
+/// Keep the UI-local Send chain while it remains in scope; otherwise use the
 /// first provider-ordered choice. An empty scope has no cursor.
 inline int chooseChain(const QJsonArray &networks, int current)
 {
@@ -186,9 +186,8 @@ inline Applied applyTokens(ScopedState &s, const QString &reply)
     return {ok, ok ? QString() : refusal(reply, QStringLiteral("tokens"))};
 }
 
-/// The persisted token order a reply carries. `get_balances`, `list_tokens` and the catalogue
-/// search all echo it, so the order the user chose is restored by whichever lands first rather
-/// than only by a search on a screen they may never open.
+/// The persisted token order a reply carries. `get_balances` and `list_tokens` both echo it,
+/// so the order the user chose is restored by whichever lands first.
 ///
 /// `issuedAt` is the choice counter the read went out under, `chosenAt` the current one. A
 /// reply in flight ACROSS a choice carries the order the user just replaced, and publishing it
@@ -359,29 +358,4 @@ inline NetworkStep networkStep(bool selectionHeld, const QString &reply)
 inline bool mayAdopt(bool selectionHeld, int reportedChainId)
 {
     return selectionHeld && reportedChainId != 0;
-}
-
-/// A later page of the catalogue answer, appended onto the answer on screen. It must
-/// continue that answer — same chain, and its `offset` exactly the rows already held — or the
-/// screen keeps what it has: a page for the previous question, or one that failed, adds
-/// nothing. The counts follow the page, and `appended` tells the view to grow rather than
-/// start over.
-inline QString mergeTokenPage(const QString &accumulated, const QString &page, int offset)
-{
-    QJsonObject acc = parseObject(accumulated);
-    const QJsonObject p = parseObject(page);
-    QJsonArray rows = acc.value(QStringLiteral("tokens")).toArray();
-    if (!replyOk(page) || !acc.value(QStringLiteral("ok")).toBool() || offset <= 0
-        || p.value(QStringLiteral("chainId")) != acc.value(QStringLiteral("chainId"))
-        || offset != rows.size() || p.value(QStringLiteral("offset")).toInt(-1) != offset)
-        return accumulated;
-    for (const QJsonValue &v : p.value(QStringLiteral("tokens")).toArray())
-        rows.append(v);
-    acc.insert(QStringLiteral("tokens"), rows);
-    acc.insert(QStringLiteral("shown"), rows.size());
-    acc.insert(QStringLiteral("total"), p.value(QStringLiteral("total")));
-    acc.insert(QStringLiteral("listed"), p.value(QStringLiteral("listed")));
-    acc.insert(QStringLiteral("hasMore"), p.value(QStringLiteral("hasMore")).toBool());
-    acc.insert(QStringLiteral("appended"), true);
-    return toJsonCompact(acc);
 }

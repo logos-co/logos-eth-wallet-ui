@@ -2,8 +2,8 @@
 //
 // The probe beside this one measures the behaviour with two real same-symbol contracts on
 // screen. This measures the thing a probe cannot: that no NEW call site resolves a token by
-// symbol. The defect was never one lookup — it was eight, spread over the list, the order map,
-// the detail screen, the objectNames, the picker and the Manage row, and every one of them
+// symbol. The defect was never one lookup — it was spread over the list, the order map,
+// the detail screen, the objectNames and the picker, and every one of them
 // looked locally reasonable. A rendering path that matches on a symbol is the bug, wherever
 // it is added next.
 //
@@ -101,13 +101,6 @@ int main()
     expectKeyed("balance_");
     expectKeyed("tokenName_");
     expectKeyed("tokenContract_");
-    expectKeyed("manageTokenRow_");
-    expectKeyed("manageTokenBalance_");
-    expectKeyed("manageTokenName_");
-    expectKeyed("manageTokenSource_");
-    expectKeyed("manageTokenContract_");
-    expectKeyed("manageTokenToggle_");
-
     std::printf("\nand the send names the CONTRACT to the backend, not a bare symbol\n");
     expect("the request carries the address", "SendRequest.tokenAddress",
            has("r.tokenAddress = sendPage.tokenAddress"));

@@ -44,9 +44,6 @@ public:
     void refreshVerifiedProxy() override;
     void refreshPending() override;
     void chooseTokenSort(QString order) override;
-    void searchTokens(QString query) override;
-    void loadMoreTokens() override;
-    void setTokenEnabled(QString address, bool enabled) override;
     void reviewIntentSend(QString requestJson) override;
     void acceptIntentSend() override;
     void declineIntentSend() override;
@@ -78,7 +75,7 @@ private:
     /// spins the event loop, so an answer in hand can already be older than the screen.
     bool selectionHeld(quint64 gen) const { return gen == m_dataGen; }
 
-    /// Move this view's local Send/Manage-token chain cursor to a currently in-scope record.
+    /// Move this view's local Send chain cursor to a currently in-scope record.
     bool adoptChain(int chainId);
 
     /// Enter a guarded async lane: raise its spinner and arm the lapse timer that hands the
@@ -103,13 +100,9 @@ private:
     /// One quote, priced asynchronously.
     void runQuote(const QString &requestJson, bool interactive);
 
-    /// One catalogue search, for `m_tokenQuery` on `m_tokenQueryChain`. Asynchronous: the
-    /// embedded list is thousands of rows and the match runs in the backend, not here.
-    void runTokenSearch();
-    /// Take the order a listing reply rode back on. list_tokens, get_balances and the
-    /// catalogue search ALL carry it, so the persisted order reaches the view on whichever
-    /// lands first — never only on a search the user has to go and make. `issuedAt` is the
-    /// choice counter the read went out under; see m_sortChoiceGen.
+    /// Take the order a listing reply rode back on. list_tokens and get_balances both carry
+    /// it, so the persisted order reaches the view on whichever lands first. `issuedAt` is
+    /// the choice counter the read went out under; see m_sortChoiceGen.
     void adoptTokenSort(const QString &reply, quint64 issuedAt);
 
     void applyBalancesReply(const QString &reply);
@@ -168,19 +161,6 @@ private:
     /// One quote at a time, with exactly one re-price coalesced behind it: a keystroke
     /// arriving mid-call must still be priced, but every keystroke must not be a round-trip.
     AsyncLane m_quoteLane;
-    /// One catalogue search at a time, one re-search coalesced behind it. Same shape as the
-    /// quote lane and for the same reason: a keystroke landing mid-call must still be searched.
-    AsyncLane m_tokenSearchLane;
-    /// The newest query, and the chain it is meant for. The queued re-search reads them, so a
-    /// keystroke arriving behind a live call searches for what was typed LAST, not first.
-    QString m_tokenQuery;
-    int m_tokenQueryChain = 0;
-    /// The first row the next call asks for: 0 for a new question, the rows on screen for its
-    /// next page.
-    int m_tokenOffset = 0;
-    /// One enable/disable at a time. A bare claim: a second toggle should be ignored while the
-    /// first is in flight, not queued behind it and applied to a row that has since moved.
-    InFlight m_tokenToggleInFlight;
     InFlight m_feesInFlight;
     /// One pricing of another app's request at a time, and one acceptance: both are bare
     /// claims, because the dialog's buttons are disabled while either is held.

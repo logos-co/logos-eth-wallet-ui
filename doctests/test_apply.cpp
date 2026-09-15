@@ -423,28 +423,6 @@ int main()
                parseObject(verdict).value(QStringLiteral("mode")).toString() == QStringLiteral("required"));
     }
 
-    std::printf("\nthe catalogue, in pages: a later page grows the answer on screen, or is nothing\n");
-    {
-        const QString first = q(R"({"ok":true,"chainId":1,"total":5,"offset":0,"shown":2,"hasMore":true,"listed":3,"tokens":[{"symbol":"A"},{"symbol":"B"}]})");
-        const QString second = q(R"({"ok":true,"chainId":1,"total":5,"offset":2,"shown":2,"hasMore":true,"listed":3,"tokens":[{"symbol":"C"},{"symbol":"D"}]})");
-        const QJsonObject m = parseObject(mergeTokenPage(first, second, 2));
-        const QJsonArray rows = m.value(QStringLiteral("tokens")).toArray();
-        expect("the page's rows follow the first page's", "A B C D",
-               rows.size() == 4 && rows.at(3).toObject().value(QStringLiteral("symbol")).toString() == QStringLiteral("D"));
-        expect("...shown counts every row held", "4", m.value(QStringLiteral("shown")).toInt() == 4);
-        expect("...total is the page's", "5", m.value(QStringLiteral("total")).toInt() == 5);
-        expect("...and the view is told to grow rather than start over", "appended",
-               m.value(QStringLiteral("appended")).toBool());
-        const QString last = q(R"({"ok":true,"chainId":1,"total":5,"offset":4,"shown":1,"hasMore":false,"listed":3,"tokens":[{"symbol":"E"}]})");
-        expect("the last page ends it", "hasMore false",
-               !parseObject(mergeTokenPage(mergeTokenPage(first, second, 2), last, 4)).value(QStringLiteral("hasMore")).toBool());
-        same("a page whose offset is not where the rows end is nothing", mergeTokenPage(first, last, 4), first);
-        same("a page for another chain is nothing",
-             mergeTokenPage(first, q(R"({"ok":true,"chainId":11155111,"total":5,"offset":2,"shown":1,"hasMore":false,"listed":3,"tokens":[{"symbol":"X"}]})"), 2), first);
-        same("a page that failed keeps the rows", mergeTokenPage(first, q(R"({"ok":false,"error":"down"})"), 2), first);
-        same("a page onto nothing is nothing", mergeTokenPage(QString(), second, 2), QString());
-    }
-
     std::printf("\nRESULT: %s\n", failures ? "FAILED" : "ALL PASS");
     return failures ? 1 : 0;
 }

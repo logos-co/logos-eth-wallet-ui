@@ -204,8 +204,6 @@ Item {
             tokensJson: JSON.stringify([{ symbol: "ETH", name: "Ether", decimals: 18,
                                           native: true }]),
             historyJson: JSON.stringify(probe.rows), blockedChainsJson: "[]",
-            availableTokensJson: "", availableTokensLoading: false, tokenToggleBusy: false,
-            tokenToggleError: "",
             sweepingReceipts: false, quoteJson: "{}", quoteRequestJson: "", quoteStale: false,
             txDetailsJson: probe.detailsJson, txDetailsLoading: false, txStatusLoading: false,
             pendingRequestId: "", lastError: "", sendError: "", selectedAccount: probe.me,

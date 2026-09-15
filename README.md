@@ -2,8 +2,7 @@
 
 The Ethereum wallet is a portfolio over a device-wide chain scope, backed by the single
 `eth_wallet_backend` composer. Tokens and Activity span every enabled chain in that scope;
-Send and Manage tokens use their own explicit UI-local chain picker. The composer itself has
-no active-chain setting.
+Send uses an explicit UI-local chain picker. The composer itself has no active-chain setting.
 
 Five sections keep daily work separate: Tokens, Send, Receive, Activity and Settings.
 The header always shows the selected account and portfolio scope. Send always names the
@@ -42,9 +41,9 @@ come from the asset/composer layer. JavaScript numbers are never used for 256-bi
 Sorting by balance means each asset's own exact token amount; it is not fiat-value sorting and
 the UI does not contact a price service.
 
-Manage tokens has its own chain picker and queries the paged catalogue for that chain. Native
-currency and pinned WETH cannot be disabled. Other enabled tokens are persisted snapshots in
-`token_list_module`, so metadata remains stable across catalogue changes and restarts.
+Token membership is device-wide and belongs to the Token Lists UI. Wallet Settings hands off
+through the `evm.token_lists.configure` intent; this UI does not search the catalogue or enable
+and disable tokens itself. Changes announced by the composer refresh the portfolio.
 
 ## Sending
 

@@ -303,9 +303,8 @@ Item {
         iconColor: isActive ? Theme.palette.text : Theme.palette.textTertiary
     }
 
-    // One row of the Settings tab: it names a screen and GOES there, the way a token row goes
-    // to a token. An inline component cannot reach this document's ids, so the chevron is
-    // passed in and the destination is handled at the use site.
+    // One destination on the Settings tab. Wallet-owned screens push locally; capabilities
+    // owned by another app hand off through the shell. The use site decides which.
     component SettingsEntry: LogosItemDelegate {
         id: entry
         property url chevron
@@ -400,94 +399,9 @@ Item {
         return out.map(function (o) { return o.t })
     }
 
-    // ── the token catalogue, behind Manage tokens ─────────────────────────────────
-    // The query the catalogue on screen answers. Held at ROOT because the field that typed it
-    // lives inside a page the nav stack destroys, and because a chain change has to re-ask it.
-    property string tokenQuery: ""
-    // Whether that screen is the one in front of the user. Read off the nav stack rather than
-    // latched by the open/close calls, which would drift the moment a third one appeared. The
-    // page declares itself; an objectName is the harness's handle, not an identity to key on.
-    readonly property bool manageTokensOpen:
-        nav && nav.currentItem !== null && nav.currentItem.isTokenCatalogue === true
-    // The UI-local chain cursor as a typed int, so the handler below fires on a selection
-    // CHANGE rather than on every republish of the same one. The composer owns no active
-    // chain; 0 means no configured in-scope chain can be selected.
+    // Send's UI-local chain cursor. The composer owns no active chain; 0 means no configured
+    // in-scope chain can be selected.
     readonly property int chainId: net.chainId !== undefined ? net.chainId : 0
-    // A token is offered PER CHAIN and the listing names the chain it answered for, so a
-    // network moving under an open Manage tokens leaves every row withheld — and nothing else
-    // re-searches, so it stayed that way until the user typed. The SAME query goes out again:
-    // resetting it to the whole offered set would throw away what they were looking for.
-    onChainIdChanged: if (chainId !== 0 && manageTokensOpen) root.searchTokens(root.tokenQuery)
-    // The backend's list_available_tokens answer VERBATIM: { ok, chainId, total, shown,
-    // listed, tokens, listError? }. Empty means nothing has been searched, or the read failed.
-    readonly property bool availableKnown: ready && backend.availableTokensJson.length > 0
-    readonly property var available: availableKnown ? j(backend.availableTokensJson, "{}") : ({})
-    // The catalogue is CHAIN-scoped and the reply names the chain it answered for. A listing
-    // read under another network is not this network's answer, whatever it holds.
-    readonly property bool availableForChain: availableKnown && available.chainId === net.chainId
-    readonly property var availableTokens: availableForChain && available.tokens !== undefined
-                                           ? available.tokens : []
-    readonly property bool availableLoading: ready && backend.availableTokensLoading
-    // A toggle is being written. Its own flag: the write and the search are separate calls,
-    // and one spinner covering both comes down while the other is still running.
-    readonly property bool tokenToggleBusy: ready && backend.tokenToggleBusy
-    // The last toggle was refused. Its OWN line, beside the switch that was pressed: the write
-    // is answered by nothing else, so a refusal that only reached the error line at the top of
-    // the view is a row that silently sprang back with the reason a screen away.
-    readonly property string tokenToggleError: ready ? backend.tokenToggleError : ""
-
-    // The three counts the listing carries, and they mean three different things.
-    //   listed — rows the token list holds for this chain AT ALL, before any query
-    //   total  — rows this query matched, BEFORE the cut
-    //   shown  — rows that survived it
-    // −1 is "the reply did not say", which is not zero: an answer that named no count may not
-    // be rendered as an answer that counted none.
-    function catalogueCount(key) {
-        var v = availableForChain ? available[key] : undefined
-        return typeof v === "number" ? v : -1
-    }
-    readonly property int availableListed: catalogueCount("listed")
-    readonly property int availableTotal: catalogueCount("total")
-    readonly property int availableShown: catalogueCount("shown")
-    // The list itself could not be read. Present ONLY on a real failure — `listed: 0` with no
-    // listError is the ORDINARY sepolia answer and must never wear this.
-    readonly property string availableListError:
-        availableForChain && available.listError !== undefined
-            ? String(available.listError) : ""
-    readonly property bool availableFailed: availableListError.length > 0
-    // This chain is not in the bundled list at all. A real, complete answer: whatever rows are
-    // on screen are the built-ins, and no query will find more.
-    readonly property bool catalogueEmptyForChain:
-        availableForChain && !availableFailed && availableListed === 0
-    // The answer has more pages than are on screen. Its own word for it, `hasMore`, rather
-    // than a count comparison: the rows held are every page fetched so far, and the next one
-    // loads as the list scrolls. Never silent: the user is told the rows are a slice.
-    readonly property bool availableHasMore:
-        availableForChain && !availableFailed && available.hasMore === true
-
-    // The rows the Manage tokens list draws, appended a page at a time. A ListView handed a
-    // NEW array scrolls back to its top, and a page lands while the user is at the bottom —
-    // so the model behind the screen only grows in place, and starts over for a new answer.
-    ListModel { id: availableModel }
-    onAvailableTokensChanged: syncAvailableModel()
-    function syncAvailableModel() {
-        var rows = root.availableTokens
-        var grows = root.available.appended === true && availableModel.count > 0
-                    && availableModel.count <= rows.length
-        if (!grows) availableModel.clear()
-        for (var i = availableModel.count; i < rows.length; ++i)
-            availableModel.append(root.tokenRow(rows[i]))
-    }
-    // One row with every role present: a ListModel types a role on first sight, and the
-    // native row has no address.
-    function tokenRow(t) {
-        return { symbol: String(t.symbol || ""), name: String(t.name || ""),
-                 decimals: typeof t.decimals === "number" ? t.decimals : -1,
-                 address: typeof t.address === "string" ? t.address : "",
-                 native: t.native === true, enabled: t.enabled === true, builtin: t.builtin === true,
-                 source: typeof t.source === "string" ? t.source : "",
-                 logoURI: typeof t.logoURI === "string" ? t.logoURI : "" }
-    }
 
     // Account × chain × token × request. The backend withdraws it when any of them moves.
     readonly property var quote: scoped ? j(backend.quoteJson, "{}") : ({})
@@ -598,9 +512,9 @@ Item {
         if (nav.depth > 1) nav.popToIndex(0, StackView.Immediate)
         nav.pushItem(txDetailComponent, { hash: hash })
     }
-    // The three settings screens are sections of one tab now. Kept as named functions: they
+    // Wallet-owned settings screens are sections of one tab. Kept as named functions: they
     // are what the probes and the harness call, and one place to change if the tab moves.
-    // The three settings screens are PUSHED, like a token or a transaction. selectTab first:
+    // They are PUSHED, like a token or a transaction. selectTab first:
     // it pops any screen already up and puts the strip on Settings, so the tab the user is
     // left looking at is the one the pushed screen belongs to.
     function openNetworks() { root.selectTab(4); nav.pushItem(networksComponent) }
@@ -610,13 +524,6 @@ Item {
     // A name for the tab index, so the probe and any later caller do not carry the number.
     function openReceive() { root.selectTab(2) }
 
-    function openManageTokens() {
-        root.selectTab(4)
-        nav.pushItem(manageTokensComponent)
-        // The empty query is the whole offered set. Asked for here rather than in the screen's
-        // Component.onCompleted, so re-opening it re-reads rather than showing the last answer.
-        root.searchTokens("")
-    }
     function back() { if (nav.depth > 1) nav.popCurrentItem() }
 
     // The closed set of actions the verdict may carry. Text only, no button: a sandboxed view
@@ -782,20 +689,6 @@ Item {
         if (ready && order !== root.tokenSort) root.backend.chooseTokenSort(order)
     }
 
-    // The catalogue is searched by the BACKEND. The embedded Uniswap list runs to thousands of
-    // rows, so a query is a call, never a filter over something pulled across the wire.
-    function searchTokens(query) {
-        root.tokenQuery = query
-        if (ready) root.backend.searchTokens(query)
-    }
-
-    // One write at a time, and never for a row with no contract behind it: the native token is
-    // not a token_list entry and cannot be turned off.
-    function setTokenEnabled(address, on) {
-        if (ready && !root.tokenToggleBusy && address && address.length > 0)
-            root.backend.setTokenEnabled(address, on)
-    }
-
     // WHAT IDENTIFIES A TOKEN — here, and everywhere else in this view.
     //
     // A token is its (chain, contract), never its symbol: the shipped list carries five
@@ -822,7 +715,6 @@ Item {
         return dup
     }
     readonly property var tokenDupSymbols: dupSymbols(tokens)
-    readonly property var availableDupSymbols: dupSymbols(availableTokens)
 
     // The contract, put on a row only where the symbol beside it is worn by another row on the
     // same screen. Keying by address stops the WALLET confusing the two; this is what stops
@@ -1571,8 +1463,8 @@ Item {
             Item { Layout.fillWidth: true }
         }
 
-        // The selected account's address and the device-wide portfolio scope. Send and
-        // Manage tokens have their own explicit chain pickers below.
+        // The selected account's address and the device-wide portfolio scope. Send has its own
+        // explicit chain picker below.
         RowLayout {
             Layout.fillWidth: true
             spacing: Theme.spacing.small
@@ -2752,10 +2644,8 @@ Item {
                         }
                     }
 
-                    // Settings. An index of the three screens this wallet has: each row GOES
-                    // there, the way a token row goes to a token. They are pushed onto `nav`,
-                    // which sits under the tab strip — so a settings screen is a place inside
-                    // this tab, with its own title and its own way back.
+                    // Wallet-owned settings are pushed onto `nav`. Token membership belongs to
+                    // Token Lists, so that row hands off through its declared capability.
                     Item {
                         id: settingsPage
                         objectName: "settingsPage"
@@ -2778,10 +2668,20 @@ Item {
                                 onClicked: root.openNetworks()
                             }
                             SettingsEntry {
-                                objectName: "tokensEntry"
-                                text: "Tokens"
+                                objectName: "tokenListsEntry"
+                                text: "Token lists"
                                 chevron: root.iconTriangleDown
-                                onClicked: root.openManageTokens()
+                                onClicked: root.askFor("evm.token_lists.configure",
+                                                       "Nothing on this device manages token lists.")
+                            }
+                            LogosText {
+                                objectName: "tokenListsIntentNote"
+                                Layout.fillWidth: true
+                                visible: root.intentNote.length > 0
+                                textFormat: Text.PlainText
+                                wrapMode: Text.WordWrap
+                                color: Theme.palette.textSecondary
+                                text: root.intentNote
                             }
 
                             Item { Layout.fillHeight: true }
@@ -3590,7 +3490,7 @@ Item {
         }
     }
 
-    // ── manage tokens ─────────────────────────────────────────────────────────────
+    // ── networks ──────────────────────────────────────────────────────────────────
     // Which network this wallet is on, and who owns the endpoint it talks to.
     //
     // This was a popup with three links in it. A dialog whose whole content is links to
@@ -3973,416 +3873,7 @@ Item {
         }
     }
 
-    // Everything offered on the catalogue screen's selected chain, each row with a switch.
-    // That picker is UI-local; it does not alter a device-wide or composer "active" chain.
-    // The list is the
-    // BACKEND's answer to a query — never the whole catalogue filtered here, because the
-    // embedded Uniswap list is thousands of rows.
-    Component {
-        id: manageTokensComponent
-
-        Item {
-            id: managePage
-            objectName: "manageTokensPage"
-            // What root.manageTokensOpen reads: this screen, and no other, is the one a
-            // network change has to re-ask the catalogue for.
-            readonly property bool isTokenCatalogue: true
-
-            // Either call. They are separate writers with separate flags — see tokenToggleBusy
-            // — but to the screen they are both "the backend is answering".
-            readonly property bool busy: root.availableLoading || root.tokenToggleBusy
-            // The search has been running long enough to look stuck.
-            property bool searchSlow: false
-            onBusyChanged: {
-                managePage.searchSlow = false
-                if (managePage.busy) slowSearch.restart(); else slowSearch.stop()
-            }
-            // What is running, and whether it has taken long enough to owe an explanation.
-            // `beside` is the wording for a line sitting above rows that are still on screen:
-            // those rows answer the query BEFORE this one, which is worth saying once.
-            function busyLine(beside) {
-                if (root.tokenToggleBusy)
-                    return searchSlow ? "Still applying that change…" : "Applying that change…"
-                if (searchSlow)
-                    return "Still searching the token list — it is large, and this can take a "
-                         + "moment."
-                return beside ? "Searching… the rows below still answer the previous query."
-                              : "Loading tokens…"
-            }
-
-            ColumnLayout {
-                anchors.fill: parent
-                spacing: Theme.spacing.small
-
-                RowLayout {
-                    Layout.fillWidth: true
-                    HoverIcon {
-                        objectName: "manageTokensBackButton"
-                        size: 32
-                        iconSize: 20
-                        iconSource: root.iconArrowLeft
-                        onClicked: root.back()
-                    }
-                    LogosText {
-                        objectName: "manageTokensTitle"
-                        textFormat: Text.PlainText
-                        text: "Manage tokens"
-                        font.pixelSize: Theme.typography.panelTitleText
-                        font.weight: Theme.typography.weightMedium
-                    }
-                    Item { Layout.fillWidth: true }
-                    // What THIS screen turns on and off is which tokens the wallet shows.
-                    // Where those tokens come from — the lists, their URLs, a custom one — is
-                    // DEVICE-WIDE and owned elsewhere, exactly as the endpoint is. So this
-                    // asks for that capability rather than naming the app that has it.
-                    LogosButton {
-                        objectName: "openTokenListsButton"
-                        text: "Token lists"
-                        onClicked: root.askFor("evm.token_lists.configure",
-                                               "Nothing on this device manages token lists.")
-                    }
-                    LogosText {
-                        objectName: "tokensIntentNote"
-                        Layout.maximumWidth: 260
-                        visible: root.intentNote.length > 0
-                        textFormat: Text.PlainText
-                        wrapMode: Text.WordWrap
-                        color: Theme.palette.textSecondary
-                        text: root.intentNote
-                    }
-                    LogosSpinner {
-                        objectName: "manageTokensSpinner"
-                        implicitWidth: 20
-                        implicitHeight: 20
-                        visible: managePage.busy
-                        running: visible
-                        ringColor: Theme.palette.textSecondary
-                    }
-                }
-
-                LogosSearchBar {
-                    id: tokenSearch
-                    objectName: "tokenSearchField"
-                    Layout.fillWidth: true
-                    enabled: root.ready
-                    placeholderText: "Enter token name or address"
-                    // Not per keystroke: the lane coalesces a query typed over a live call,
-                    // but a round trip per character is still a round trip per character.
-                    onTextChanged: searchDebounce.restart()
-                    onSubmitted: function (t) { searchDebounce.stop(); root.searchTokens(t) }
-                }
-
-                Timer {
-                    id: searchDebounce
-                    interval: 250
-                    onTriggered: root.searchTokens(tokenSearch.text)
-                }
-
-                // The call's own budget outlasts anyone's patience, so a search still running
-                // after this says so. The interval is reachable by objectName because a probe
-                // cannot wait out the real one.
-                Timer {
-                    id: slowSearch
-                    objectName: "manageTokensSlowTimer"
-                    interval: 4000
-                    onTriggered: managePage.searchSlow = true
-                }
-
-                // Token membership is per chain, so this settings screen has its own explicit
-                // cursor over the enabled in-scope registry.
-                LogosComboBox {
-                    id: manageTokensNetworkPicker
-                    objectName: "manageTokensNetwork"
-                    Layout.fillWidth: true
-                    model: root.networks.map(function (n) { return root.networkNameFor(n.chainId) })
-                    enabled: root.ready && root.networks.length > 0 && !root.tokenToggleBusy
-                    onActivated: root.backend.selectChain(root.networks[currentIndex].chainId)
-                }
-                Binding {
-                    target: manageTokensNetworkPicker
-                    property: "currentIndex"
-                    value: root.networkIndex(root.chainId)
-                    restoreMode: Binding.RestoreNone
-                }
-
-                // What enabling a row actually means. The badge on each row says which list an
-                // address came from; this says why that is a question worth asking at all.
-                LogosText {
-                    objectName: "manageTokensProvenanceNote"
-                    Layout.fillWidth: true
-                    wrapMode: Text.WordWrap
-                    textFormat: Text.PlainText
-                    visible: root.availableTokens.length > 0
-                    color: Theme.palette.textSecondary
-                    font.pixelSize: Theme.typography.secondaryText
-                    text: "Most addresses here come from a bundled snapshot of a public token "
-                          + "list, not from a table this wallet verified. Each row says which. "
-                          + "Turning one on is telling this wallet which contract that symbol "
-                          + "means."
-                }
-
-                // ── what the rows do and do not amount to ──
-                // Four separate answers, three of which used to be one silent one. In order:
-                // the read FAILED, this chain has no list at all, the answer was CUT, and a
-                // call is running. They are worded and coloured apart on purpose — an empty
-                // testnet is not a broken list, and neither is a search that matched nothing.
-
-                // The read failed. An error, not a caveat: the rows on screen are whatever was
-                // already known and the catalogue behind them was never seen.
-                LogosText {
-                    objectName: "manageTokensListNote"
-                    Layout.fillWidth: true
-                    wrapMode: Text.WordWrap
-                    textFormat: Text.PlainText
-                    visible: root.availableFailed
-                    color: Theme.palette.error
-                    // Carries the backend's own words.
-                    text: "The token list could not be read: " + root.availableListError
-                          + ". Only tokens already known to this wallet are listed."
-                }
-
-                // `listed: 0` with no listError is the ORDINARY answer on a testnet, and it
-                // has a cause worth saying: the bundled list is a snapshot of a mainnet
-                // directory. Shown beside the rows, because the built-ins still came back.
-                LogosText {
-                    objectName: "manageTokensNoCatalogue"
-                    Layout.fillWidth: true
-                    wrapMode: Text.WordWrap
-                    textFormat: Text.PlainText
-                    visible: root.catalogueEmptyForChain && root.availableTokens.length > 0
-                    color: Theme.palette.textSecondary
-                    font.pixelSize: Theme.typography.secondaryText
-                    text: "The bundled token list holds nothing for this network — it is a "
-                          + "snapshot of a list that is overwhelmingly Ethereum mainnet. Only "
-                          + "the tokens built into this wallet are offered here."
-                }
-
-                // More pages than are on screen. Never silent: a user narrowing a search is
-                // entitled to know the rows in front of them are a slice of what matched, and
-                // that the rest is a scroll away.
-                LogosText {
-                    objectName: "manageTokensCountNote"
-                    Layout.fillWidth: true
-                    wrapMode: Text.WordWrap
-                    textFormat: Text.PlainText
-                    visible: root.availableHasMore
-                    color: Theme.palette.textSecondary
-                    font.pixelSize: Theme.typography.secondaryText
-                    text: "Showing " + root.availableShown + " of " + root.availableTotal
-                          + " matches — scroll for more, or keep typing to narrow."
-                }
-
-                // A call is running with rows already on screen, which therefore answer the
-                // PREVIOUS query. The centred block below speaks for the case where there are
-                // no rows to be wrong about.
-                LogosText {
-                    objectName: "manageTokensBusyNote"
-                    Layout.fillWidth: true
-                    wrapMode: Text.WordWrap
-                    textFormat: Text.PlainText
-                    visible: managePage.busy && root.availableTokens.length > 0
-                    color: Theme.palette.textSecondary
-                    font.pixelSize: Theme.typography.secondaryText
-                    text: managePage.busyLine(true)
-                }
-
-                // A refused write, beside the switch that was pressed. Its own property rather
-                // than the view's error line: that line is at the top of the screen, is cleared
-                // by the next refresh, and this is the only answer a toggle ever gets.
-                LogosText {
-                    objectName: "manageTokensToggleError"
-                    Layout.fillWidth: true
-                    wrapMode: Text.WordWrap
-                    textFormat: Text.PlainText
-                    visible: root.tokenToggleError.length > 0
-                    color: Theme.palette.error
-                    // Backend-authored.
-                    text: root.tokenToggleError
-                }
-
-                Item {
-                    Layout.fillWidth: true
-                    Layout.fillHeight: true
-
-                    // No rows. WHICH kind of no rows is the whole point: a failed read, a
-                    // network the bundled list does not cover, a query that matched nothing,
-                    // and a network offering nothing are four different things to be told.
-                    LogosText {
-                        objectName: "manageTokensEmpty"
-                        anchors.centerIn: parent
-                        width: parent.width
-                        horizontalAlignment: Text.AlignHCenter
-                        wrapMode: Text.WordWrap
-                        textFormat: Text.PlainText
-                        visible: root.availableForChain && root.availableTokens.length === 0
-                        color: root.availableFailed ? Theme.palette.error
-                                                    : Theme.palette.textSecondary
-                        text: root.availableFailed
-                              ? "The token list could not be read"
-                              : root.catalogueEmptyForChain
-                                ? "The bundled token list holds nothing for this network. It is "
-                                  + "a snapshot of a list that is overwhelmingly Ethereum "
-                                  + "mainnet, so this network offers little or nothing."
-                                : tokenSearch.text.length > 0
-                                  ? "No token matches that name or address"
-                                  : "No tokens are offered on this network"
-                    }
-                    // Nothing read is not an empty catalogue, and it is not a failure either:
-                    // this is also what a chain change looks like until the re-read lands.
-                    ColumnLayout {
-                        objectName: "manageTokensUnknown"
-                        anchors.centerIn: parent
-                        spacing: Theme.spacing.small
-                        visible: !root.availableForChain
-                        LogosSpinner {
-                            objectName: "manageTokensUnknownSpinner"
-                            Layout.alignment: Qt.AlignHCenter
-                            implicitWidth: 24
-                            implicitHeight: 24
-                            visible: managePage.busy
-                            running: visible
-                            ringColor: Theme.palette.textSecondary
-                        }
-                        LogosText {
-                            objectName: "manageTokensUnknownNote"
-                            Layout.alignment: Qt.AlignHCenter
-                            textFormat: Text.PlainText
-                            text: managePage.busy ? managePage.busyLine(false) : "—"
-                            color: Theme.palette.textSecondary
-                        }
-                    }
-
-                    LogosListView {
-                        objectName: "manageTokensList"
-                        anchors.fill: parent
-                        visible: root.availableTokens.length > 0
-                        model: availableModel
-                        spacing: 0
-                        // The next page, asked for once per answer as its end comes into
-                        // view; the backend ignores the ask while a call is live or once the
-                        // answer is complete, so this is at most one call per page.
-                        property int askedAt: -1
-                        onContentYChanged: {
-                            if (!root.availableHasMore || root.availableLoading) return
-                            if (contentHeight - contentY - height > 240) return
-                            if (askedAt === root.availableShown) return
-                            askedAt = root.availableShown
-                            if (root.ready) root.backend.loadMoreTokens()
-                        }
-                        delegate: Item {
-                            id: manageRow
-                            // The ListModel row, read by role. A ListModel delegate has no
-                            // manageRow.row on Qt 6.9.
-                            readonly property var row: model
-                            objectName: "manageTokenRow_" + root.tokenKey(row)
-                            width: ListView.view ? ListView.view.width : 0
-                            implicitHeight: 56
-
-                            // The backend's answer for this row, which the switch shows. The
-                            // press moves `checked` on its own, so this is what puts it back.
-                            readonly property bool isOn: manageRow.row.enabled === true
-                            // A builtin is offered on every chain that has it and cannot be
-                            // turned off; the native token is not a token_list entry at all.
-                            readonly property bool locked: manageRow.row.builtin === true
-                                                           || manageRow.row.native === true
-
-                            RowLayout {
-                                anchors.fill: parent
-                                anchors.rightMargin: Theme.spacing.small
-                                spacing: Theme.spacing.small
-
-                                TokenGlyph {
-                                    symbol: manageRow.row.symbol
-                                    logoSource: root.localLogo(manageRow.row)
-                                }
-
-                                ColumnLayout {
-                                    spacing: 0
-                                    LogosText {
-                                        textFormat: Text.PlainText
-                                        text: manageRow.row.symbol
-                                        font.weight: Theme.typography.weightMedium
-                                    }
-                                    RowLayout {
-                                        spacing: Theme.spacing.tiny
-                                        LogosText {
-                                            objectName: "manageTokenName_" + root.tokenKey(manageRow.row)
-                                            textFormat: Text.PlainText
-                                            text: manageRow.row.name
-                                            color: Theme.palette.textSecondary
-                                            font.pixelSize: Theme.typography.secondaryText
-                                        }
-                                        // WHERE this row's contract came from. The symbol is
-                                        // not evidence — anyone may deploy a contract that
-                                        // answers "USDC" — and this is the difference between
-                                        // an address this build carries and one a bundled
-                                        // directory offered.
-                                        LogosBadge {
-                                            objectName: "manageTokenSource_" + root.tokenKey(manageRow.row)
-                                            readonly property string src: root.tokenSource(manageRow.row)
-                                            text: root.tokenSourceLabel(src)
-                                            color: root.tokenSourceColor(src)
-                                        }
-                                        // Present only where another offered row wears this
-                                        // one's symbol. Turning a token on picks a CONTRACT,
-                                        // so the catalogue may not offer two rows a reader
-                                        // cannot tell apart.
-                                        LogosText {
-                                            objectName: "manageTokenContract_" + root.tokenKey(manageRow.row)
-                                            visible: text.length > 0
-                                            textFormat: Text.PlainText
-                                            text: root.disambiguator(manageRow.row, root.availableDupSymbols)
-                                            color: Theme.palette.textSecondary
-                                            font.pixelSize: Theme.typography.secondaryText
-                                        }
-                                    }
-                                }
-
-                                Item { Layout.fillWidth: true }
-
-                                // Only an enabled token has a balance: get_balances answers a
-                                // row per OFFERED token, so a disabled one is an em-dash here
-                                // rather than a zero we did not read. By CONTRACT — a disabled
-                                // row matched on its symbol advertised an enabled namesake's
-                                // holding as its own.
-                                LogosText {
-                                    objectName: "manageTokenBalance_" + root.tokenKey(manageRow.row)
-                                    textFormat: Text.PlainText
-                                    text: root.balanceDisplay(manageRow.row)
-                                          + " " + manageRow.row.symbol
-                                    color: Theme.palette.textSecondary
-                                }
-
-                                LogosSwitch {
-                                    objectName: "manageTokenToggle_" + root.tokenKey(manageRow.row)
-                                    checked: manageRow.isOn
-                                    enabled: root.ready && !manageRow.locked
-                                             && !root.tokenToggleBusy
-                                    onToggled: {
-                                        var want = checked
-                                        // The press has already overwritten the binding above.
-                                        // Put it back: the row shows what the BACKEND says,
-                                        // not what was pressed, until the re-read lands.
-                                        checked = Qt.binding(function () { return manageRow.isOn })
-                                        root.setTokenEnabled(manageRow.row.address, want)
-                                    }
-                                }
-                            }
-
-                            Rectangle {
-                                anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
-                                height: 1
-                                color: Theme.palette.borderTertiaryMuted
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-
-    // ── another app asks to send ─────────────────────────────────────────────────
+   // ── another app asks to send ─────────────────────────────────────────────────
     //
     // What the app handed over, in full, before anything is asked of the signer: who asked
     // (attested by the shell), what they claim it is for, every call with its contract and
