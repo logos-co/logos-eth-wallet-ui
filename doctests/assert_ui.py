@@ -557,12 +557,12 @@ print("   erc20 send gets no \"To\" row at all, because the transaction has no s
 check("the plain-send row is gated on the kind the backend recorded",
       qml_binding("txDetailToRow", "visible"), 'visible: txPage.rec.kind === "native"')
 check("...and the contract row on the other one",
-      qml_binding("txDetailInteractedRow", "visible"), 'visible: txPage.rec.kind === "erc20"')
+      qml_binding("txDetailInteractedRow", "visible"), 'visible: txPage.rec.kind !== "native"')
 check("both render the SAME field, so neither can be the other's interpretation",
       qml_binding("txDetailToRow", "value") == qml_binding("txDetailInteractedRow", "value")
       == "value: root.rawToDisplay(txPage.rec)", True)
 check("the calldata goes with the contract row, and nowhere else",
-      qml_binding("txDetailDataRow", "visible"), 'visible: txPage.rec.kind === "erc20"')
+      qml_binding("txDetailDataRow", "visible"), 'visible: txPage.rec.kind !== "native"')
 print("   the regression this opens: with \"To\" gone from the card, an erc20 send whose")
 print("   receipt has not landed decodes no transfers — and the recipient the user typed")
 print("   would be NOWHERE on the screen. It is rendered below instead, in the interpreted")
@@ -762,9 +762,14 @@ check("every back arrow is one size",
       sorted({re.search(r"iconSize: (\d+)", b).group(1) for b in backs}), ["20"])
 check("...on every screen there is to leave", len(backs), 5)
 
-check("the four spinner-bearing claims",
+check("the five spinner-bearing claims",
       sorted(set(re.findall(r"beginClaim\((m_\w+)", code))),
-      ["m_detailsInFlight", "m_feesInFlight", "m_tokenToggleInFlight", "m_txStatusInFlight"])
+      ["m_detailsInFlight", "m_feesInFlight", "m_intentPriceInFlight", "m_tokenToggleInFlight",
+       "m_txStatusInFlight"])
+print("   the pricing of another app's request is the fifth: its spinner is the dialog's fee")
+print("   line, and its send button waits on it")
+check("...and the send button waits on the pricing",
+      "!root.intentSendPricing" in qml_binding("intentSendAccept", "enabled"), True)
 check("...and the button it drives says it is running",
       "!root.txStatusLoading" in qml_binding("txDetailRefresh", "enabled"), True)
 
@@ -968,7 +973,17 @@ check("...from exactly one place, so no route can reach the screen without it",
 print("   the query goes to the BACKEND. The embedded Uniswap list is thousands of rows, so")
 print("   a filter written here would mean pulling all of them across the wire first")
 check("the list renders what the backend answered",
-      qml_binding("manageTokensList", "model"), "model: root.availableTokens")
+      qml_binding("manageTokensList", "model"), "model: availableModel")
+print("   as a ListModel grown in place: a ListView handed a NEW array scrolls back to its")
+print("   top, and a page lands while the user is at the bottom")
+_sync = qml_fn_body(qml_body, "syncAvailableModel")
+check("...which is filled from that reply's tokens", "root.availableTokens" in _sync, True)
+check("...appended from where it stands only when the answer says it grew",
+      in_order(_sync, "root.available.appended === true", "availableModel.count <= rows.length",
+               "if (!grows) availableModel.clear()", "for (var i = availableModel.count"), True)
+check("...and the next page is asked for as the end comes into view, once per answer",
+      in_order(" ".join(qml_item("manageTokensList")), "root.availableHasMore",
+               "askedAt === root.availableShown", "root.backend.loadMoreTokens()"), True)
 check("...which is that reply's own tokens, unfiltered and unsorted",
       [w for w in ("filter(", "sort(", "toLowerCase", "indexOf")
        if w in qml_decl("availableTokens")], [])
@@ -1001,7 +1016,7 @@ toggles = [f"EthWalletView.qml:{n}: {l.strip()}" for n, l in enumerate(qml_lines
 check("exactly one line asks the backend to enable a token", len(toggles), 1)
 check("...and the switch puts its binding back rather than keeping the press",
       in_order(" ".join(qml_item("manageTokenToggle_")), "var want = checked",
-               "Qt.binding", "root.setTokenEnabled(modelData.address, want)"), True)
+               "Qt.binding", "root.setTokenEnabled(manageRow.row.address, want)"), True)
 check("...while a builtin, and the native token, cannot be pressed at all",
       "!manageRow.locked" in qml_binding("manageTokenToggle_", "enabled"), True)
 
@@ -1047,16 +1062,15 @@ print("   rendered as a reply that matched none")
 check("a missing count answers −1, not 0",
       in_order(qml_fn_body(qml_body, "catalogueCount"),
                'typeof v === "number"', "? v : -1"), True)
-check("...and the cut is claimed only when BOTH figures were stated",
-      in_order(qml_decl("availableCut"), "availableTotal >= 0", "availableShown >= 0",
-               "availableTotal > availableShown"), True)
-print("   and the cut is never silent: both figures reach the screen, on the line that")
-print("   says the list in front of the user is a slice of what matched")
+check("...and a further page is claimed on the answer's own word, not a count comparison",
+      "available.hasMore === true" in qml_decl("availableHasMore"), True)
+print("   and a further page is never silent: both figures reach the screen, on the line")
+print("   that says the list in front of the user is a slice of what matched")
 check("the count line names shown and total",
       in_order(qml_binding("manageTokensCountNote", "text"),
                "root.availableShown", "root.availableTotal"), True)
-check("...and is on screen exactly when they differ",
-      qml_binding("manageTokensCountNote", "visible"), "visible: root.availableCut")
+check("...and is on screen exactly while another page follows",
+      qml_binding("manageTokensCountNote", "visible"), "visible: root.availableHasMore")
 print("   every count the reply carries is READ. A count published and never rendered is a")
 print("   truncation the screen is silent about")
 check("listed, total and shown all reach a property",

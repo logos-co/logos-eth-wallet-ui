@@ -96,6 +96,9 @@ Item {
         var c = JSON.parse(probe.catalogue(probe.chain))
         c.total = total
         c.shown = shown
+        // The answer's own word for "there is another page": the note is keyed on it, not
+        // on the two counts disagreeing.
+        c.hasMore = total > shown
         return JSON.stringify(c)
     }
 
@@ -210,6 +213,8 @@ Item {
             c.push(address + "=" + on)
             fake.toggleCalls = c
         }
+        property int moreCalls: 0
+        function loadMoreTokens() { fake.moreCalls += 1 }
     }
 
     property var logos: ({ module: function (n) { return fake }, isViewModuleReady: function (n) { return true } })
@@ -331,7 +336,7 @@ Item {
         console.log("differ the list in front of the user is a SLICE, and saying nothing is the")
         console.log("one thing this screen may not do")
         check("the cut is named, both figures", txt("manageTokensCountNote"),
-              "Showing 50 of 318 matches — keep typing to narrow.")
+              "Showing 50 of 318 matches — scroll for more, or keep typing to narrow.")
         check("...and it is on screen", vis("manageTokensCountNote"), true)
         check("...while nothing calls a readable list broken",
               vis("manageTokensListNote"), false)

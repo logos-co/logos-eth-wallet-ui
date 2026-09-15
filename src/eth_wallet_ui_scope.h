@@ -10,6 +10,11 @@ inline QJsonObject parseObject(const QString &reply)
     return QJsonDocument::fromJson(reply.toUtf8()).object();
 }
 
+inline QString toJsonCompact(const QJsonObject &o)
+{
+    return QString::fromUtf8(QJsonDocument(o).toJson(QJsonDocument::Compact));
+}
+
 inline bool replyOk(const QString &reply)
 {
     return parseObject(reply).value(QStringLiteral("ok")).toBool();

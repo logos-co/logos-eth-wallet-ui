@@ -76,10 +76,12 @@ class EthWalletUi
     // The persisted token order, "alpha" or "balance". Device-wide rather than scoped: it
     // rides back on every listing call, so it is republished by whichever answers last.
     PROP(QString tokenSort="alpha" READONLY)
-    // The last list_available_tokens answer, VERBATIM: { ok, chainId, total, shown, listed,
-    // tokens, listError? }. Empty means "not searched yet". It carries the chain it is about,
-    // and the Manage tokens screen renders it only while that is still the active one — the
-    // previous network's catalogue is not an answer about this one.
+    // The list_available_tokens answer: { ok, chainId, total, shown, hasMore, listed, tokens,
+    // listError?, appended? }. The first page verbatim; every later page loadMoreTokens fetched
+    // is appended onto it, `shown` counting all rows held and `appended` marking a growth
+    // rather than a new answer. Empty means "not searched yet". It carries the chain it is
+    // about, and the Manage tokens screen renders it only while that is still the active one
+    // — the previous network's catalogue is not an answer about this one.
     PROP(QString availableTokensJson="" READONLY)
     PROP(bool availableTokensLoading=false READONLY)
     // A token is being enabled or disabled. Its OWN flag, not the search spinner above: two
@@ -149,11 +151,21 @@ class EthWalletUi
     // ours. Empty exactly when `pendingRequestId` is.
     PROP(QString pendingApprovalHandle="" READONLY)
 
-    // How the last send ended: `{ status, hash?, reason? }`, or empty before the first one.
+    // How the last send ended: `{ status, hash?, hashes?, reason? }`, or empty before the first
+    // one. `hashes` is every transaction of the send: a bundle another app asked for is more
+    // than one, and the app is answered with all of them.
     // Set as `pendingRequestId` clears, because that is the instant the waiting dialog
     // disappears — and the shell may be returning the user here at exactly that moment, so
     // something has to be left on screen that explains the trip.
     PROP(QString lastSendOutcomeJson="" READONLY)
+
+    // A request from ANOTHER APP to send transactions from this wallet, under review:
+    // `{ requestId, requester, chainId, from, purpose, calls, fee?, error? }`. Empty when
+    // nothing is being reviewed. The app never sees a key: it hands over calls, the human
+    // sees them here first, and the same signer approval follows as for the wallet's own send.
+    PROP(QString intentSendJson="" READONLY)
+    // The sender is pricing the request above. Down when `fee` or `error` lands.
+    PROP(bool intentSendPricing=false READONLY)
 
     SLOT(void refresh())
     SLOT(void selectAccount(QString address))
@@ -178,6 +190,14 @@ class EthWalletUi
     // Sweep this account's still-pending transactions for receipts.
     SLOT(void refreshPending())
 
+    // Put another app's request on screen and price it. The JSON is
+    // `{ requestId, requester, params }` as the intent bridge delivered it.
+    SLOT(void reviewIntentSend(QString requestJson))
+    // The human said yes: the calls go to the sender, and the send is then the wallet's own
+    // pending send — same poll, same signer hand-off, same outcome dialog.
+    SLOT(void acceptIntentSend())
+    SLOT(void declineIntentSend())
+
     // Persist the token order. Named apart from the `tokenSort` property it moves: the
     // generated setter for a PROP already owns setTokenSort(), and a SLOT may not collide
     // with it. Answered by a tokenSort change, not by an event.
@@ -191,6 +211,9 @@ class EthWalletUi
     // embedded Uniswap list is thousands of rows and may not be pulled into the view to be
     // filtered there.
     SLOT(void searchTokens(QString query))
+    // The next page of the current answer, asked for as the list scrolls to its end. Ignored
+    // while a call is live or once the answer said it was complete.
+    SLOT(void loadMoreTokens())
     // Enable or disable one token for the active chain, then re-read the balances — the
     // backend call emits no event, so nothing else would move the Tokens tab.
     SLOT(void setTokenEnabled(QString address, bool enabled))

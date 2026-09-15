@@ -16,6 +16,7 @@ logos_module(
         src/eth_wallet_ui_backend.cpp
         src/eth_wallet_ui_apply.h
         src/eth_wallet_ui_guard.h
+        src/eth_wallet_ui_intent.h
         src/eth_wallet_ui_scope.h
         src/eth_wallet_ui_sweep.h
     INCLUDE_DIRS

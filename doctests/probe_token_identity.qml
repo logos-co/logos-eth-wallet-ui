@@ -161,6 +161,7 @@ Item {
         function setQuoteAutoRefresh(on) {}
         function searchTokens(query) { fake.availableTokensJson = probe.available }
         function setTokenEnabled(address, on) {}
+        function loadMoreTokens() {}
     }
 
     property var logos: ({ module: function (n) { return fake }, isViewModuleReady: function (n) { return true } })

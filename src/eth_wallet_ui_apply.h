@@ -267,3 +267,28 @@ inline bool mayAdopt(bool selectionHeld, int reportedChainId)
 {
     return selectionHeld && reportedChainId != 0;
 }
+
+/// A later page of the catalogue answer, appended onto the answer on screen. It must
+/// continue that answer — same chain, and its `offset` exactly the rows already held — or the
+/// screen keeps what it has: a page for the previous question, or one that failed, adds
+/// nothing. The counts follow the page, and `appended` tells the view to grow rather than
+/// start over.
+inline QString mergeTokenPage(const QString &accumulated, const QString &page, int offset)
+{
+    QJsonObject acc = parseObject(accumulated);
+    const QJsonObject p = parseObject(page);
+    QJsonArray rows = acc.value(QStringLiteral("tokens")).toArray();
+    if (!replyOk(page) || !acc.value(QStringLiteral("ok")).toBool() || offset <= 0
+        || p.value(QStringLiteral("chainId")) != acc.value(QStringLiteral("chainId"))
+        || offset != rows.size() || p.value(QStringLiteral("offset")).toInt(-1) != offset)
+        return accumulated;
+    for (const QJsonValue &v : p.value(QStringLiteral("tokens")).toArray())
+        rows.append(v);
+    acc.insert(QStringLiteral("tokens"), rows);
+    acc.insert(QStringLiteral("shown"), rows.size());
+    acc.insert(QStringLiteral("total"), p.value(QStringLiteral("total")));
+    acc.insert(QStringLiteral("listed"), p.value(QStringLiteral("listed")));
+    acc.insert(QStringLiteral("hasMore"), p.value(QStringLiteral("hasMore")).toBool());
+    acc.insert(QStringLiteral("appended"), true);
+    return toJsonCompact(acc);
+}

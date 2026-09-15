@@ -12,8 +12,15 @@
 set -uo pipefail
 cd "$(dirname "$0")"
 
-QML_BIN="${QML_BIN:-$(ls -d /nix/store/*-qtdeclarative-*/bin/qml 2>/dev/null | head -1)}"
-QT_QML_DIR="${QT_QML_DIR:-$(ls -d /nix/store/*-qtdeclarative-*/lib/qt-6/qml 2>/dev/null | head -1)}"
+# The store can hold a Linux qtdeclarative beside the native one (cross builds leave it
+# there), so the first binary listed is not necessarily one this machine can run.
+if [ -z "${QML_BIN:-}" ]; then
+    for c in /nix/store/*-qtdeclarative-*/bin/qml; do
+        "$c" --version >/dev/null 2>&1 && QML_BIN="$c" && break
+    done
+fi
+QML_BIN="${QML_BIN:-}"
+QT_QML_DIR="${QT_QML_DIR:-${QML_BIN:+${QML_BIN%/bin/qml}/lib/qt-6/qml}}"
 DS="${LOGOS_DESIGN_SYSTEM_QML:-}"
 for c in ../../logos-design-system/src/qml \
          $(ls -d /nix/store/*-logos-design-system-src/src/qml 2>/dev/null | head -1); do
