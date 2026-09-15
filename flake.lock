@@ -259,11 +259,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1789407726,
-        "narHash": "sha256-VxYgzZYCypy6IRwhj4cUVYXe9MYqCizK/oU7hnXlx5c=",
+        "lastModified": 1789431132,
+        "narHash": "sha256-y0aimdEvHvvqGJqoxgSyoDphk84tAH01RSnKINg6RmY=",
         "owner": "logos-co",
         "repo": "logos-eth-wallet-backend",
-        "rev": "d6c93c35d9a321a3983fb87c433f85c3dcabd684",
+        "rev": "1b2cde97dd9e5b4d2e6aa8ca9c72b604b5f4440a",
         "type": "github"
       },
       "original": {
