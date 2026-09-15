@@ -1819,6 +1819,9 @@ Item {
                                         visible: !root.balancesPending && tokenRow.balanceFailure !== null
                                         source: LogosIcons.warning
                                         color: Theme.palette.error
+                                        // warning.svg ships dark; normalize its luminance so the
+                                        // error tint is visible on both idle and hovered rows.
+                                        brightness: 1.0
                                         HoverHandler { id: balanceErrorHover }
                                         ToolTip.text: balanceErrorIcon.description
                                         ToolTip.visible: balanceErrorHover.hovered
@@ -2798,6 +2801,7 @@ Item {
                         visible: !root.balancesPending && tokenPage.balanceFailure !== null
                         source: LogosIcons.warning
                         color: Theme.palette.error
+                        brightness: 1.0
                         HoverHandler { id: tokenDetailBalanceErrorHover }
                         ToolTip.text: tokenDetailBalanceError.description
                         ToolTip.visible: tokenDetailBalanceErrorHover.hovered

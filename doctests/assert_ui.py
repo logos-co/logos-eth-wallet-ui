@@ -942,7 +942,8 @@ check("a failed chain replaces its balance with an error symbol",
       True)
 check("...using the standard warning silhouette in the error colour",
       "source: LogosIcons.warning" in balance_error
-      and "color: Theme.palette.error" in balance_error, True)
+      and "color: Theme.palette.error" in balance_error
+      and "brightness: 1.0" in balance_error, True)
 check("...and hovering it exposes the provider's description",
       "ToolTip.text: balanceErrorIcon.description" in balance_error
       and "root.balanceFailureDescription(modelData)" in balance_error, True)
