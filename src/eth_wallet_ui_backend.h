@@ -31,7 +31,9 @@ public:
     void saveContact(QString address, QString name) override;
     void forgetContact(QString address) override;
     void selectAccount(QString address) override;
-    void setActiveChain(int chainId) override;
+    void selectChain(int chainId) override;
+    void changeChainEnabled(int chainId, bool enabled) override;
+    void changeNetworkScope(QString scope) override;
     void quote(QString requestJson) override;
     void setQuoteAutoRefresh(bool on) override;
     void submitSend(QString requestJson) override;
@@ -76,10 +78,7 @@ private:
     /// spins the event loop, so an answer in hand can already be older than the screen.
     bool selectionHeld(quint64 gen) const { return gen == m_dataGen; }
 
-    /// Take the chain named by an active_chain_changed event. The counter only knows about
-    /// moves this view made, so without this the values for the network being left stand —
-    /// and every reply for it is accepted — until refresh() reads the move back. Answers
-    /// whether the chain actually moved.
+    /// Move this view's local Send/Manage-token chain cursor to a currently in-scope record.
     bool adoptChain(int chainId);
 
     /// Enter a guarded async lane: raise its spinner and arm the lapse timer that hands the
@@ -141,6 +140,9 @@ private:
     /// A refresh asked for while one was running. Queued rather than dropped: the reads spin
     /// the event loop, so a chain change landing mid-refresh would never be read at all.
     bool m_refreshAgain = false;
+    /// Bumped when eth_rpc announces a registry change. list_networks is synchronous and may
+    /// dispatch that event inside its own nested loop; an older snapshot must not be published.
+    quint64 m_registryGen = 0;
     /// Polls a pending send until it settles. Stopped once nothing is in flight.
     QTimer m_sendPoll;
     /// Sweeps broadcast transactions for receipts. Runs only while a row is pending.

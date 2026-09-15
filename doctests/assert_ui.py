@@ -378,7 +378,7 @@ sync = qml_fn_body(picker.group(1) if picker else "", "syncIndex")
 check("sendTokenPicker re-asserts its index on a model change",
       bool(picker) and "onModelChanged: syncIndex()" in picker.group(1), True)
 check("...and syncIndex writes the token back, so the picker and the amount field agree",
-      "sendPage.selectToken(root.tokens[currentIndex])" in sync, True)
+      "sendPage.selectToken(root.chainTokens[Math.max(0, currentIndex)])" in sync, True)
 
 print("0e) the backend holds NO rule about what may reach the screen")
 # WHY THIS SECTION LOOKS NOTHING LIKE THE ELEVEN PASSES BEFORE IT.
@@ -447,10 +447,10 @@ for fn, transition in [("fetchTxDetails", "applyTxDetails("),
                        ("submitSend", "applySend(")]:
     check(f"{fn} snapshots, calls {transition[:-1]}, publishes",
           in_order(fn_body(fn), "scopeSnapshot()", transition, "publishScope("), True)
-print("   the event that names the new chain is TAKEN, not discarded: until it is adopted")
-print("   the values for the network being left are on screen and every reply for it is accepted")
-check("active_chain_changed adopts the chain it names, first",
-      handler("Active_chain_changed").strip().startswith("adoptChain(chainId);"), True)
+print("   there is no device active-chain event now. Registry events invalidate the snapshot")
+print("   before queueing a refresh, so a synchronous stale listing cannot reach the screen")
+check("networks_changed invalidates before it refreshes",
+      in_order(handler("Networks_changed"), "++m_registryGen", "refreshSoon()"), True)
 check("balances_updated ignores an account that is not on screen",
       "address.compare(selectedAccount()" in handler("Balances_updated"), True)
 check("leaving the section withdraws the figures, not just the timer",
@@ -460,7 +460,7 @@ for t in ["test_apply.cpp", "test_data_guard.cpp", "test_reply_scope.cpp",
           "test_scope_invariant.cpp", "test_sweep_decision.cpp"]:
     check(f"{t} exists", (Path(__file__).resolve().parent / t).exists(), True)
 
-print("0f) the two SYNC producers take a witness BEFORE the call, not after")
+print("0f) synchronous producers take a witness BEFORE the call, not after")
 # eth_wallet_backend is concurrency:"multi", so a synchronous call into it runs a nested event
 # loop and dispatches queued events inline. The selection can therefore move INSIDE the call,
 # and neither the answer nor the refusal that comes back is about the screen any more.
@@ -473,19 +473,15 @@ print("0f) the two SYNC producers take a witness BEFORE the call, not after")
 # The DECISION each one makes is a table row in test_apply.cpp (networkStep, mayAdopt,
 # applySend). What is asserted here is only that the witness reaches it, taken before the read.
 net = fn_body("loadNetwork")
-first, _, rest = net.partition("list_networks()")
-check("loadNetwork: witness, read, decide",
-      in_order(first, "gen = m_dataGen", "get_active_network()",
-               "networkStep(selectionHeld(gen)"), True)
-print("   anchored to the FIRST read's own region: the second read's re-read request sits")
-print("   200 characters further down and answered for this one until this pass")
-check("...and an answer older than the screen is asked for again", "m_refreshAgain" in first, True)
-print("   and the fix material was already on the wire: list_networks names the chain the")
-print("   backend is actually on, and the read kept only `networks`")
-check("a second witness is taken between the two reads",
-      in_order(net, "get_active_network()", "gen = m_dataGen", "list_networks()"), True)
-check("...and the later read's own answer decides the chain, under that witness",
-      in_order(rest, "activeChainId", "mayAdopt(selectionHeld(gen)", "adoptChain(now)"), True)
+check("loadNetwork: registry witness, read, decide",
+      in_order(net, "registryGen = m_registryGen", "list_networks()",
+               "registryGen != m_registryGen"), True)
+check("...and an answer older than the registry is asked for again",
+      in_order(net, "registryGen != m_registryGen", "m_refreshAgain = true", "return"), True)
+check("the UI cursor is chosen only from the answered in-scope registry",
+      in_order(net, "chooseChain(networks", "adoptChain(chosen)"), True)
+check("the same answer publishes enabled rows, configured rows and scope",
+      in_order(net, "setNetworksJson", "setConfiguredNetworksJson", "setNetworkScope"), True)
 check("submitSend: witness, send, decide",
       in_order(fn_body("submitSend"), "gen = m_dataGen", ".send(requestJson)",
                "applySend(after, reply, selectionHeld(gen))"), True)
@@ -655,8 +651,7 @@ print("   one that was not: ~23s of frozen window on the only control an older r
 # is inventoried here — with where it runs, not with a claim that it is harmless — so a new
 # one fails this and has to be argued for.
 STILL_SYNC = {
-    "get_active_network": "refresh(), and its write IS the selection every check is made against",
-    "list_networks": "refresh(), under its own witness beside the read above",
+    "list_networks": "refresh(), under the registry generation witness",
     "list_tokens": "refresh()",
     "list_accounts": "refresh(), with the labels read that must land in the same turn",
     "get_account_labels": "refresh()",
@@ -667,7 +662,8 @@ STILL_SYNC = {
                      "so the view re-reads rather than editing its published copy",
     "save_contact": "the address book, which reaches no chain and writes one small file",
     "forget_contact": "the address book",
-    "set_active_chain": "a chain switch, which re-reads everything behind it anyway",
+    "set_chain_enabled": "the Networks screen, relayed to eth_rpc's registry",
+    "set_network_scope": "the Networks screen, relayed to eth_rpc's registry",
     "send": "the send path, whose ordering witness is taken around the call",
     "send_status": "the send poll",
     "cancel_send": "the send path",
@@ -676,7 +672,7 @@ STILL_SYNC = {
 called = set(re.findall(r"modules\(\)\.eth_wallet_backend\.(\w+)\(", code))
 sync = sorted(n for n in called
               if not n.endswith("AsyncResult") and not re.match(r"on[A-Z]", n))
-check("every synchronous backend call is one of the fourteen inventoried here",
+check("every synchronous backend call is inventoried here",
       sync, sorted(STILL_SYNC))
 check("...and the receipt re-read is no longer one of them", "refresh_tx_status" in sync, False)
 check("refreshTxStatus: claim, call, own the reply, re-read, lower the spinner",
@@ -1100,8 +1096,9 @@ check("the toggle's callback does not re-read",
 tokens_changed = handler("Tokens_changed")
 check("the event does, and moves both listings",
       in_order(tokens_changed, "refreshSoon()", "runTokenSearch()"), True)
-check("...only for the chain on screen, since the payload names one",
-      in_order(tokens_changed, "chainId != shown().chainId", "return"), True)
+check("...for every changed chain, because the Tokens tab is a portfolio",
+      "Q_UNUSED(chainId)" in tokens_changed
+      and "chainId != shown().chainId" not in tokens_changed, True)
 check("...and the order event adopts the order it carries",
       in_order(handler("Token_sort_changed"), "setTokenSort(order)", "refreshSoon()"), True)
 print("   and eth_rpc is configured from ANOTHER app: applyVerdict stops the verdict poll on")

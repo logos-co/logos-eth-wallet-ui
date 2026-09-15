@@ -1,4 +1,4 @@
-// A TOKEN IS ITS CONTRACT, as a shape over the view's own source.
+// A TOKEN IS ITS CHAIN AND CONTRACT, as a shape over the view's own source.
 //
 // The probe beside this one measures the behaviour with two real same-symbol contracts on
 // screen. This measures the thing a probe cannot: that no NEW call site resolves a token by
@@ -76,12 +76,12 @@ int main()
     }
     view = QString::fromUtf8(f.readAll());
 
-    std::printf("there is ONE identity function, and it is the contract\n");
-    expect("tokenKey keys on the address", "case-folded, so two spellings are one token",
-           has("if (typeof t.address === \"string\" && t.address.length > 0) "
-               "return t.address.toLowerCase()"));
+    std::printf("there is ONE identity function, and it is the chain and contract\n");
+    expect("tokenKey keys on chain and address", "case-folded, so two spellings are one token",
+           has("var chain = t.chainId !== undefined ? String(t.chainId) + \":\" : \"\"")
+               && has("return chain + t.address.toLowerCase()"));
     expect("...and the native currency has its own key",
-           "an address cannot spell it", has("if (t.native === true) return \"native\""));
+           "an address cannot spell it", has("if (t.native === true) return chain + \"native\""));
 
     std::printf("\nand no rendering path resolves a token by the symbol it wears\n");
     expect("no by-symbol lookup survives", "tokenBySymbol is gone", !has("tokenBySymbol"));
@@ -115,9 +115,9 @@ int main()
            has("function selectToken(t)")
                && !has("sendPage.token = root.tokens[currentIndex].symbol"));
     expect("...and the picker chooses a ROW", "never a symbol off the model",
-           has("onActivated: sendPage.selectToken(root.tokens[currentIndex])"));
+           has("onActivated: sendPage.selectToken(root.chainTokens[currentIndex])"));
     expect("the section finds its row by identity", "tokenIndex matches tokenKey",
-           has("if (root.tokenKey(root.tokens[i]) === k) return i"));
+           has("if (root.tokenKey(root.chainTokens[i]) === k) return i"));
 
     std::printf("\ntwo rows sharing a symbol are tellable apart by a human, too\n");
     expect("the contract is shown where it settles a question",

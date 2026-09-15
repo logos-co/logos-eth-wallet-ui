@@ -70,6 +70,16 @@ int main()
         expect("a named account this wallet holds, recased", "is accepted", n.ok);
         same("...and used", n.review.value(QStringLiteral("from")).toString(), QStringLiteral("0x70997970c51812dc3a010c7d01b50e0d17dc79c8"));
         same("a numeric value is carried as a string", n.senderRequest.value(QStringLiteral("calls")).toArray().at(0).toObject().value(QStringLiteral("value")).toString(), QStringLiteral("5"));
+
+        const IntentSendChecked cross = checkIntentSend(
+            req(R"({"purpose":"p","chainId":1,"calls":[{"to":"0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45"}]})"),
+            sepolia(), roster(), QList<int>{1, 11155111}, false);
+        expect("an app may name another enabled in-scope chain", "is accepted", cross.ok);
+        same("...and that chain reaches the sender", QString::number(cross.senderRequest.value(QStringLiteral("chainId")).toInt()), QStringLiteral("1"));
+        const IntentSendChecked outOfScope = checkIntentSend(
+            req(R"({"purpose":"p","chainId":10,"calls":[{"to":"0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45"}]})"),
+            sepolia(), roster(), QList<int>{1, 11155111}, false);
+        same("a chain outside the device scope is refused", outOfScope.error, QStringLiteral("bad_request"));
     }
     std::printf("\nrefusals: bad_request is a payload no retry fixes; busy is the wallet's state\n");
     {
@@ -90,7 +100,7 @@ int main()
         same("a wallet already waiting on a send", code(R"({"purpose":"p","calls":[{"to":"0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45"}]})", sepolia(), true), QStringLiteral("busy"));
         same("a wallet with no account", code(R"({"purpose":"p","calls":[{"to":"0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45"}]})", selectionOf(QString(), QStringLiteral(R"({"chainId":11155111})"))), QStringLiteral("busy"));
         const IntentSendChecked why = checkIntentSend(req(R"({"purpose":"p","chainId":1,"calls":[{"to":"0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45"}]})"), sepolia(), roster(), false);
-        expect("every refusal says why, for the app's author", "detail", why.detail.contains(QStringLiteral("11155111")));
+        expect("every refusal says why, for the app's author", "detail", why.detail.contains(QStringLiteral("chain 1")));
     }
     std::printf("\nthe answer, from the wallet's own outcome record\n");
     {

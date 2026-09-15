@@ -242,12 +242,6 @@ void EthWalletUiBackend::onContextReady()
         if (address.isEmpty() || address.compare(selectedAccount(), Qt::CaseInsensitive) == 0)
             refreshSoon();
     });
-    // Taken, not discarded: until the move is adopted, the values for the network being left
-    // are on screen and every reply for it is one this view would still have accepted.
-    modules().eth_wallet_backend.onActive_chain_changed([this](int chainId) {
-        adoptChain(chainId);
-        refreshSoon();
-    });
     modules().eth_wallet_backend.onSend_status_changed([this](QString) {
         QTimer::singleShot(0, [this] { pollSend(); });
     });
@@ -263,10 +257,9 @@ void EthWalletUiBackend::onContextReady()
     modules().eth_wallet_backend.onAccounts_changed([this](int) { refreshSoon(); });
     // The set of tokens OFFERED on a chain moves without this view asking — a toggle it made
     // itself, and a custom token another app imported into token_list. Chain-scoped, so a
-    // move on a network we are not showing costs nothing.
+    // move on any in-scope network changes the multi-chain Tokens view.
     modules().eth_wallet_backend.onTokens_changed([this](int chainId) {
-        if (chainId != shown().chainId)
-            return;
+        Q_UNUSED(chainId);
         refreshSoon();
         m_tokenOffset = 0;
         runTokenSearch();
@@ -281,72 +274,66 @@ void EthWalletUiBackend::onContextReady()
     // what restores the verdict: `applyVerdict` stops the poll on a confirmed `off`, so
     // without this, verification switched on elsewhere would never reach this screen. The
     // refresh carries the verdict inline and restarts the poll, so nothing else is needed.
-    modules().eth_wallet_backend.onNetworks_changed([this](int) { refreshSoon(); });
+    modules().eth_wallet_backend.onNetworks_changed([this](int) {
+        ++m_registryGen;
+        refreshSoon();
+    });
 
     refresh();
 }
 
 void EthWalletUiBackend::loadNetwork()
 {
-    // This write IS `shown()`, the selection every reply is checked against, so it takes a
-    // witness like a reply. The read spins the event loop: an answer older than a chain change
-    // landing inside it puts the chain BACK, and every consumer then refuses the real one.
-    quint64 gen = m_dataGen;
-    const QString active = modules().eth_wallet_backend.get_active_network();
-    switch (networkStep(selectionHeld(gen), active)) {
-    case NetworkStep::AskAgain:
-        // Nothing else guarantees a re-read: selectAccount() moves the selection without one.
-        m_refreshAgain = true;
-        break;
-    case NetworkStep::Publish:
-        setActiveNetworkJson(member(active, "network"));
-        // The verdict rides along inside the network object, so one refresh feeds the chip.
-        applyVerifiedProxy(member(activeNetworkJson(), "verifiedProxy"));
-        break;
-    case NetworkStep::Unknown:
-        setLastError(refusal(active, QStringLiteral("network")));
-        // A network we could not read is a selection we do not know: publishing an empty one
-        // withdraws the chain-scoped values rather than leaving them under a stale name.
-        setActiveNetworkJson(QStringLiteral("{}"));
-        // Nothing else re-reads the network, and the view is now showing dashes: ask again
-        // rather than leaving the wallet blank until the user happens to do something.
-        if (!m_networkRetry) {
-            m_networkRetry = true;
-            QTimer::singleShot(kVerifiedPollMs, this, [this] {
-                m_networkRetry = false;
-                refresh();
-            });
-        }
-        // The FIRST read is the one that loses a startup race, and this is the only branch
-        // that reaches it. Without a poll here the chip stays hidden forever.
-        if (!m_vpPoll.isActive())
-            m_vpPoll.start();
-        break;
-    }
-
-    gen = m_dataGen;
+    const quint64 registryGen = m_registryGen;
     const QString all = modules().eth_wallet_backend.list_networks();
-    if (!failed(all, QStringLiteral("networks"))) {
-        setNetworksJson(member(all, "networks"));
-        // The later of the two reads, and it names the chain the backend is actually on: a move
-        // this view was never told about is adopted here.
-        const int now = parseObject(all).value(QStringLiteral("activeChainId")).toInt();
-        if (mayAdopt(selectionHeld(gen), now) && adoptChain(now))
-            m_refreshAgain = true;
+    if (registryGen != m_registryGen) {
+        m_refreshAgain = true;
+        return;
     }
+    if (failed(all, QStringLiteral("networks"))) {
+        setNetworksJson(QStringLiteral("[]"));
+        setActiveNetworkJson(QStringLiteral("{}"));
+        return;
+    }
+    const QJsonObject registry = parseObject(all);
+    const QJsonArray networks = registry.value(QStringLiteral("networks")).toArray();
+    setNetworksJson(QString::fromUtf8(QJsonDocument(networks).toJson(QJsonDocument::Compact)));
+    setConfiguredNetworksJson(QString::fromUtf8(
+        QJsonDocument(registry.value(QStringLiteral("configuredNetworks")).toArray())
+            .toJson(QJsonDocument::Compact)));
+    setNetworkScope(registry.value(QStringLiteral("scope")).toString(QStringLiteral("mainnets")));
+    const int chosen = chooseChain(networks, shown().chainId);
+    if (chosen == 0)
+        setActiveNetworkJson(QStringLiteral("{}"));
+    else if (adoptChain(chosen))
+        m_refreshAgain = true;
 
-    // Snapshotted AFTER the read, not before: a sync read into the multi backend pumps the
-    // event loop, so the selection this reply is checked against is the one it left behind.
+    // Compose every enabled in-scope chain's offered rows. The local cursor is irrelevant to
+    // this view; it is used only by Send and Manage tokens.
     const quint64 sortGen = m_sortChoiceGen;
-    const QString tokens = modules().eth_wallet_backend.list_tokens();
+    QJsonArray tokens;
+    QString sortReply;
+    for (const QJsonValue &networkValue : networks) {
+        const QJsonObject network = networkValue.toObject();
+        const int chainId = network.value(QStringLiteral("chainId")).toInt();
+        const QString reply = modules().eth_wallet_backend.list_tokens(chainId);
+        if (!replyOk(reply)) {
+            setLastError(refusal(reply, QStringLiteral("tokens")));
+            continue;
+        }
+        sortReply = reply;
+        for (const QJsonValue &tokenValue : parseObject(reply).value(QStringLiteral("tokens")).toArray()) {
+            QJsonObject token = tokenValue.toObject();
+            token.insert(QStringLiteral("chainId"), chainId);
+            token.insert(QStringLiteral("network"), network.value(QStringLiteral("name")));
+            token.insert(QStringLiteral("testnet"), network.value(QStringLiteral("testnet")));
+            tokens.append(token);
+        }
+    }
     ScopedState s = scopeSnapshot();
-    const Applied t = applyTokens(s, tokens);
+    s.tokens = QString::fromUtf8(QJsonDocument(tokens).toJson(QJsonDocument::Compact));
     publishScope(s);
-    // The order rides on this reply, and every refresh reads it: without this the persisted
-    // order was restored only by a catalogue search, on a screen the user need never open.
-    adoptTokenSort(tokens, sortGen);
-    if (!t.error.isEmpty())
-        setLastError(t.error);
+    adoptTokenSort(sortReply, sortGen);
 }
 
 void EthWalletUiBackend::loadAccounts()
@@ -413,7 +400,9 @@ void EthWalletUiBackend::loadBalancesAndHistory()
             // selection still finishes this leg, and the history call goes out next.
             setBalancesLoading(false);
             if (gen == m_dataGen) {
-                const QString reply = bal.ok() ? bal.value : QString();
+                const QJsonArray networks = QJsonDocument::fromJson(networksJson().toUtf8()).array();
+                const QString reply = bal.ok()
+                    ? flattenBalances(bal.value, networks, shown().chainId) : QString();
                 // Not scope-gated: the order is one persisted setting, not a chain-scoped one,
                 // so a reply for another selection still names the order that was chosen.
                 adoptTokenSort(reply, sortGen);
@@ -424,8 +413,11 @@ void EthWalletUiBackend::loadBalancesAndHistory()
                     m_dataLane.release(slot);
                     if (!m_dataLane.owns(slot))
                         return;
-                    if (gen == m_dataGen)
-                        applyHistoryReply(hist.ok() ? hist.value : QString());
+                    if (gen == m_dataGen) {
+                        const QString reply = hist.ok()
+                            ? scopeComposerHistory(hist.value, shown().chainId) : QString();
+                        applyHistoryReply(reply);
+                    }
                     handOnLane(m_dataLane);
                 },
                 Timeout(kCallBudgetMs));
@@ -471,7 +463,12 @@ void EthWalletUiBackend::loadFeeTiers()
     if (!beginClaim(m_feesInFlight, &slot, [this](bool on) { setFeeTiersLoading(on); }))
         return;
     const quint64 gen = m_dataGen;
-    modules().eth_wallet_backend.suggest_feesAsyncResult(
+    if (shown().chainId == 0) {
+        m_feesInFlight.release(slot);
+        setFeeTiersLoading(false);
+        return;
+    }
+    modules().eth_wallet_backend.suggest_feesAsyncResult(shown().chainId,
         [this, gen, slot](logos::AsyncResult<QString> res) {
             m_feesInFlight.release(slot);
             if (!m_feesInFlight.isCurrent(slot) || gen != m_dataGen)
@@ -500,6 +497,7 @@ void EthWalletUiBackend::refresh()
     loadAccounts();
     loadBalancesAndHistory();
     loadFeeTiers();
+    refreshVerifiedProxy();
 
     m_inFlight = false;
     if (m_refreshAgain) {
@@ -515,17 +513,27 @@ void EthWalletUiBackend::selectAccount(QString address)
     loadBalancesAndHistory();
 }
 
-void EthWalletUiBackend::setActiveChain(int chainId)
+void EthWalletUiBackend::selectChain(int chainId)
 {
     setLastError(QString());
-    const QString reply = modules().eth_wallet_backend.set_active_chain(chainId);
-    // The backend refuses while a send is awaiting approval, and its message names the
-    // network that send was built for. Surface it verbatim.
-    if (failed(reply, QString()))
+    if (!adoptChain(chainId))
         return;
-    // refresh() re-reads the network through setActiveNetworkJson, which is what withdraws
-    // everything scoped to the network being left — an in-flight reply included.
+    // This cursor is local: a pending send keeps its own chain and never holds this picker.
     refresh();
+}
+
+void EthWalletUiBackend::changeChainEnabled(int chainId, bool enabled)
+{
+    const QString reply = modules().eth_wallet_backend.set_chain_enabled(chainId, enabled);
+    if (!failed(reply, QStringLiteral("network")))
+        refresh();
+}
+
+void EthWalletUiBackend::changeNetworkScope(QString scope)
+{
+    const QString reply = modules().eth_wallet_backend.set_network_scope(scope);
+    if (!failed(reply, QStringLiteral("network scope")))
+        refresh();
 }
 
 void EthWalletUiBackend::quote(QString requestJson)
@@ -749,7 +757,8 @@ void EthWalletUiBackend::refreshVerifiedProxy()
         [this, slot](logos::AsyncResult<QString> verdict) {
             m_vpInFlight.release(slot);
             // A failed call is silence, never a verdict — the plain Async twin cannot say.
-            applyVerifiedProxy(verdict.ok() ? verdict.value : QString());
+            applyVerifiedProxy(verdict.ok()
+                ? verdictForChain(verdict.value, shown().chainId) : QString());
         },
         Timeout(kCallBudgetMs));
 }
@@ -786,8 +795,8 @@ void EthWalletUiBackend::chooseTokenSort(QString order)
     // pumps the event loop, and a listing issued under the previous order can land inside it
     // carrying that order back over the one just chosen.
     ++m_sortChoiceGen;
-    // Synchronous like set_active_chain: it writes one string in the backend's settings and
-    // reaches no chain. The rows are BUILT in that order, so both listings are re-read.
+    // Synchronous: it writes one string in the composer's settings and reaches no chain.
+    // The rows are BUILT in that order, so both listings are re-read.
     const QString reply = modules().eth_wallet_backend.set_token_sort(order);
     if (failed(reply, QStringLiteral("token order")))
         return;
@@ -922,8 +931,11 @@ void EthWalletUiBackend::reviewIntentSend(QString requestJson)
     QStringList held;
     for (const QJsonValue &v : QJsonDocument::fromJson(accountsJson().toUtf8()).array())
         held << v.toString();
-    const IntentSendChecked checked =
-        checkIntentSend(requestJson, shown(), held, !pendingRequestId().isEmpty());
+    QList<int> allowedChains;
+    for (const QJsonValue &v : QJsonDocument::fromJson(networksJson().toUtf8()).array())
+        allowedChains << v.toObject().value(QStringLiteral("chainId")).toInt();
+    const IntentSendChecked checked = checkIntentSend(
+        requestJson, shown(), held, allowedChains, !pendingRequestId().isEmpty());
     if (!checked.ok) {
         // Published with its refusal rather than answered from here: the view holds the
         // intent's id and is the one that answers the shell.
@@ -975,13 +987,16 @@ void EthWalletUiBackend::acceptIntentSend()
     QStringList held;
     for (const QJsonValue &v : QJsonDocument::fromJson(accountsJson().toUtf8()).array())
         held << v.toString();
+    QList<int> allowedChains;
+    for (const QJsonValue &v : QJsonDocument::fromJson(networksJson().toUtf8()).array())
+        allowedChains << v.toObject().value(QStringLiteral("chainId")).toInt();
     // Re-checked against the wallet as it stands NOW, not as it stood when the review opened:
     // the account or the network may have moved under the dialog.
     const IntentSendChecked checked = checkIntentSend(
         toJsonCompact(QJsonObject{{QStringLiteral("requestId"), review.value(QStringLiteral("requestId"))},
                                   {QStringLiteral("requester"), review.value(QStringLiteral("requester"))},
                                   {QStringLiteral("params"), review}}),
-        shown(), held, !pendingRequestId().isEmpty());
+        shown(), held, allowedChains, !pendingRequestId().isEmpty());
     if (!checked.ok) {
         m_intentSendInFlight.release(slot);
         QJsonObject cur = review;

@@ -2,6 +2,7 @@
 
 #include <QJsonArray>
 #include <QJsonObject>
+#include <QList>
 #include <QStringList>
 
 #include "eth_wallet_ui_scope.h"
@@ -41,11 +42,12 @@ inline bool looksLikeAddress(const QString &s)
     return true;
 }
 
-/// Check a request against the wallet as it stands. `shown` is the account and network on
-/// screen, `accounts` the keystore's roster, `sending` whether a send is already awaiting a
-/// human. Nothing here consults a module: the sender prices and refuses on its own terms.
+/// Check a request against the wallet as it stands. `shown` supplies the default account and
+/// UI-local chain cursor, `allowedChains` is eth_rpc's enabled in-scope set, `accounts` the
+/// keystore roster, and `sending` whether a send is already awaiting a human.
 inline IntentSendChecked checkIntentSend(const QString &requestJson, const Selection &shown,
-                                         const QStringList &accounts, bool sending)
+                                         const QStringList &accounts,
+                                         const QList<int> &allowedChains, bool sending)
 {
     IntentSendChecked out;
     const QJsonObject r = parseObject(requestJson);
@@ -65,11 +67,15 @@ inline IntentSendChecked checkIntentSend(const QString &requestJson, const Selec
         return refuse(QStringLiteral("busy"), QStringLiteral("the wallet has no account or network selected"));
 
     const QJsonValue chainV = p.value(QStringLiteral("chainId"));
+    int chainId = shown.chainId;
     if (!chainV.isUndefined() && !chainV.isNull()) {
-        if (!chainV.isDouble() || chainV.toInt() != shown.chainId)
-            return refuse(QStringLiteral("bad_request"),
-                          QStringLiteral("the wallet is on chain %1, not %2").arg(shown.chainId).arg(chainV.toVariant().toString()));
+        if (!chainV.isDouble() || chainV.toDouble() != chainV.toInt())
+            return refuse(QStringLiteral("bad_request"), QStringLiteral("chainId must be an integer"));
+        chainId = chainV.toInt();
     }
+    if (chainId <= 0 || !allowedChains.contains(chainId))
+        return refuse(QStringLiteral("bad_request"),
+                      QStringLiteral("chain %1 is not enabled and in scope").arg(chainId));
     QString from = p.value(QStringLiteral("from")).toString().trimmed();
     if (from.isEmpty()) {
         from = shown.account;
@@ -128,20 +134,28 @@ inline IntentSendChecked checkIntentSend(const QString &requestJson, const Selec
     out.review = QJsonObject{
         {QStringLiteral("requestId"), requestId},
         {QStringLiteral("requester"), requester},
-        {QStringLiteral("chainId"), shown.chainId},
+        {QStringLiteral("chainId"), chainId},
         {QStringLiteral("from"), from},
         {QStringLiteral("purpose"), purpose},
         {QStringLiteral("tier"), tier},
         {QStringLiteral("calls"), cleaned},
     };
     out.senderRequest = QJsonObject{
-        {QStringLiteral("chainId"), shown.chainId},
+        {QStringLiteral("chainId"), chainId},
         {QStringLiteral("from"), from},
         {QStringLiteral("purpose"), purpose},
         {QStringLiteral("calls"), cleaned},
         {QStringLiteral("tier"), tier},
     };
     return out;
+}
+
+// Compatibility overload for focused callers that model only the cursor chain. Production
+// passes eth_rpc's complete in-scope set through the overload above.
+inline IntentSendChecked checkIntentSend(const QString &requestJson, const Selection &shown,
+                                         const QStringList &accounts, bool sending)
+{
+    return checkIntentSend(requestJson, shown, accounts, QList<int>{shown.chainId}, sending);
 }
 
 /// The answer to the requester once the send has settled, from the wallet's own outcome

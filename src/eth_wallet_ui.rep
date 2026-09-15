@@ -35,8 +35,13 @@ class EthWalletUi
     // app is the only writer.
     PROP(QString activeNetworkJson="{}" READONLY)
     PROP(QString networksJson="[]" READONLY)
+    // Every configured chain, including disabled and currently out-of-scope rows, for the
+    // Networks settings screen.
+    PROP(QString configuredNetworksJson="[]" READONLY)
+    // Device-wide scope from eth_rpc_module: mainnets | testnets | both.
+    PROP(QString networkScope="mainnets" READONLY)
 
-    // eth_rpc's verdict for the active chain, via the backend:
+    // eth_rpc's verdict for the UI-local selected chain, via the backend:
     // { ok, chainId, mode, state, usable, blocking, message, action, detail }.
     // `blocking` true means this view is deliberately showing no chain data.
     PROP(QString verifiedProxyJson="{}" READONLY)
@@ -61,17 +66,15 @@ class EthWalletUi
     // a rejected nickname must not blank the error explaining a send that did not go out.
     PROP(QString contactsError="" READONLY)
 
-    // Balances for the selected account on the active network. EMPTY means "not read yet",
-    // which the view must render as an em-dash — never as a zero, and never as the previous
-    // network's number.
+    // Balances for the selected account across every enabled in-scope chain. EMPTY means
+    // "not read yet"; rows carry chainId and a blocked chain carries its own refusal.
     PROP(QString balancesJson="" READONLY)
     // eth_rpc's own label for the read behind those balances: "verified" (proof-backed),
     // "proxied" / "direct" (forwarded on trust) or "unknown". Only "verified" may be badged
     // as verified — a receipt or a fee estimate never can. Empty means the label says
     // nothing about what is on screen: nothing was read, or the verdict moved under it.
     PROP(QString balancesRoute="" READONLY)
-    // Tokens on the active network. EMPTY means "not read yet" — a blank list is a claim
-    // that this network has none, and the previous network's symbols are not an answer.
+    // Offered tokens across every enabled in-scope chain. Each row carries chainId.
     PROP(QString tokensJson="" READONLY)
     // The persisted token order, "alpha" or "balance". Device-wide rather than scoped: it
     // rides back on every listing call, so it is republished by whichever answers last.
@@ -170,9 +173,11 @@ class EthWalletUi
     SLOT(void refresh())
     SLOT(void selectAccount(QString address))
 
-    // Refused by the backend while a send is awaiting approval; the error names the network
-    // the pending request was built for.
-    SLOT(void setActiveChain(int chainId))
+    // UI-local cursor used only by Send and Manage tokens. It changes no device state.
+    SLOT(void selectChain(int chainId))
+    // Device-wide chain registry controls relayed by the wallet composer.
+    SLOT(void changeChainEnabled(int chainId, bool enabled))
+    SLOT(void changeNetworkScope(QString scope))
 
     // Price a send without side effects — safe to call on every edit.
     SLOT(void quote(QString requestJson))
@@ -207,14 +212,14 @@ class EthWalletUi
     // the common case from a send form.
     SLOT(void saveContact(QString address, QString name))
     SLOT(void forgetContact(QString address))
-    // Search the catalogue offered on the active chain. The query goes to the BACKEND: the
+    // Search the catalogue offered on the UI-local Manage-token chain. The query goes to the BACKEND: the
     // embedded Uniswap list is thousands of rows and may not be pulled into the view to be
     // filtered there.
     SLOT(void searchTokens(QString query))
     // The next page of the current answer, asked for as the list scrolls to its end. Ignored
     // while a call is live or once the answer said it was complete.
     SLOT(void loadMoreTokens())
-    // Enable or disable one token for the active chain, then re-read the balances — the
+    // Enable or disable one token for the UI-local Manage-token chain, then re-read balances — the
     // backend call emits no event, so nothing else would move the Tokens tab.
     SLOT(void setTokenEnabled(QString address, bool enabled))
 }

@@ -35,6 +35,99 @@ inline QString unknownVerdict(int chainId, const QString &why)
     return QString::fromUtf8(QJsonDocument(v).toJson(QJsonDocument::Compact));
 }
 
+/// Keep the UI-local Send/Manage-token chain while it remains in scope; otherwise use the
+/// first provider-ordered choice. An empty scope has no cursor.
+inline int chooseChain(const QJsonArray &networks, int current)
+{
+    for (const QJsonValue &value : networks) {
+        if (value.toObject().value(QStringLiteral("chainId")).toInt() == current)
+            return current;
+    }
+    return networks.isEmpty() ? 0
+                              : networks.first().toObject().value(QStringLiteral("chainId")).toInt();
+}
+
+inline QJsonObject networkAt(const QJsonArray &networks, int chainId)
+{
+    for (const QJsonValue &value : networks) {
+        const QJsonObject row = value.toObject();
+        if (row.value(QStringLiteral("chainId")).toInt() == chainId)
+            return row;
+    }
+    return {};
+}
+
+/// Turn the composer's per-chain balance answer into the flat row list the view renders.
+/// Successful rows keep their chain and route; one failed chain becomes one explicit blocked
+/// row, so a required proxy on one network never blanks the others.
+inline QString flattenBalances(const QString &reply, const QJsonArray &networks, int cursorChain)
+{
+    QJsonObject top = parseObject(reply);
+    if (!top.value(QStringLiteral("ok")).toBool())
+        return reply;
+    QJsonArray rows;
+    QString cursorRoute;
+    for (const QJsonValue &value : top.value(QStringLiteral("chains")).toArray()) {
+        const QJsonObject chain = value.toObject();
+        const int chainId = chain.value(QStringLiteral("chainId")).toInt();
+        const QJsonObject network = networkAt(networks, chainId);
+        if (chain.value(QStringLiteral("ok")).toBool()) {
+            const QString route = chain.value(QStringLiteral("route")).toString();
+            if (chainId == cursorChain)
+                cursorRoute = route;
+            for (const QJsonValue &balanceValue : chain.value(QStringLiteral("balances")).toArray()) {
+                QJsonObject balance = balanceValue.toObject();
+                balance.insert(QStringLiteral("chainId"), chainId);
+                balance.insert(QStringLiteral("network"), network.value(QStringLiteral("name")));
+                balance.insert(QStringLiteral("testnet"), network.value(QStringLiteral("testnet")));
+                balance.insert(QStringLiteral("route"), route);
+                rows.append(balance);
+            }
+        } else {
+            QJsonObject blocked{{QStringLiteral("chainId"), chainId},
+                                {QStringLiteral("network"), network.value(QStringLiteral("name"))},
+                                {QStringLiteral("testnet"), network.value(QStringLiteral("testnet"))},
+                                {QStringLiteral("blocked"), true},
+                                {QStringLiteral("error"), chain.value(QStringLiteral("error"))}};
+            if (chain.contains(QStringLiteral("verifiedProxy")))
+                blocked.insert(QStringLiteral("verifiedProxy"), chain.value(QStringLiteral("verifiedProxy")));
+            rows.append(blocked);
+        }
+    }
+    top.remove(QStringLiteral("chains"));
+    // The composer has no active chain. Stamp the UI-local cursor only at this adapter
+    // boundary so the existing freshness guard can still reject a late cursor reply.
+    top.insert(QStringLiteral("chainId"), cursorChain);
+    top.insert(QStringLiteral("balances"), rows);
+    top.insert(QStringLiteral("route"), cursorRoute);
+    return toJsonCompact(top);
+}
+
+/// History is a multi-chain composer reply too. The transactions retain their real chainId;
+/// this top-level field exists only for the UI's account+cursor freshness guard.
+inline QString scopeComposerHistory(const QString &reply, int cursorChain)
+{
+    QJsonObject top = parseObject(reply);
+    if (!top.value(QStringLiteral("ok")).toBool())
+        return reply;
+    top.insert(QStringLiteral("chainId"), cursorChain);
+    return toJsonCompact(top);
+}
+
+/// Select one verdict from the composer's multi-chain report for the local send cursor.
+inline QString verdictForChain(const QString &reply, int chainId)
+{
+    const QJsonObject top = parseObject(reply);
+    if (!top.value(QStringLiteral("ok")).toBool())
+        return {};
+    for (const QJsonValue &value : top.value(QStringLiteral("chains")).toArray()) {
+        const QJsonObject row = value.toObject();
+        if (row.value(QStringLiteral("chainId")).toInt() == chainId)
+            return toJsonCompact(row.value(QStringLiteral("verdict")).toObject());
+    }
+    return {};
+}
+
 /// Balances. The reply names the account and chain it read, so one naming another selection is
 /// not late — it is about something else. Dropped whole: it may not stamp freshness either.
 inline Applied applyBalances(ScopedState &s, const QString &reply)

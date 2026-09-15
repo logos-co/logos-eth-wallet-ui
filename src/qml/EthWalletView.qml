@@ -9,8 +9,9 @@ import "qrcodegen.js" as QrGen
 // The Ethereum wallet.
 //
 // Information design follows MetaMask: one question per screen, everything else behind a
-// disclosure. Four sections, no action button above the tab strip, and the active network
-// visible at all times — a user must never be able to mistake which chain they are spending on.
+// disclosure. Five sections, no action button above the tab strip, and both the portfolio
+// scope and Send's selected network stay explicit — a user must never be able to mistake
+// which chains they are reading or which chain they are spending on.
 //
 // This view holds no secret. It requests signatures and reads which accounts exist; the vault
 // password is taken only by evm_signer_ui, and seed phrases only ever reach evm_keystore_ui.
@@ -258,6 +259,10 @@ Item {
 
     readonly property var net: ready ? j(backend.activeNetworkJson, "{}") : ({})
     readonly property var networks: ready ? j(backend.networksJson, "[]") : []
+    readonly property var configuredNetworks: ready ? j(backend.configuredNetworksJson, "[]") : []
+    readonly property string networkScope: ready ? backend.networkScope : "mainnets"
+    readonly property var mainnetChains: configuredNetworks.filter(function (n) { return n.testnet !== true })
+    readonly property var testnetChains: configuredNetworks.filter(function (n) { return n.testnet === true })
     readonly property var accounts: ready ? j(backend.accountsJson, "[]") : []
     // { "<lowercase hex, no 0x>": "<name>" }, relayed from the keystore.
     readonly property var accountLabels: ready ? j(backend.accountLabelsJson, "{}") : ({})
@@ -267,8 +272,8 @@ Item {
     // Same rule as the balances: unknown AND being read spins, unknown and idle does not.
     readonly property bool feesPending: feeTiersLoading && root.fees.source === undefined
 
-    // eth_rpc's verdict for the active chain, relayed by the backend. `blocking` true means
-    // this view is deliberately showing no chain data at all.
+    // eth_rpc's verdict for the UI-local selected chain, relayed by the backend. Per-chain
+    // portfolio failures remain attached to their own balance rows.
     readonly property var vp: ready ? j(backend.verifiedProxyJson, "{}") : ({})
     // Verification is on unless a verdict we could read says "off".
     readonly property bool verificationOn: ready && vp.mode !== undefined && vp.mode !== "off"
@@ -338,6 +343,7 @@ Item {
     // balances leg, not the lane: the lane stays up through the history call that follows.
     readonly property bool balancesPending: !balancesKnown && balancesLoading
     readonly property var balances: balancesKnown ? j(backend.balancesJson, "[]") : []
+    readonly property var balanceFailures: balances.filter(function (row) { return row.blocked === true })
     // eth_rpc's label for the read behind the balances on screen — the ONLY thing here that
     // can be proof-backed. Withdrawn with them: a claim cannot outlive the figure it is about.
     readonly property string balancesRoute: balancesKnown ? backend.balancesRoute : ""
@@ -359,6 +365,9 @@ Item {
     // Chain-scoped: withdrawn on a network change, and re-read in the same turn.
     readonly property bool tokensKnown: ready && backend.tokensJson.length > 0
     readonly property var tokens: tokensKnown ? j(backend.tokensJson, "[]") : []
+    readonly property var chainTokens: tokens.filter(function (token) {
+        return token.chainId === undefined || token.chainId === root.chainId
+    })
 
     // The persisted token order, from the published scope. Normalised to the closed set the
     // menu offers: an order this build does not know is shown as no order at all — a menu
@@ -400,8 +409,9 @@ Item {
     // page declares itself; an objectName is the harness's handle, not an identity to key on.
     readonly property bool manageTokensOpen:
         nav && nav.currentItem !== null && nav.currentItem.isTokenCatalogue === true
-    // The active chain as a typed int, so the handler below fires on a network CHANGE rather
-    // than on every republish of the same one. 0 is a network that could not be read.
+    // The UI-local chain cursor as a typed int, so the handler below fires on a selection
+    // CHANGE rather than on every republish of the same one. The composer owns no active
+    // chain; 0 means no configured in-scope chain can be selected.
     readonly property int chainId: net.chainId !== undefined ? net.chainId : 0
     // A token is offered PER CHAIN and the listing names the chain it answered for, so a
     // network moving under an open Manage tokens leaves every row withheld — and nothing else
@@ -495,7 +505,26 @@ Item {
     // The chain's own currency as an identity. It has no contract, so it is matched by the one
     // key an address cannot spell rather than by whatever symbol the network calls it.
     readonly property var nativeToken: ({ native: true })
-    // How every screen names the active network, and what it says when it does not know it.
+    function networkById(id) {
+        var i
+        for (i = 0; i < networks.length; ++i)
+            if (networks[i].chainId === id) return networks[i]
+        for (i = 0; i < configuredNetworks.length; ++i)
+            if (configuredNetworks[i].chainId === id) return configuredNetworks[i]
+        return ({ chainId: id })
+    }
+    function networkIndex(id) {
+        for (var i = 0; i < networks.length; ++i)
+            if (networks[i].chainId === id) return i
+        return -1
+    }
+    function networkNameFor(id) {
+        var n = networkById(id)
+        if (n.name === undefined || String(n.name).length === 0) return "Chain " + id
+        return n.name + (n.testnet === true ? " (testnet)" : "")
+    }
+    function scopeIndex(scope) { return scope === "testnets" ? 1 : scope === "both" ? 2 : 0 }
+    // How cursor-scoped screens name their selected network.
     function networkLabel() { return netKnown ? netName + (isTestnet ? " (testnet)" : "") : "—" }
     readonly property bool isTestnet: net.testnet === true
     readonly property bool sendPending: ready && backend.pendingRequestId.length > 0
@@ -553,6 +582,7 @@ Item {
     // tokenPicker.syncIndex(), which reads it back off sendPage. Reversed, the picker resyncs
     // to whatever was there and the caller's choice is dropped silently.
     function openSend(t) {
+        if (t && t.chainId !== undefined) root.backend.selectChain(t.chainId)
         sendPage.selectToken(t)
         root.selectTab(1)
     }
@@ -775,9 +805,10 @@ Item {
     // native currency has no contract, so it takes the one key an address cannot spell.
     function tokenKey(t) {
         if (!t) return ""
-        if (t.native === true) return "native"
-        if (typeof t.address === "string" && t.address.length > 0) return t.address.toLowerCase()
-        return t.symbol ? "sym:" + t.symbol : ""
+        var chain = t.chainId !== undefined ? String(t.chainId) + ":" : ""
+        if (t.native === true) return chain + "native"
+        if (typeof t.address === "string" && t.address.length > 0) return chain + t.address.toLowerCase()
+        return t.symbol ? chain + "sym:" + t.symbol : ""
     }
 
     // Symbols more than one row in `list` answers to.
@@ -1421,6 +1452,12 @@ Item {
                             text: root.txTitle(modelData)
                         }
                         Item { Layout.fillWidth: true }
+                        LogosBadge {
+                            objectName: "txChain_" + modelData.hash
+                            text: root.networkNameFor(modelData.chainId)
+                            color: root.networkById(modelData.chainId).testnet === true
+                                   ? Theme.palette.accentOrange : Theme.palette.textSecondary
+                        }
                         // The badge the receipt sweep moves from pending to confirmed.
                         LogosBadge {
                             objectName: "txStatus_" + modelData.hash
@@ -1534,7 +1571,8 @@ Item {
             Item { Layout.fillWidth: true }
         }
 
-        // The selected account's address, and what network the figures above it are on.
+        // The selected account's address and the device-wide portfolio scope. Send and
+        // Manage tokens have their own explicit chain pickers below.
         RowLayout {
             Layout.fillWidth: true
             spacing: Theme.spacing.small
@@ -1559,15 +1597,14 @@ Item {
 
             Item { Layout.fillWidth: true }
 
-            // Testnets are visually distinct so mainnet cannot be mistaken for one.
+            // This is a portfolio scope, not an "active network": the read-only tabs now
+            // compose every enabled chain in the selected scope.
             LogosBadge {
                 objectName: "chainChip"
-                text: !root.netKnown ? "—"
-                    : root.isTestnet ? root.netName.toUpperCase() + " · TESTNET"
-                                     : root.netName.toUpperCase()
-                color: !root.netKnown ? Theme.palette.textSecondary
-                     : root.isTestnet ? Theme.palette.accentOrange
-                                      : Theme.palette.success
+                text: root.networkScope === "testnets" ? "TESTNETS"
+                    : root.networkScope === "both" ? "MAINNETS + TESTNETS" : "MAINNETS"
+                color: root.networkScope === "testnets" || root.networkScope === "both"
+                       ? Theme.palette.accentOrange : Theme.palette.success
             }
 
             // What was actually proved for the numbers on screen. Hidden only on a
@@ -1632,8 +1669,8 @@ Item {
             }
         }
 
-        // A row can be frozen at "pending" by the proxy on ITS OWN chain, which may not be
-        // the one on screen — the banner above is keyed on the active chain and never says so.
+        // A row can be frozen at "pending" by the proxy on ITS OWN chain, which may differ
+        // from Send's local network cursor. Keep that chain on the row.
         LogosFrame {
             objectName: "blockedChainsFrame"
             Layout.fillWidth: true
@@ -1773,13 +1810,40 @@ Item {
                             }
                         }
 
+                        // A required proxy may block one chain while every other chain still
+                        // answers. Keep the portfolio visible and put the refusal on its row.
+                        LogosFrame {
+                            id: balanceFailuresFrame
+                            objectName: "balanceFailuresFrame"
+                            visible: root.balanceFailures.length > 0
+                            anchors {
+                                top: tokenSortStrip.visible ? tokenSortStrip.bottom : parent.top
+                                left: parent.left; right: parent.right
+                            }
+                            contentItem: ColumnLayout {
+                                spacing: Theme.spacing.tiny
+                                Repeater {
+                                    model: root.balanceFailures
+                                    LogosText {
+                                        objectName: "balanceFailure_" + modelData.chainId
+                                        Layout.fillWidth: true
+                                        textFormat: Text.PlainText
+                                        wrapMode: Text.WordWrap
+                                        color: Theme.palette.warning
+                                        text: (modelData.network || root.networkNameFor(modelData.chainId))
+                                              + " balances unavailable: " + (modelData.error || "read refused")
+                                    }
+                                }
+                            }
+                        }
+
                         LogosListView {
                             objectName: "tokenList"
                             // Under the strip, so a row never scrolls behind the control
                             // that orders it.
                             anchors {
-                                top: tokenSortStrip.visible ? tokenSortStrip.bottom
-                                                            : parent.top
+                                top: balanceFailuresFrame.visible ? balanceFailuresFrame.bottom
+                                   : tokenSortStrip.visible ? tokenSortStrip.bottom : parent.top
                                 left: parent.left; right: parent.right
                                 bottom: parent.bottom
                             }
@@ -1809,10 +1873,21 @@ Item {
 
                                     ColumnLayout {
                                         spacing: 0
-                                        LogosText {
-                                            textFormat: Text.PlainText
-                                            text: modelData.symbol
-                                            font.weight: Theme.typography.weightMedium
+                                        RowLayout {
+                                            spacing: Theme.spacing.tiny
+                                            LogosText {
+                                                textFormat: Text.PlainText
+                                                text: modelData.symbol
+                                                font.weight: Theme.typography.weightMedium
+                                            }
+                                            LogosBadge {
+                                                objectName: "tokenChain_" + root.tokenKey(modelData)
+                                                text: modelData.network !== undefined
+                                                      ? modelData.network : root.networkNameFor(modelData.chainId)
+                                                color: modelData.testnet === true
+                                                       ? Theme.palette.accentOrange
+                                                       : Theme.palette.textSecondary
+                                            }
                                         }
                                         RowLayout {
                                             spacing: Theme.spacing.tiny
@@ -1867,7 +1942,7 @@ Item {
                             objectName: "tokensEmpty"
                             anchors.centerIn: parent
                             visible: root.tokensKnown && root.tokens.length === 0
-                            text: "No tokens on this network"
+                            text: "No assets in this scope"
                             color: Theme.palette.textSecondary
                         }
                         // A list nothing read is not a network with no tokens on it. No
@@ -1984,13 +2059,16 @@ Item {
                                                       && typeof t.address === "string" ? t.address : ""
                         }
 
-                        // Where the chosen token sits in root.tokens, 0 (the native currency) when it is not
-                        // there. By identity: matching the symbol landed on the first contract wearing it.
+                        // Where the chosen token sits in the cursor chain's offered set, 0 (the native
+                        // currency) when it is not there. By identity: symbols can collide.
                         function tokenIndex() {
-                            var k = sendPage.tokenAddress.length ? sendPage.tokenAddress.toLowerCase()
-                                                                   : "native"
-                            for (var i = 0; i < root.tokens.length; ++i)
-                                if (root.tokenKey(root.tokens[i]) === k) return i
+                            var selectedToken = { chainId: root.chainId,
+                                                  native: sendPage.tokenAddress.length === 0 }
+                            if (sendPage.tokenAddress.length)
+                                selectedToken.address = sendPage.tokenAddress
+                            var k = root.tokenKey(selectedToken)
+                            for (var i = 0; i < root.chainTokens.length; ++i)
+                                if (root.tokenKey(root.chainTokens[i]) === k) return i
                             return 0
                         }
 
@@ -2040,6 +2118,7 @@ Item {
 
                                 function request() {
                                     var r = {
+                                        chainId: root.chainId,
                                         from: root.selected,
                                         to: toField.text.trim(),
                                         // TOKEN units — "0.1" ETH, not 10^17 wei. `amount` still means base units
@@ -2075,6 +2154,23 @@ Item {
                                 // list being re-read under an open dialog, the account moving beneath it.
                                 onFormRequestChanged: if (sendPage.visible) reprice()
 
+                                // Sending is deliberately single-chain even though the read-only wallet is a
+                                // portfolio. This picker moves only this view's cursor; it changes no device state.
+                                LogosComboBox {
+                                    id: sendNetworkPicker
+                                    objectName: "sendNetworkPicker"
+                                    Layout.fillWidth: true
+                                    model: root.networks.map(function (n) { return root.networkNameFor(n.chainId) })
+                                    enabled: root.ready && root.networks.length > 0 && !root.sendPending
+                                    onActivated: root.backend.selectChain(root.networks[currentIndex].chainId)
+                                }
+                                Binding {
+                                    target: sendNetworkPicker
+                                    property: "currentIndex"
+                                    value: root.networkIndex(root.chainId)
+                                    restoreMode: Binding.RestoreNone
+                                }
+
                                 // Which token is leaving the account. Without this the header Send could only
                                 // ever move the native currency.
                                 LogosComboBox {
@@ -2083,9 +2179,9 @@ Item {
                                     Layout.fillWidth: true
                                     // A composed string model, not textRole: it matches accountPicker's shape and
                                     // needs no role plumbing.
-                                    model: root.tokens.map(function (t) { return root.tokenPickerLabel(t) })
-                                    enabled: root.ready && root.tokens.length > 0
-                                    onActivated: sendPage.selectToken(root.tokens[currentIndex])
+                                    model: root.chainTokens.map(function (t) { return root.tokenPickerLabel(t) })
+                                    enabled: root.ready && root.chainTokens.length > 0
+                                    onActivated: sendPage.selectToken(root.chainTokens[currentIndex])
 
                                     // Re-asserted, not bound, exactly as accountPicker: ComboBox rewrites
                                     // currentIndex imperatively and resets it when the model is re-read — and the
@@ -2093,7 +2189,8 @@ Item {
                                     // answers to one question.
                                     function syncIndex() {
                                         currentIndex = sendPage.tokenIndex()
-                                        if (root.tokens.length) sendPage.selectToken(root.tokens[currentIndex])
+                                        if (root.chainTokens.length)
+                                            sendPage.selectToken(root.chainTokens[Math.max(0, currentIndex)])
                                     }
                                     Component.onCompleted: syncIndex()
                                     onModelChanged: syncIndex()
@@ -2810,7 +2907,10 @@ Item {
 
                         DetailRow {
                             label: "Network"
-                            value: root.networkLabel()
+                            value: tokenPage.tok.network !== undefined
+                                   ? tokenPage.tok.network
+                                     + (tokenPage.tok.testnet === true ? " (testnet)" : "")
+                                   : root.networkNameFor(tokenPage.tok.chainId)
                         }
                         RowDivider {}
                         // The native currency has no contract. An empty chip would read as an
@@ -3219,7 +3319,7 @@ Item {
                             RowDivider {}
                             DetailRow {
                                 label: "Network"
-                                value: root.networkLabel()
+                                value: root.networkNameFor(txPage.rec.chainId)
                             }
                             RowDivider {}
                             DetailRow {
@@ -3520,26 +3620,18 @@ Item {
                     Item { Layout.fillWidth: true }
                 }
 
-                // Read-only here: eth_rpc's chains.json is DEVICE-WIDE and shared with every
-                // Logos wallet, so this wallet reports it and the Ethereum RPC app owns it.
-                // The button below asks for that app by capability rather than by name, so a
-                // second implementation of it would serve this just as well.
                 LogosText {
                     objectName: "rpcSettingsNote"
                     Layout.fillWidth: true
                     wrapMode: Text.WordWrap
                     textFormat: Text.PlainText
                     color: Theme.palette.textSecondary
-                    text: "Endpoint: " + (root.net.rpcUrl && root.net.rpcUrl.length
-                                          ? root.net.rpcUrl : "not set")
-                          + "\nVerified routing: "
-                          + (root.vp.mode !== undefined ? root.vp.mode : "unknown")
-                          + "\n\nThese are shared with every Logos wallet on this device, and "
-                          + "are changed in the Ethereum RPC app."
+                    text: "Enabled chains and scope are shared by every Logos wallet on this "
+                          + "device. Endpoints and verified-routing policy remain in Ethereum RPC."
                 }
                 LogosButton {
                     objectName: "openRpcSettingsButton"
-                    text: "Change these"
+                    text: "Edit endpoints and routing"
                     onClicked: root.askFor("evm.rpc.configure",
                                            "Nothing on this device offers to change them.")
                 }
@@ -3553,22 +3645,80 @@ Item {
                     text: root.intentNote
                 }
 
-                LogosText {
-                    text: "Active network"
-                    color: Theme.palette.textSecondary
-                    Layout.topMargin: Theme.spacing.small
+                RowLayout {
+                    Layout.fillWidth: true
+                    LogosText {
+                        text: "Portfolio scope"
+                        color: Theme.palette.textSecondary
+                    }
+                    Item { Layout.fillWidth: true }
+                    LogosComboBox {
+                        id: walletScopePicker
+                        objectName: "walletNetworkScopePicker"
+                        model: ["Mainnets", "Testnets", "Both"]
+                        enabled: root.ready
+                        onActivated: root.backend.changeNetworkScope(
+                            currentIndex === 1 ? "testnets" : currentIndex === 2 ? "both" : "mainnets")
+                    }
+                    Binding {
+                        target: walletScopePicker
+                        property: "currentIndex"
+                        value: root.scopeIndex(root.networkScope)
+                        restoreMode: Binding.RestoreNone
+                    }
                 }
-                // One at a time, and the one in force is disabled rather than hidden: a
-                // selector that drops the current choice is a selector that cannot say what
-                // it is.
+
+                LogosText { text: "Mainnets"; color: Theme.palette.textSecondary }
                 Repeater {
-                    model: root.networks
-                    LogosButton {
-                        objectName: "network_" + modelData.key
+                    model: root.mainnetChains
+                    delegate: RowLayout {
+                        required property var modelData
                         Layout.fillWidth: true
-                        text: modelData.name + (modelData.testnet ? " (testnet)" : "")
-                        enabled: root.ready && modelData.chainId !== root.net.chainId
-                        onClicked: root.backend.setActiveChain(modelData.chainId)
+                        LogosText {
+                            Layout.fillWidth: true
+                            textFormat: Text.PlainText
+                            text: modelData.name + " · " + modelData.chainId
+                        }
+                        LogosSwitch {
+                            id: mainnetEnabledSwitch
+                            objectName: "walletChainEnabled_" + modelData.chainId
+                            text: modelData.inScope === true ? "Enabled · in scope" : "Enabled"
+                            enabled: root.ready
+                            onToggled: root.backend.changeChainEnabled(modelData.chainId, checked)
+                        }
+                        Binding {
+                            target: mainnetEnabledSwitch
+                            property: "checked"
+                            value: modelData.enabled === true
+                            restoreMode: Binding.RestoreNone
+                        }
+                    }
+                }
+
+                LogosText { text: "Testnets"; color: Theme.palette.textSecondary }
+                Repeater {
+                    model: root.testnetChains
+                    delegate: RowLayout {
+                        required property var modelData
+                        Layout.fillWidth: true
+                        LogosText {
+                            Layout.fillWidth: true
+                            textFormat: Text.PlainText
+                            text: modelData.name + " · " + modelData.chainId
+                        }
+                        LogosSwitch {
+                            id: testnetEnabledSwitch
+                            objectName: "walletChainEnabled_" + modelData.chainId
+                            text: modelData.inScope === true ? "Enabled · in scope" : "Enabled"
+                            enabled: root.ready
+                            onToggled: root.backend.changeChainEnabled(modelData.chainId, checked)
+                        }
+                        Binding {
+                            target: testnetEnabledSwitch
+                            property: "checked"
+                            value: modelData.enabled === true
+                            restoreMode: Binding.RestoreNone
+                        }
                     }
                 }
                 Item { Layout.fillHeight: true }
@@ -3823,7 +3973,9 @@ Item {
         }
     }
 
-    // Everything offered on the active chain, each row with a switch. The list is the
+    // Everything offered on the catalogue screen's selected chain, each row with a switch.
+    // That picker is UI-local; it does not alter a device-wide or composer "active" chain.
+    // The list is the
     // BACKEND's answer to a query — never the whole catalogue filtered here, because the
     // embedded Uniswap list is thousands of rows.
     Component {
@@ -3936,15 +4088,21 @@ Item {
                     onTriggered: managePage.searchSlow = true
                 }
 
-                // Which chain the rows below are offered on. A token is enabled per network,
-                // so a screen that did not name one would be asking about nothing in particular.
-                LogosText {
+                // Token membership is per chain, so this settings screen has its own explicit
+                // cursor over the enabled in-scope registry.
+                LogosComboBox {
+                    id: manageTokensNetworkPicker
                     objectName: "manageTokensNetwork"
                     Layout.fillWidth: true
-                    textFormat: Text.PlainText
-                    text: root.networkLabel()
-                    color: Theme.palette.textSecondary
-                    font.pixelSize: Theme.typography.secondaryText
+                    model: root.networks.map(function (n) { return root.networkNameFor(n.chainId) })
+                    enabled: root.ready && root.networks.length > 0 && !root.tokenToggleBusy
+                    onActivated: root.backend.selectChain(root.networks[currentIndex].chainId)
+                }
+                Binding {
+                    target: manageTokensNetworkPicker
+                    property: "currentIndex"
+                    value: root.networkIndex(root.chainId)
+                    restoreMode: Binding.RestoreNone
                 }
 
                 // What enabling a row actually means. The badge on each row says which list an
@@ -4258,7 +4416,7 @@ Item {
             DetailRow {
                 objectName: "intentSendNetwork"
                 label: "Network"
-                value: root.networkLabel()
+                value: root.networkNameFor(root.intentSend.chainId)
             }
             LogosText {
                 text: "Transactions to approve"
@@ -4346,7 +4504,8 @@ Item {
                 LogosButton {
                     objectName: "intentSendAccept"
                     variant: LogosButton.Variant.Primary
-                    text: root.netKnown ? "Send on " + root.networkLabel() : "Send"
+                    text: root.intentSend.chainId !== undefined
+                          ? "Send on " + root.networkNameFor(root.intentSend.chainId) : "Send"
                     enabled: root.ready && !root.sendPending && !root.intentSendPricing
                     onClicked: root.backend.acceptIntentSend()
                 }

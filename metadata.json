@@ -5,7 +5,7 @@
   "type": "ui_qml",
   "interface": "universal",
   "category": "wallet",
-  "description": "Send ether on one Ethereum network at a time, with the full set of fee controls. Holds no key material.",
+  "description": "View EVM assets and activity across enabled networks, and send on an explicitly selected chain. Holds no key material.",
   "author": "Logos Core Team",
   "main": "eth_wallet_ui_plugin",
   "icon": "src/icons/eth_wallet.png",
@@ -56,7 +56,7 @@
           "name": "chainId",
           "type": "number",
           "required": false,
-          "description": "Must be the wallet's active network; absent means it"
+          "description": "Must be enabled and in the current device scope; absent uses the wallet's local Send-network selection"
         },
         {
           "name": "from",
