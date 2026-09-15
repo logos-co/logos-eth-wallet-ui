@@ -23,6 +23,9 @@ re-entrant, stale `list_networks` reply from overwriting a newer choice.
 Balances arrive as per-chain results. A healthy chain remains visible when another is blocked
 or unreadable; the failed chain gets an explicit row rather than being rendered as zero.
 Activity is filtered by the same scope and each transaction retains its recorded `chainId`.
+The Tokens toolbar can refresh balances on demand. It enters the same single-flight lane as
+automatic token, account and network updates, so repeated requests coalesce instead of
+starting concurrent portfolio reads.
 
 Every asynchronous reply is checked against the account, chain and request it names before it
 can reach the screen. Selection changes withdraw narrower data first, so a previous account or

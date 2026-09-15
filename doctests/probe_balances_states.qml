@@ -190,9 +190,7 @@ Item {
 
     function assertRetryAsksAgain() {
         console.log("")
-        console.log("Retry is the only re-read this view has: nothing else here calls refresh,")
-        console.log("so without it a failed first read is a dead wallet until the user")
-        console.log("navigates away and back")
+        console.log("the global refusal still carries its local Retry action")
         var btn = probe.find(view.item, "errorRetryButton")
         if (!btn) {
             probe.failures++
@@ -203,6 +201,21 @@ Item {
         check("it asked the backend", fake.refreshCalls, 1)
         check("...and the banner cleared with it", probe.shown("errorLabel"), false)
         check("...taking the button with it", probe.shown("errorRetryButton"), false)
+    }
+
+    function assertToolbarRefreshAsksAgain() {
+        console.log("")
+        console.log("a per-chain refusal has no global Retry banner, so the Tokens toolbar")
+        console.log("provides the on-demand balance re-read")
+        var btn = probe.find(view.item, "balancesRefreshButton")
+        if (!btn) {
+            probe.failures++
+            console.log("  FAIL  balancesRefreshButton is not in the tree")
+            return
+        }
+        check("the button is ready between balance reads", btn.enabled, true)
+        btn.clicked()
+        check("it asked the backend", fake.refreshCalls, 2)
     }
 
     function assertARereadKeepsTheOldFigure() {
@@ -253,6 +266,7 @@ Item {
             } else if (probe.phase === 4) {
                 probe.assertARefusalIsNotASpinner()
                 probe.assertRetryAsksAgain()
+                probe.assertToolbarRefreshAsksAgain()
                 fake.balancesJson = probe.answered
                 fake.dataLoading = false
                 // A re-read over a known figure.

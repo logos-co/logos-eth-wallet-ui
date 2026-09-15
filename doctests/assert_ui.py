@@ -703,9 +703,8 @@ check("...the lane lowers it too",
       bool(lane_lowers) and "setBalancesLoading(false)" in lane_lowers.group(0), True)
 
 print()
-print("   and a refusal has a way out. Nothing else in this view calls refresh(), the network")
-print("   retry covers a network read alone, and the receipt sweep cannot arm on a refusal —")
-print("   so without this button a failed first read is a wallet the user cannot re-read.")
+print("   and a global refusal has a local way out. Per-chain balance failures instead use")
+print("   the Tokens toolbar refresh asserted below, beside the rows that name the failure.")
 check("the banner carries a retry", qml_binding("errorRetryButton", "onClicked"),
       "onClicked: root.backend.refresh()")
 print("   and the gate is on the ROW, so the two cannot drift apart — and so the row")
@@ -741,7 +740,7 @@ print("   system's own copy button was the only one that did, and it looked like
 print("   out in a row of three. It was the one that was right.")
 check("no icon button is a bare LogosIconButton",
       re.findall(r"^\s*LogosIconButton \{", qml, re.M), [])
-check("...they all come from the one hover-aware rule", len(icon_buttons), 12)
+check("...they all come from the one hover-aware rule", len(icon_buttons), 13)
 check("...which is stated once", qml.count("component HoverIcon:"), 1)
 check("...and the tint follows the cursor",
       qml_binding("HoverIcon", "iconColor") or
@@ -930,6 +929,13 @@ check("...and the button is what opens that menu",
       "tokenSortMenu.popupUnder(tokenSortButton)" in " ".join(qml_item("tokenSortButton")), True)
 check("the strip is gone when there is nothing to order",
       qml_binding("tokenSortStrip", "visible"), "visible: root.tokens.length > 0")
+balance_refresh = " ".join(qml_item("balancesRefreshButton"))
+check("the Tokens toolbar can refresh balances on demand",
+      "onClicked: root.backend.refresh()" in balance_refresh, True)
+check("...and cannot stack another read while the balance leg is live",
+      "enabled: root.ready && !root.balancesLoading" in balance_refresh, True)
+check("...with an accessible name for the icon-only control",
+      'ToolTip.text: "Refresh balances"' in balance_refresh, True)
 print("   and the PERSISTED order is adopted from whichever portfolio listing lands first")
 check("both reads take the order off their reply",
       sorted(f for f in ("loadNetwork", "loadBalancesAndHistory")

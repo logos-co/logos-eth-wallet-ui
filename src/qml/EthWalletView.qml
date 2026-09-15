@@ -1680,6 +1680,20 @@ Item {
                             }
                             spacing: Theme.spacing.tiny
                             Item { Layout.fillWidth: true }
+                            // Per-chain balance failures live beside their rows rather than in
+                            // the global error banner, so its Retry button is intentionally not
+                            // present for them. Keep an explicit way to ask every balance again.
+                            HoverIcon {
+                                objectName: "balancesRefreshButton"
+                                size: 32
+                                iconSize: 16
+                                iconSource: root.iconRefresh
+                                enabled: root.ready && !root.balancesLoading
+                                ToolTip.text: "Refresh balances"
+                                ToolTip.visible: hovered
+                                ToolTip.delay: 400
+                                onClicked: root.backend.refresh()
+                            }
                             // Always on screen, so the order in force is readable without
                             // opening the menu that changes it.
                             LogosText {
