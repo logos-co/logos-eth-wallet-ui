@@ -113,7 +113,7 @@ def sample():
         'JSON.stringify({acct:selected,chain:(net.chainId||0),name:netName,'
         'bk:balancesKnown,hk:historyKnown,tk:tokensKnown,'
         'bal:balanceExact(nativeToken),rows:history.length,'
-        'chip:chipText(chipState(vp,balancesRoute)),loading:dataLoading})'}).get("result")
+        'scope:networkScope,loading:dataLoading})'}).get("result")
     try: return json.loads(r)
     except Exception: return {}
 def settle(want_acct=None, want_chain=None, tries=60):
@@ -480,8 +480,10 @@ check("...and an answer older than the registry is asked for again",
       in_order(net, "registryGen != m_registryGen", "m_refreshAgain = true", "return"), True)
 check("the UI cursor is chosen only from the answered in-scope registry",
       in_order(net, "chooseChain(networks", "adoptChain(chosen)"), True)
-check("the same answer publishes enabled rows, configured rows and scope",
-      in_order(net, "setNetworksJson", "setConfiguredNetworksJson", "setNetworkScope"), True)
+check("the same answer publishes in-scope rows and scope",
+      in_order(net, "setNetworksJson", "setNetworkScope"), True)
+check("...without publishing the out-of-scope registry into this UI contract",
+      "setConfiguredNetworksJson" in net, False)
 check("submitSend: witness, send, decide",
       in_order(fn_body("submitSend"), "gen = m_dataGen", ".send(requestJson)",
                "applySend(after, reply, selectionHeld(gen))"), True)
@@ -662,8 +664,6 @@ STILL_SYNC = {
                      "so the view re-reads rather than editing its published copy",
     "save_contact": "the address book, which reaches no chain and writes one small file",
     "forget_contact": "the address book",
-    "set_chain_enabled": "the Networks screen, relayed to eth_rpc's registry",
-    "set_network_scope": "the Networks screen, relayed to eth_rpc's registry",
     "send": "the send path, whose ordering witness is taken around the call",
     "send_status": "the send poll",
     "cancel_send": "the send path",
@@ -723,7 +723,7 @@ print("   #5C5C5C or #969696 SVG stays dark whatever iconColor asks for — whic
 print("   the back chevron and the trash read as disabled. The five dark ones are vendored")
 print("   into assets/ as white copies; delete them when the design system normalises.")
 check("only the neutral design-system icons are used directly",
-      sorted(set(re.findall(r"LogosIcons\.(\w+)", qml))), ["check", "close", "grid"])
+      sorted(set(re.findall(r"LogosIcons\.(\w+)", qml))), ["check", "close", "grid", "warning"])
 check("...and the vendored copies are all neutral",
       sorted({f for p in (VIEW.parent / "assets").glob("*.svg")
               for f in re.findall(r'fill="([^"]+)"', p.read_text())}),
@@ -936,6 +936,17 @@ check("...and cannot stack another read while the balance leg is live",
       "enabled: root.ready && !root.balancesLoading" in balance_refresh, True)
 check("...with an accessible name for the icon-only control",
       'ToolTip.text: "Refresh balances"' in balance_refresh, True)
+balance_error = " ".join(qml_item("balanceError_"))
+check("a failed chain replaces its balance with an error symbol",
+      "visible: !root.balancesPending && tokenRow.balanceFailure !== null" in balance_error,
+      True)
+check("...using the standard warning silhouette in the error colour",
+      "source: LogosIcons.warning" in balance_error
+      and "color: Theme.palette.error" in balance_error, True)
+check("...and hovering it exposes the provider's description",
+      "ToolTip.text: balanceErrorIcon.description" in balance_error
+      and "root.balanceFailureDescription(modelData)" in balance_error, True)
+check("the old detached failure banner is gone", "balanceFailuresFrame" in qml, False)
 print("   and the PERSISTED order is adopted from whichever portfolio listing lands first")
 check("both reads take the order off their reply",
       sorted(f for f in ("loadNetwork", "loadBalancesAndHistory")
@@ -972,6 +983,27 @@ forbidden_token_editor = ["manageTokensComponent", "manageTokensPage", "searchTo
                           "set_token_enabled"]
 check("Wallet exposes no catalogue or token-membership operation",
       [name for name in forbidden_token_editor if name in ownership_surface], [])
+
+print("0o1) Ethereum RPC owns the network selector; Wallet only reports its in-scope answer")
+forbidden_network_editor = ["walletNetworkScopePicker", "walletChainEnabled_",
+                            "changeChainEnabled", "changeNetworkScope",
+                            "configuredNetworksJson"]
+check("Wallet exposes no network-registry writer or out-of-scope listing",
+      [name for name in forbidden_network_editor if name in ownership_surface], [])
+check("the read-only groups are derived from the in-scope network answer",
+      "networks.filter" in qml_decl("mainnetChains")
+      and "networks.filter" in qml_decl("testnetChains"), True)
+networks_page = qml[qml.index('objectName: "networksPage"'):
+                    qml.index("// The address book")]
+check("each row carries its own verification indication",
+      'objectName: "walletNetworkVerification_"' in networks_page
+      and "root.verificationText(modelData)" in networks_page, True)
+check("the settings handoff remains the one network-changing action",
+      'objectName: "openRpcSettingsButton"' in networks_page
+      and 'text: "Change network settings"' in networks_page
+      and 'root.askFor("evm.rpc.configure"' in networks_page, True)
+check("the aggregate verification badge is gone from the wallet header",
+      'objectName: "verifiedChip"' in qml, False)
 
 print("0o2) the token screen says WHERE a row's name and decimals came from, for every answer")
 print("     the backend can give. eth_wallet_backend's list_tokens documents the vocabulary:")

@@ -32,8 +32,6 @@ public:
     void forgetContact(QString address) override;
     void selectAccount(QString address) override;
     void selectChain(int chainId) override;
-    void changeChainEnabled(int chainId, bool enabled) override;
-    void changeNetworkScope(QString scope) override;
     void quote(QString requestJson) override;
     void setQuoteAutoRefresh(bool on) override;
     void submitSend(QString requestJson) override;

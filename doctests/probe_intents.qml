@@ -158,8 +158,9 @@ Item {
                                                             nativeSymbol: "ETH", testnet: true })
         property string networksJson: JSON.stringify([{ chainId: 11155111, name: "Sepolia",
                                                         nativeSymbol: "ETH", testnet: true,
-                                                        enabled: true }])
-        property string configuredNetworksJson: networksJson
+                                                        enabled: true, inScope: true,
+                                                        verifiedProxyMode: "off",
+                                                        verifiedProxy: { mode: "off", state: "disabled" } }])
         property string networkScope: "testnets"
         property string verifiedProxyJson: JSON.stringify({ ok: true, chainId: 11155111,
                                                             mode: "off" })
@@ -536,8 +537,14 @@ Item {
         check("rpc endpoints", probe.lastRequest().intent, "evm.rpc.configure")
         check("...with no payload", JSON.stringify(probe.lastRequest().params), "{}")
         probe.answer({ ok: true, data: {}, error: "" })
-        check("...and the network selector is on that screen too, not in a dialog",
-              find(page, "walletChainEnabled_11155111") !== null || root_networksEmpty(), true)
+        check("...and the in-scope network is listed",
+              find(page, "walletNetworkRow_11155111") !== null, true)
+        check("...with its own verification setting",
+              find(page, "walletNetworkVerification_11155111").text, "Verification off")
+        check("...without copying Ethereum RPC's scope selector",
+              find(page, "walletNetworkScopePicker"), null)
+        check("...or its enable switch",
+              find(page, "walletChainEnabled_11155111"), null)
     }
 
     function assertTokenListsHop() {
@@ -556,10 +563,6 @@ Item {
               node("tokenListsIntentNote").text,
               "Nothing on this device manages token lists.")
     }
-
-    // The probe's fake publishes no network list, so the selector legitimately has no rows.
-    // Saying so beats an assertion that passes for the wrong reason.
-    function root_networksEmpty() { return view.item.networks.length === 0 }
 
     // ── the other direction: this wallet PROVIDES evm.transactions.send ──────────
     //

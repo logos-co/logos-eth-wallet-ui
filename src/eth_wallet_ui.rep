@@ -35,9 +35,6 @@ class EthWalletUi
     // app is the only writer.
     PROP(QString activeNetworkJson="{}" READONLY)
     PROP(QString networksJson="[]" READONLY)
-    // Every configured chain, including disabled and currently out-of-scope rows, for the
-    // Networks settings screen.
-    PROP(QString configuredNetworksJson="[]" READONLY)
     // Device-wide scope from eth_rpc_module: mainnets | testnets | both.
     PROP(QString networkScope="mainnets" READONLY)
 
@@ -159,10 +156,6 @@ class EthWalletUi
 
     // UI-local cursor used only by Send. It changes no device state.
     SLOT(void selectChain(int chainId))
-    // Device-wide chain registry controls relayed by the wallet composer.
-    SLOT(void changeChainEnabled(int chainId, bool enabled))
-    SLOT(void changeNetworkScope(QString scope))
-
     // Price a send without side effects — safe to call on every edit.
     SLOT(void quote(QString requestJson))
     // Re-price the open Send dialog on a timer. Off while the dialog is closed.

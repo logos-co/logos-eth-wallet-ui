@@ -259,10 +259,11 @@ Item {
 
     readonly property var net: ready ? j(backend.activeNetworkJson, "{}") : ({})
     readonly property var networks: ready ? j(backend.networksJson, "[]") : []
-    readonly property var configuredNetworks: ready ? j(backend.configuredNetworksJson, "[]") : []
     readonly property string networkScope: ready ? backend.networkScope : "mainnets"
-    readonly property var mainnetChains: configuredNetworks.filter(function (n) { return n.testnet !== true })
-    readonly property var testnetChains: configuredNetworks.filter(function (n) { return n.testnet === true })
+    // `networks` is already the device-wide in-scope set. Wallet renders that answer and
+    // delegates every edit to Ethereum RPC; it never reconstructs the registry's selector.
+    readonly property var mainnetChains: networks.filter(function (n) { return n.testnet !== true })
+    readonly property var testnetChains: networks.filter(function (n) { return n.testnet === true })
     readonly property var accounts: ready ? j(backend.accountsJson, "[]") : []
     // { "<lowercase hex, no 0x>": "<name>" }, relayed from the keystore.
     readonly property var accountLabels: ready ? j(backend.accountLabelsJson, "{}") : ({})
@@ -420,11 +421,8 @@ Item {
     // key an address cannot spell rather than by whatever symbol the network calls it.
     readonly property var nativeToken: ({ native: true })
     function networkById(id) {
-        var i
-        for (i = 0; i < networks.length; ++i)
+        for (var i = 0; i < networks.length; ++i)
             if (networks[i].chainId === id) return networks[i]
-        for (i = 0; i < configuredNetworks.length; ++i)
-            if (configuredNetworks[i].chainId === id) return configuredNetworks[i]
         return ({ chainId: id })
     }
     function networkIndex(id) {
@@ -437,7 +435,6 @@ Item {
         if (n.name === undefined || String(n.name).length === 0) return "Chain " + id
         return n.name + (n.testnet === true ? " (testnet)" : "")
     }
-    function scopeIndex(scope) { return scope === "testnets" ? 1 : scope === "both" ? 2 : 0 }
     // How cursor-scoped screens name their selected network.
     function networkLabel() { return netKnown ? netName + (isTestnet ? " (testnet)" : "") : "—" }
     readonly property bool isTestnet: net.testnet === true
@@ -536,28 +533,24 @@ Item {
         return ""
     }
 
-    // What the chip may claim: the verdict AND the route label for the balances on screen,
-    // because a `ready` proxy that returned a `proxied` balance proved nothing. `syncing` is
-    // not a state here — the banner says that in the backend's own words whenever it blocks.
-    function chipState(verdict, route) {
-        if (verdict.mode === undefined || verdict.mode === "off") return "hidden"
-        if (verdict.mode === "unknown" || verdict.state === undefined) return "unknown"
-        // The banner below is on screen for exactly this verdict. Whatever label the last
-        // good read left behind, the chip above it may not answer "verified".
-        if (verdict.blocking === true) return "unproved"
-        return route === "verified" ? "verified" : "unproved"
+    // Per-chain, and only on the Networks screen: an aggregate badge cannot honestly say
+    // "verified" when one chain is proof-backed and another is not. The setting and its
+    // current readiness remain distinct so "on" never silently means "proved".
+    function verificationText(n) {
+        var mode = n && n.verifiedProxyMode !== undefined ? n.verifiedProxyMode : "unknown"
+        var verdict = n && n.verifiedProxy !== undefined ? n.verifiedProxy : ({})
+        if (mode === "off") return "Verification off"
+        if (mode !== "required") return "Verification unknown"
+        if (verdict.usable === true) return "Verification on · ready"
+        if (verdict.state === "syncing") return "Verification on · syncing"
+        return "Verification on · unavailable"
     }
-    // Scoped on purpose: the balances are proof-backed, the Activity statuses and the Send
-    // fee figures are not, and one unqualified "Verified" claimed all three.
-    function chipText(s) {
-        if (s === "verified") return "Balances verified"
-        if (s === "unknown") return "Verification unknown"
-        return "Not verified"
-    }
-    function chipColor(s) {
-        if (s === "verified") return Theme.palette.success
-        if (s === "unknown") return Theme.palette.warning
-        return Theme.palette.error
+    function verificationColor(n) {
+        var mode = n && n.verifiedProxyMode !== undefined ? n.verifiedProxyMode : "unknown"
+        var verdict = n && n.verifiedProxy !== undefined ? n.verifiedProxy : ({})
+        if (mode === "off") return Theme.palette.textSecondary
+        if (mode !== "required" || verdict.state === "syncing") return Theme.palette.warning
+        return verdict.usable === true ? Theme.palette.success : Theme.palette.error
     }
 
     // What one of eth_rpc's route labels actually promises. `verified` is the only one that
@@ -657,6 +650,22 @@ Item {
     function balanceDisplay(t) { return balanceField(t, "display") }
     // Every digit. The detail screens use this, so 1 wei is readable somewhere.
     function balanceExact(t) { return balanceField(t, "exact") }
+
+    // A failed chain is carried as one explicit row beside the successful balance rows. Map
+    // it onto every token on that chain: an em-dash means unknown, while this symbol means a
+    // known read failure and its tooltip preserves the provider's explanation.
+    function balanceFailureFor(t) {
+        if (!t || t.chainId === undefined) return null
+        for (var i = 0; i < balanceFailures.length; ++i)
+            if (balanceFailures[i].chainId === t.chainId) return balanceFailures[i]
+        return null
+    }
+    function balanceFailureDescription(t) {
+        var failure = balanceFailureFor(t)
+        if (failure === null) return ""
+        var name = failure.network || networkNameFor(failure.chainId)
+        return name + " balances unavailable: " + (failure.error || "The balance read failed.")
+    }
 
     // The picker's row for an address. Case-folded: the keystore returns EIP-55 checksummed
     // hex and a caller may hand back any casing of the same account.
@@ -1499,15 +1508,6 @@ Item {
                        ? Theme.palette.accentOrange : Theme.palette.success
             }
 
-            // What was actually proved for the numbers on screen. Hidden only on a
-            // CONFIRMED "off": an unreadable mode is not the same answer as "off".
-            LogosBadge {
-                objectName: "verifiedChip"
-                readonly property string chip: root.chipState(root.vp, root.balancesRoute)
-                visible: root.ready && chip !== "hidden"
-                text: root.chipText(chip)
-                color: root.chipColor(chip)
-            }
         }
 
         // A badge cannot carry an instruction. When the wallet is showing nothing because the
@@ -1716,40 +1716,12 @@ Item {
                             }
                         }
 
-                        // A required proxy may block one chain while every other chain still
-                        // answers. Keep the portfolio visible and put the refusal on its row.
-                        LogosFrame {
-                            id: balanceFailuresFrame
-                            objectName: "balanceFailuresFrame"
-                            visible: root.balanceFailures.length > 0
-                            anchors {
-                                top: tokenSortStrip.visible ? tokenSortStrip.bottom : parent.top
-                                left: parent.left; right: parent.right
-                            }
-                            contentItem: ColumnLayout {
-                                spacing: Theme.spacing.tiny
-                                Repeater {
-                                    model: root.balanceFailures
-                                    LogosText {
-                                        objectName: "balanceFailure_" + modelData.chainId
-                                        Layout.fillWidth: true
-                                        textFormat: Text.PlainText
-                                        wrapMode: Text.WordWrap
-                                        color: Theme.palette.warning
-                                        text: (modelData.network || root.networkNameFor(modelData.chainId))
-                                              + " balances unavailable: " + (modelData.error || "read refused")
-                                    }
-                                }
-                            }
-                        }
-
                         LogosListView {
                             objectName: "tokenList"
                             // Under the strip, so a row never scrolls behind the control
                             // that orders it.
                             anchors {
-                                top: balanceFailuresFrame.visible ? balanceFailuresFrame.bottom
-                                   : tokenSortStrip.visible ? tokenSortStrip.bottom : parent.top
+                                top: tokenSortStrip.visible ? tokenSortStrip.bottom : parent.top
                                 left: parent.left; right: parent.right
                                 bottom: parent.bottom
                             }
@@ -1761,7 +1733,9 @@ Item {
                             // rows named tokenRow_LIT are one row said twice, to a reader
                             // and to the harness alike.
                             delegate: LogosItemDelegate {
+                                id: tokenRow
                                 objectName: "tokenRow_" + root.tokenKey(modelData)
+                                readonly property var balanceFailure: root.balanceFailureFor(modelData)
                                 width: ListView.view ? ListView.view.width : 0
                                 // The component hard-binds 36; a taller contentItem clips
                                 // without this.
@@ -1830,9 +1804,25 @@ Item {
                                     }
                                     LogosText {
                                         objectName: "balance_" + root.tokenKey(modelData)
-                                        visible: !root.balancesPending
+                                        visible: !root.balancesPending && tokenRow.balanceFailure === null
                                         textFormat: Text.PlainText
                                         text: root.balanceDisplay(modelData)
+                                    }
+                                    LogosIcon {
+                                        id: balanceErrorIcon
+                                        objectName: "balanceError_" + root.tokenKey(modelData)
+                                        readonly property string description:
+                                            root.balanceFailureDescription(modelData)
+                                        Layout.alignment: Qt.AlignVCenter
+                                        Layout.preferredWidth: 18
+                                        Layout.preferredHeight: 18
+                                        visible: !root.balancesPending && tokenRow.balanceFailure !== null
+                                        source: LogosIcons.warning
+                                        color: Theme.palette.error
+                                        HoverHandler { id: balanceErrorHover }
+                                        ToolTip.text: balanceErrorIcon.description
+                                        ToolTip.visible: balanceErrorHover.hovered
+                                        ToolTip.delay: 400
                                     }
                                 }
 
@@ -2723,6 +2713,8 @@ Item {
             readonly property bool tokKnown: root.tokenByKey(tokenPage.key) !== null
             readonly property var tok: tokKnown ? root.tokenByKey(tokenPage.key) : ({})
             readonly property string symbol: tokKnown ? String(tokenPage.tok.symbol) : ""
+            readonly property var balanceFailure: tokKnown
+                                                   ? root.balanceFailureFor(tokenPage.tok) : null
             // Only a list we have READ can say this token is not on this network. While it is
             // unknown the screen stays and shows dashes, rather than closing under the user
             // every time the network is re-read.
@@ -2779,6 +2771,7 @@ Item {
                     spacing: Theme.spacing.small
                     LogosText {
                         objectName: "tokenDetailBalance"
+                        visible: !root.balancesPending && tokenPage.balanceFailure === null
                         textFormat: Text.PlainText
                         font.pixelSize: 34
                         // EXACT here, bounded in the list: a balance of 1 wei has to be readable
@@ -2793,6 +2786,22 @@ Item {
                         visible: root.balancesPending
                         running: visible
                         ringColor: Theme.palette.textSecondary
+                    }
+                    LogosIcon {
+                        id: tokenDetailBalanceError
+                        objectName: "tokenDetailBalanceError"
+                        readonly property string description:
+                            root.balanceFailureDescription(tokenPage.tok)
+                        Layout.alignment: Qt.AlignVCenter
+                        Layout.preferredWidth: 24
+                        Layout.preferredHeight: 24
+                        visible: !root.balancesPending && tokenPage.balanceFailure !== null
+                        source: LogosIcons.warning
+                        color: Theme.palette.error
+                        HoverHandler { id: tokenDetailBalanceErrorHover }
+                        ToolTip.text: tokenDetailBalanceError.description
+                        ToolTip.visible: tokenDetailBalanceErrorHover.hovered
+                        ToolTip.delay: 400
                     }
                 }
 
@@ -3505,7 +3514,7 @@ Item {
     }
 
     // ── networks ──────────────────────────────────────────────────────────────────
-    // Which network this wallet is on, and who owns the endpoint it talks to.
+    // Which networks this portfolio includes, and whether each is routed through verification.
     //
     // This was a popup with three links in it. A dialog whose whole content is links to
     // other places is a click in front of each of them, so the places are the screens now
@@ -3540,12 +3549,13 @@ Item {
                     wrapMode: Text.WordWrap
                     textFormat: Text.PlainText
                     color: Theme.palette.textSecondary
-                    text: "Enabled chains and scope are shared by every Logos wallet on this "
-                          + "device. Endpoints and verified-routing policy remain in Ethereum RPC."
+                    text: "These are the networks in the device-wide portfolio scope. "
+                          + "Enablement, scope, endpoints and verified routing are managed "
+                          + "in Ethereum RPC."
                 }
                 LogosButton {
                     objectName: "openRpcSettingsButton"
-                    text: "Edit endpoints and routing"
+                    text: "Change network settings"
                     onClicked: root.askFor("evm.rpc.configure",
                                            "Nothing on this device offers to change them.")
                 }
@@ -3559,33 +3569,15 @@ Item {
                     text: root.intentNote
                 }
 
-                RowLayout {
-                    Layout.fillWidth: true
-                    LogosText {
-                        text: "Portfolio scope"
-                        color: Theme.palette.textSecondary
-                    }
-                    Item { Layout.fillWidth: true }
-                    LogosComboBox {
-                        id: walletScopePicker
-                        objectName: "walletNetworkScopePicker"
-                        model: ["Mainnets", "Testnets", "Both"]
-                        enabled: root.ready
-                        onActivated: root.backend.changeNetworkScope(
-                            currentIndex === 1 ? "testnets" : currentIndex === 2 ? "both" : "mainnets")
-                    }
-                    Binding {
-                        target: walletScopePicker
-                        property: "currentIndex"
-                        value: root.scopeIndex(root.networkScope)
-                        restoreMode: Binding.RestoreNone
-                    }
+                LogosText {
+                    visible: root.mainnetChains.length > 0
+                    text: "Mainnets"
+                    color: Theme.palette.textSecondary
                 }
-
-                LogosText { text: "Mainnets"; color: Theme.palette.textSecondary }
                 Repeater {
                     model: root.mainnetChains
                     delegate: RowLayout {
+                        objectName: "walletNetworkRow_" + modelData.chainId
                         required property var modelData
                         Layout.fillWidth: true
                         LogosText {
@@ -3593,26 +3585,23 @@ Item {
                             textFormat: Text.PlainText
                             text: modelData.name + " · " + modelData.chainId
                         }
-                        LogosSwitch {
-                            id: mainnetEnabledSwitch
-                            objectName: "walletChainEnabled_" + modelData.chainId
-                            text: modelData.inScope === true ? "Enabled · in scope" : "Enabled"
-                            enabled: root.ready
-                            onToggled: root.backend.changeChainEnabled(modelData.chainId, checked)
-                        }
-                        Binding {
-                            target: mainnetEnabledSwitch
-                            property: "checked"
-                            value: modelData.enabled === true
-                            restoreMode: Binding.RestoreNone
+                        LogosBadge {
+                            objectName: "walletNetworkVerification_" + modelData.chainId
+                            text: root.verificationText(modelData)
+                            color: root.verificationColor(modelData)
                         }
                     }
                 }
 
-                LogosText { text: "Testnets"; color: Theme.palette.textSecondary }
+                LogosText {
+                    visible: root.testnetChains.length > 0
+                    text: "Testnets"
+                    color: Theme.palette.textSecondary
+                }
                 Repeater {
                     model: root.testnetChains
                     delegate: RowLayout {
+                        objectName: "walletNetworkRow_" + modelData.chainId
                         required property var modelData
                         Layout.fillWidth: true
                         LogosText {
@@ -3620,20 +3609,18 @@ Item {
                             textFormat: Text.PlainText
                             text: modelData.name + " · " + modelData.chainId
                         }
-                        LogosSwitch {
-                            id: testnetEnabledSwitch
-                            objectName: "walletChainEnabled_" + modelData.chainId
-                            text: modelData.inScope === true ? "Enabled · in scope" : "Enabled"
-                            enabled: root.ready
-                            onToggled: root.backend.changeChainEnabled(modelData.chainId, checked)
-                        }
-                        Binding {
-                            target: testnetEnabledSwitch
-                            property: "checked"
-                            value: modelData.enabled === true
-                            restoreMode: Binding.RestoreNone
+                        LogosBadge {
+                            objectName: "walletNetworkVerification_" + modelData.chainId
+                            text: root.verificationText(modelData)
+                            color: root.verificationColor(modelData)
                         }
                     }
+                }
+                LogosText {
+                    objectName: "walletNetworksEmpty"
+                    visible: root.networks.length === 0
+                    text: "No networks are currently in scope."
+                    color: Theme.palette.textSecondary
                 }
                 Item { Layout.fillHeight: true }
             }

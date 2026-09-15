@@ -284,9 +284,6 @@ void EthWalletUiBackend::loadNetwork()
     const QJsonObject registry = parseObject(all);
     const QJsonArray networks = registry.value(QStringLiteral("networks")).toArray();
     setNetworksJson(QString::fromUtf8(QJsonDocument(networks).toJson(QJsonDocument::Compact)));
-    setConfiguredNetworksJson(QString::fromUtf8(
-        QJsonDocument(registry.value(QStringLiteral("configuredNetworks")).toArray())
-            .toJson(QJsonDocument::Compact)));
     setNetworkScope(registry.value(QStringLiteral("scope")).toString(QStringLiteral("mainnets")));
     const int chosen = chooseChain(networks, shown().chainId);
     if (chosen == 0)
@@ -506,20 +503,6 @@ void EthWalletUiBackend::selectChain(int chainId)
         return;
     // This cursor is local: a pending send keeps its own chain and never holds this picker.
     refresh();
-}
-
-void EthWalletUiBackend::changeChainEnabled(int chainId, bool enabled)
-{
-    const QString reply = modules().eth_wallet_backend.set_chain_enabled(chainId, enabled);
-    if (!failed(reply, QStringLiteral("network")))
-        refresh();
-}
-
-void EthWalletUiBackend::changeNetworkScope(QString scope)
-{
-    const QString reply = modules().eth_wallet_backend.set_network_scope(scope);
-    if (!failed(reply, QStringLiteral("network scope")))
-        refresh();
 }
 
 void EthWalletUiBackend::quote(QString requestJson)
