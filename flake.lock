@@ -200,11 +200,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1789483568,
-        "narHash": "sha256-a4cRx/iP0civkomJ5POxdbVBeqS4FGxtFG3PLr7M+Ng=",
+        "lastModified": 1789526529,
+        "narHash": "sha256-SELxqm0xoAXGbGteHEDyXMu38dOEBXOyX/5y+eiHDDA=",
         "owner": "logos-co",
         "repo": "logos-eth-wallet-backend",
-        "rev": "883c7c87f701831f1e7dc7636cf64fbe9fa9ee76",
+        "rev": "dbabeb876e24551d5ef47e7bf755753aa21c4560",
         "type": "github"
       },
       "original": {
@@ -226,11 +226,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1789477434,
-        "narHash": "sha256-bmkZMCnBlkoUA8plhKaalXbAoa95Z5Dm7unLPWnInjM=",
+        "lastModified": 1789518787,
+        "narHash": "sha256-lEiviODU0UtvzO+p1qX1ytRBKMP5poUlHhLBUokhVHI=",
         "owner": "logos-co",
         "repo": "logos-evm-assets-module",
-        "rev": "b92f6a1b372541cf61d57a2f2a6d00b84c495dd4",
+        "rev": "58f7077acacacf47e7f266748275a8cbd50aae8a",
         "type": "github"
       },
       "original": {
@@ -18229,11 +18229,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1789483494,
+        "lastModified": 1789514647,
         "narHash": "sha256-94FPAFWqAAdg9Vj3eEDa0RCm+69nny3VkblxQifaWiI=",
         "owner": "logos-co",
         "repo": "logos-evm-token-list-module",
-        "rev": "b4e9d30817ddcd7e391fc40f865d96f53c762b06",
+        "rev": "e108e61c5e0a5ee0d88fc6ad318f55c885538070",
         "type": "github"
       },
       "original": {
