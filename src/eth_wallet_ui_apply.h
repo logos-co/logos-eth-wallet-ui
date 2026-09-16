@@ -35,6 +35,99 @@ inline QString unknownVerdict(int chainId, const QString &why)
     return QString::fromUtf8(QJsonDocument(v).toJson(QJsonDocument::Compact));
 }
 
+/// Keep the UI-local Send chain while it remains in scope; otherwise use the
+/// first provider-ordered choice. An empty scope has no cursor.
+inline int chooseChain(const QJsonArray &networks, int current)
+{
+    for (const QJsonValue &value : networks) {
+        if (value.toObject().value(QStringLiteral("chainId")).toInt() == current)
+            return current;
+    }
+    return networks.isEmpty() ? 0
+                              : networks.first().toObject().value(QStringLiteral("chainId")).toInt();
+}
+
+inline QJsonObject networkAt(const QJsonArray &networks, int chainId)
+{
+    for (const QJsonValue &value : networks) {
+        const QJsonObject row = value.toObject();
+        if (row.value(QStringLiteral("chainId")).toInt() == chainId)
+            return row;
+    }
+    return {};
+}
+
+/// Turn the composer's per-chain balance answer into the flat row list the view renders.
+/// Successful rows keep their chain and route; one failed chain becomes one explicit blocked
+/// row, so a required proxy on one network never blanks the others.
+inline QString flattenBalances(const QString &reply, const QJsonArray &networks, int cursorChain)
+{
+    QJsonObject top = parseObject(reply);
+    if (!top.value(QStringLiteral("ok")).toBool())
+        return reply;
+    QJsonArray rows;
+    QString cursorRoute;
+    for (const QJsonValue &value : top.value(QStringLiteral("chains")).toArray()) {
+        const QJsonObject chain = value.toObject();
+        const int chainId = chain.value(QStringLiteral("chainId")).toInt();
+        const QJsonObject network = networkAt(networks, chainId);
+        if (chain.value(QStringLiteral("ok")).toBool()) {
+            const QString route = chain.value(QStringLiteral("route")).toString();
+            if (chainId == cursorChain)
+                cursorRoute = route;
+            for (const QJsonValue &balanceValue : chain.value(QStringLiteral("balances")).toArray()) {
+                QJsonObject balance = balanceValue.toObject();
+                balance.insert(QStringLiteral("chainId"), chainId);
+                balance.insert(QStringLiteral("network"), network.value(QStringLiteral("name")));
+                balance.insert(QStringLiteral("testnet"), network.value(QStringLiteral("testnet")));
+                balance.insert(QStringLiteral("route"), route);
+                rows.append(balance);
+            }
+        } else {
+            QJsonObject blocked{{QStringLiteral("chainId"), chainId},
+                                {QStringLiteral("network"), network.value(QStringLiteral("name"))},
+                                {QStringLiteral("testnet"), network.value(QStringLiteral("testnet"))},
+                                {QStringLiteral("blocked"), true},
+                                {QStringLiteral("error"), chain.value(QStringLiteral("error"))}};
+            if (chain.contains(QStringLiteral("verifiedProxy")))
+                blocked.insert(QStringLiteral("verifiedProxy"), chain.value(QStringLiteral("verifiedProxy")));
+            rows.append(blocked);
+        }
+    }
+    top.remove(QStringLiteral("chains"));
+    // The composer has no active chain. Stamp the UI-local cursor only at this adapter
+    // boundary so the existing freshness guard can still reject a late cursor reply.
+    top.insert(QStringLiteral("chainId"), cursorChain);
+    top.insert(QStringLiteral("balances"), rows);
+    top.insert(QStringLiteral("route"), cursorRoute);
+    return toJsonCompact(top);
+}
+
+/// History is a multi-chain composer reply too. The transactions retain their real chainId;
+/// this top-level field exists only for the UI's account+cursor freshness guard.
+inline QString scopeComposerHistory(const QString &reply, int cursorChain)
+{
+    QJsonObject top = parseObject(reply);
+    if (!top.value(QStringLiteral("ok")).toBool())
+        return reply;
+    top.insert(QStringLiteral("chainId"), cursorChain);
+    return toJsonCompact(top);
+}
+
+/// Select one verdict from the composer's multi-chain report for the local send cursor.
+inline QString verdictForChain(const QString &reply, int chainId)
+{
+    const QJsonObject top = parseObject(reply);
+    if (!top.value(QStringLiteral("ok")).toBool())
+        return {};
+    for (const QJsonValue &value : top.value(QStringLiteral("chains")).toArray()) {
+        const QJsonObject row = value.toObject();
+        if (row.value(QStringLiteral("chainId")).toInt() == chainId)
+            return toJsonCompact(row.value(QStringLiteral("verdict")).toObject());
+    }
+    return {};
+}
+
 /// Balances. The reply names the account and chain it read, so one naming another selection is
 /// not late — it is about something else. Dropped whole: it may not stamp freshness either.
 inline Applied applyBalances(ScopedState &s, const QString &reply)
@@ -93,9 +186,8 @@ inline Applied applyTokens(ScopedState &s, const QString &reply)
     return {ok, ok ? QString() : refusal(reply, QStringLiteral("tokens"))};
 }
 
-/// The persisted token order a reply carries. `get_balances`, `list_tokens` and the catalogue
-/// search all echo it, so the order the user chose is restored by whichever lands first rather
-/// than only by a search on a screen they may never open.
+/// The persisted token order a reply carries. `get_balances` and `list_tokens` both echo it,
+/// so the order the user chose is restored by whichever lands first.
 ///
 /// `issuedAt` is the choice counter the read went out under, `chosenAt` the current one. A
 /// reply in flight ACROSS a choice carries the order the user just replaced, and publishing it
@@ -266,29 +358,4 @@ inline NetworkStep networkStep(bool selectionHeld, const QString &reply)
 inline bool mayAdopt(bool selectionHeld, int reportedChainId)
 {
     return selectionHeld && reportedChainId != 0;
-}
-
-/// A later page of the catalogue answer, appended onto the answer on screen. It must
-/// continue that answer — same chain, and its `offset` exactly the rows already held — or the
-/// screen keeps what it has: a page for the previous question, or one that failed, adds
-/// nothing. The counts follow the page, and `appended` tells the view to grow rather than
-/// start over.
-inline QString mergeTokenPage(const QString &accumulated, const QString &page, int offset)
-{
-    QJsonObject acc = parseObject(accumulated);
-    const QJsonObject p = parseObject(page);
-    QJsonArray rows = acc.value(QStringLiteral("tokens")).toArray();
-    if (!replyOk(page) || !acc.value(QStringLiteral("ok")).toBool() || offset <= 0
-        || p.value(QStringLiteral("chainId")) != acc.value(QStringLiteral("chainId"))
-        || offset != rows.size() || p.value(QStringLiteral("offset")).toInt(-1) != offset)
-        return accumulated;
-    for (const QJsonValue &v : p.value(QStringLiteral("tokens")).toArray())
-        rows.append(v);
-    acc.insert(QStringLiteral("tokens"), rows);
-    acc.insert(QStringLiteral("shown"), rows.size());
-    acc.insert(QStringLiteral("total"), p.value(QStringLiteral("total")));
-    acc.insert(QStringLiteral("listed"), p.value(QStringLiteral("listed")));
-    acc.insert(QStringLiteral("hasMore"), p.value(QStringLiteral("hasMore")).toBool());
-    acc.insert(QStringLiteral("appended"), true);
-    return toJsonCompact(acc);
 }

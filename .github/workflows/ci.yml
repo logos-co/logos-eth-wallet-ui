@@ -125,15 +125,14 @@ jobs:
           if grep -q "SKIP" /tmp/tables.log; then
             echo "::error::the view probes skipped instead of running"; exit 1
           fi
-          for p in probe_manage_tokens probe_token_identity probe_tokens_sort probe_tx_detail probe_intents probe_recipients probe_balances_states probe_receive; do
+          for p in probe_token_identity probe_tokens_sort probe_tx_detail probe_intents probe_recipients probe_balances_states probe_receive; do
             grep -q -- "--- $p.qml" /tmp/tables.log \
               || { echo "::error::probe never ran: $p"; exit 1; }
           done
-          # Eight tables, the zbar decode, and eight probes each sign off with one
-          # RESULT line, and a probe that reaches its last phase is the only thing
-          # that prints one. A header with silence under it counts here and passes
-          # nothing. 8 + 1 + 8 = 17 — do NOT "correct" this to 16, the decode is
-          # the seventeenth and the floor is what keeps it in the run.
+          # Eight C++ tables, the QR table, the zbar decode, and seven probes each sign off
+          # with one RESULT line; a probe reaching its last phase is the only thing that
+          # prints one. A header with silence under it counts here and passes nothing.
+          # 8 + 1 + 1 + 7 = 17 — the floor keeps both QR sections in the run.
           n=$(grep -c "RESULT: ALL PASS" /tmp/tables.log)
           echo "sections that reported: $n"; [ "$n" -ge 17 ]
           n=$(grep -c "  PASS  " /tmp/tables.log)

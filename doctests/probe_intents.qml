@@ -152,10 +152,16 @@ Item {
         function declineIntentSend() { probe.declined++; fake.intentSendJson = "" }
         property bool scopedDataFresh: true
         property bool dataLoading: false
+        property bool balancesLoading: false
         property bool quoteLoading: false
         property string activeNetworkJson: JSON.stringify({ chainId: 11155111, name: "Sepolia",
                                                             nativeSymbol: "ETH", testnet: true })
-        property string networksJson: "[]"
+        property string networksJson: JSON.stringify([{ chainId: 11155111, name: "Sepolia",
+                                                        nativeSymbol: "ETH", testnet: true,
+                                                        enabled: true, inScope: true,
+                                                        verifiedProxyMode: "off",
+                                                        verifiedProxy: { mode: "off", state: "disabled" } }])
+        property string networkScope: "testnets"
         property string verifiedProxyJson: JSON.stringify({ ok: true, chainId: 11155111,
                                                             mode: "off" })
         property string accountsJson: JSON.stringify([probe.me])
@@ -165,10 +171,6 @@ Item {
         property string balancesJson: "[]"
         property string balancesRoute: "direct"
         property string tokensJson: "[]"
-        property string availableTokensJson: ""
-        property bool availableTokensLoading: false
-        property bool tokenToggleBusy: false
-        property string tokenToggleError: ""
         // Empty until the send settles, exactly as the real one is: `pollSend` refreshes
         // history a beat AFTER publishing the outcome, which is the window the receipt's
         // "View transaction" button has to survive.
@@ -179,6 +181,7 @@ Item {
         property bool txDetailsLoading: false
         property bool txStatusLoading: false
         property string feeTiersJson: "{}"
+        property bool feeTiersLoading: false
         property string quoteJson: "{}"
         property string quoteRequestJson: ""
         property string sendError: ""
@@ -534,13 +537,32 @@ Item {
         check("rpc endpoints", probe.lastRequest().intent, "evm.rpc.configure")
         check("...with no payload", JSON.stringify(probe.lastRequest().params), "{}")
         probe.answer({ ok: true, data: {}, error: "" })
-        check("...and the network selector is on that screen too, not in a dialog",
-              find(page, "network_sepolia") !== null || root_networksEmpty(), true)
+        check("...and the in-scope network is listed",
+              find(page, "walletNetworkRow_11155111") !== null, true)
+        check("...with its own verification setting",
+              find(page, "walletNetworkVerification_11155111").text, "Verification off")
+        check("...without copying Ethereum RPC's scope selector",
+              find(page, "walletNetworkScopePicker"), null)
+        check("...or its enable switch",
+              find(page, "walletChainEnabled_11155111"), null)
     }
 
-    // The probe's fake publishes no network list, so the selector legitimately has no rows.
-    // Saying so beats an assertion that passes for the wrong reason.
-    function root_networksEmpty() { return view.item.networks.length === 0 }
+    function assertTokenListsHop() {
+        console.log("")
+        console.log("token membership is not a Wallet screen. Its Settings row hands control")
+        console.log("to whichever app provides token-list configuration")
+        view.item.selectTab(4)
+        var nav = find(view.item, "nav")
+        var depth = nav ? nav.depth : -1
+        probe.press("tokenListsEntry")
+        check("token lists", probe.lastRequest().intent, "evm.token_lists.configure")
+        check("...with no payload", JSON.stringify(probe.lastRequest().params), "{}")
+        check("...without pushing a Wallet-owned screen", nav ? nav.depth : -1, depth)
+        probe.answer({ ok: false, data: undefined, error: "unavailable" })
+        check("...and an unavailable provider is explained on Settings",
+              node("tokenListsIntentNote").text,
+              "Nothing on this device manages token lists.")
+    }
 
     // ── the other direction: this wallet PROVIDES evm.transactions.send ──────────
     //
@@ -676,6 +698,7 @@ Item {
             probe.assertViewTransactionLandsOnTheRow()
             probe.assertNavigationHopsNameCapabilities()
             probe.assertRpcSettingsHop()
+            probe.assertTokenListsHop()
             probe.assertAnotherAppsSendIsReviewedAndAnswered()
 
             console.log("")

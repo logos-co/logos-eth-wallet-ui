@@ -1,16 +1,14 @@
 // A reply is rendered only against the scope it NAMES, as a table.
 //
-// The generation counter this replaces is authoritative for moves the view made and blind to
-// moves it has not observed. The measured failure: a balances read is in flight, the user
-// picks another network, `set_active_chain` is a SYNC call into a `concurrency:"multi"` module
-// and so runs a nested event loop, and the reply for the NEW chain is dispatched inside it
-// while the counter still matches — putting Sepolia's number under "ETHEREUM", with
-// scopedDataFresh true so no dash and no spinner stood in its place.
+// A generation counter is authoritative for moves the view made and blind to moves it has
+// not observed. Synchronous calls into a `concurrency:"multi"` module can run a nested event
+// loop, while asynchronous portfolio and quote replies can arrive after the local cursor has
+// moved. The payload's own account and chain are therefore part of the acceptance decision.
 //
-// The wire already carries the answer: get_balances and get_history name `chainId` and
-// `address`, list_tokens and suggest_fees name `chainId`, the verified-proxy verdict names
-// `chainId`, and a quote names `chainId` and `from`. `answersFor` is the check the counter
-// cannot make, and it is a pure function so its table needs no app, no backend and no GUI.
+// The wire carries the answer: per-chain balances and history rows name `chainId`, catalogue
+// and fee replies name `chainId`, the verified-proxy verdict names `chainId`, and a quote
+// names `chainId` and `from`. `answersFor` is the check the counter cannot make, and it is a
+// pure function so its table needs no app, no backend and no GUI.
 //
 // Run it from this directory, with PKG_CONFIG_PATH pointing at the qtbase this module builds
 // against (`<qtbase>/lib/pkgconfig`):

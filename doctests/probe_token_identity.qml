@@ -94,31 +94,6 @@ Item {
           display: "12", exact: "12", amountExact: "12" }
     ])
 
-    // What get_balances answers once Lighter is turned off: no row for it AT ALL. Its figure
-    // on the Manage screen has to come from that absence, not from its namesake's row.
-    readonly property string balancesLighterOff: JSON.stringify([
-        { symbol: "LIT", address: probe.litentry, native: false,
-          display: "1000", exact: "1000", amountExact: "1000" },
-        { symbol: "ETH", native: true, display: "1.5", exact: "1.5", amountExact: "1.5" },
-        { symbol: "USDC", address: probe.usdc, native: false,
-          display: "12", exact: "12", amountExact: "12" }
-    ])
-
-    // The catalogue behind Manage tokens: the same pair, one of them turned OFF. A disabled
-    // token is in no balances reply at all, so its figure is an em-dash — never the holding
-    // of whichever enabled contract happens to wear the same symbol.
-    readonly property string available: JSON.stringify({
-        ok: true, chainId: probe.chain, tokenSort: "alpha", total: 3, shown: 3, listed: 400,
-        tokens: [
-            { symbol: "ETH", name: "Ether", decimals: 18,
-              native: true, enabled: true, builtin: true, source: "native" },
-            { symbol: "LIT", name: "Litentry", decimals: 18, address: probe.litentry,
-              native: false, enabled: true, builtin: false, source: "embedded" },
-            { symbol: "LIT", name: "Lighter", decimals: 18, address: probe.lighter,
-              native: false, enabled: false, builtin: false, source: "embedded" }
-        ]
-    })
-
     QtObject {
         id: fake
 
@@ -138,10 +113,6 @@ Item {
         property string balancesJson: probe.balances
         property string balancesRoute: "direct"
         property string tokensJson: probe.tokens
-        property string availableTokensJson: ""
-        property bool availableTokensLoading: false
-        property bool tokenToggleBusy: false
-        property string tokenToggleError: ""
         property string historyJson: "[]"
         property string blockedChainsJson: "[]"
         property bool sweepingReceipts: false
@@ -159,9 +130,6 @@ Item {
         function chooseTokenSort(order) {}
         function quote(requestJson) {}
         function setQuoteAutoRefresh(on) {}
-        function searchTokens(query) { fake.availableTokensJson = probe.available }
-        function setTokenEnabled(address, on) {}
-        function loadMoreTokens() {}
     }
 
     property var logos: ({ module: function (n) { return fake }, isViewModuleReady: function (n) { return true } })
@@ -329,22 +297,6 @@ Item {
         check("a native send says nothing either", fvis("quoteTokenNote"), false)
     }
 
-    // ── Manage tokens ─────────────────────────────────────────────────────────────
-    function assertDisabledRowShowsNothing() {
-        console.log("")
-        console.log("and in Manage tokens, where a row that is OFF sits beside an enabled one")
-        console.log("wearing its symbol. A disabled token is in no balances reply at all")
-        check("the enabled contract shows its holding",
-              txt("manageTokenBalance_" + probe.key(probe.litentry)), "1000 LIT")
-        check("...while the one that is OFF advertises nothing",
-              txt("manageTokenBalance_" + probe.key(probe.lighter)), "— LIT")
-        console.log("   control: the two rows are told apart here too")
-        check("the disabled row names its contract",
-              txt("manageTokenContract_" + probe.key(probe.lighter)), "0x232C…4Ee2")
-        check("...and the enabled one names its own",
-              txt("manageTokenContract_" + probe.key(probe.litentry)), "0xb594…9723")
-    }
-
     Loader {
         id: view
         anchors.fill: parent
@@ -391,10 +343,6 @@ Item {
                 console.log("")
                 console.log("   control: the other key opens the OTHER screen")
                 probe.assertDetail(probe.litentry, "Litentry", "1000", "0xb594…9723")
-                fake.balancesJson = probe.balancesLighterOff
-                view.item.openManageTokens()
-            } else {
-                probe.assertDisabledRowShowsNothing()
                 console.log("")
                 console.log("RESULT: " + (probe.failures ? probe.failures + " FAILED"
                                                          : "ALL PASS"))

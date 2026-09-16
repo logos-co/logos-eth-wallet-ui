@@ -387,26 +387,40 @@ int main()
            !mayAdopt(false, 1));
     expect("...and zero", "means the reply did not say", !mayAdopt(true, 0));
 
-    std::printf("\nthe catalogue, in pages: a later page grows the answer on screen, or is nothing\n");
+    std::printf("\nthe composer adapter: read-only data spans chains while the UI keeps a local cursor\n");
     {
-        const QString first = q(R"({"ok":true,"chainId":1,"total":5,"offset":0,"shown":2,"hasMore":true,"listed":3,"tokens":[{"symbol":"A"},{"symbol":"B"}]})");
-        const QString second = q(R"({"ok":true,"chainId":1,"total":5,"offset":2,"shown":2,"hasMore":true,"listed":3,"tokens":[{"symbol":"C"},{"symbol":"D"}]})");
-        const QJsonObject m = parseObject(mergeTokenPage(first, second, 2));
-        const QJsonArray rows = m.value(QStringLiteral("tokens")).toArray();
-        expect("the page's rows follow the first page's", "A B C D",
-               rows.size() == 4 && rows.at(3).toObject().value(QStringLiteral("symbol")).toString() == QStringLiteral("D"));
-        expect("...shown counts every row held", "4", m.value(QStringLiteral("shown")).toInt() == 4);
-        expect("...total is the page's", "5", m.value(QStringLiteral("total")).toInt() == 5);
-        expect("...and the view is told to grow rather than start over", "appended",
-               m.value(QStringLiteral("appended")).toBool());
-        const QString last = q(R"({"ok":true,"chainId":1,"total":5,"offset":4,"shown":1,"hasMore":false,"listed":3,"tokens":[{"symbol":"E"}]})");
-        expect("the last page ends it", "hasMore false",
-               !parseObject(mergeTokenPage(mergeTokenPage(first, second, 2), last, 4)).value(QStringLiteral("hasMore")).toBool());
-        same("a page whose offset is not where the rows end is nothing", mergeTokenPage(first, last, 4), first);
-        same("a page for another chain is nothing",
-             mergeTokenPage(first, q(R"({"ok":true,"chainId":11155111,"total":5,"offset":2,"shown":1,"hasMore":false,"listed":3,"tokens":[{"symbol":"X"}]})"), 2), first);
-        same("a page that failed keeps the rows", mergeTokenPage(first, q(R"({"ok":false,"error":"down"})"), 2), first);
-        same("a page onto nothing is nothing", mergeTokenPage(QString(), second, 2), QString());
+        const QJsonArray networks = parseObject(q(R"({"networks":[
+            {"chainId":1,"name":"Ethereum","testnet":false},
+            {"chainId":11155111,"name":"Sepolia","testnet":true}]})"))
+            .value(QStringLiteral("networks")).toArray();
+        expect("the existing cursor is kept while it remains in scope", "11155111",
+               chooseChain(networks, 11155111) == 11155111);
+        expect("an out-of-scope cursor falls back to provider order", "1",
+               chooseChain(networks, 10) == 1);
+        const QString flat = flattenBalances(q(R"({"ok":true,"address":"0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266","chains":[
+            {"ok":true,"chainId":1,"route":"verified","balances":[{"symbol":"ETH","native":true}]},
+            {"ok":false,"chainId":11155111,"error":"proxy syncing"}]})"), networks, 1);
+        const QJsonObject balanceReply = parseObject(flat);
+        const QJsonArray rows = balanceReply.value(QStringLiteral("balances")).toArray();
+        expect("successful chains keep their rows", "with chain metadata",
+               rows.size() == 2 && rows.at(0).toObject().value(QStringLiteral("network")).toString() == QStringLiteral("Ethereum"));
+        expect("one blocked chain becomes one explicit row", "without blanking the other",
+               rows.at(1).toObject().value(QStringLiteral("blocked")).toBool());
+        expect("the cursor route labels only that chain's balances", "verified",
+               balanceReply.value(QStringLiteral("route")).toString() == QStringLiteral("verified"));
+        expect("the adapter stamps the local cursor for the freshness guard", "chainId 1",
+               balanceReply.value(QStringLiteral("chainId")).toInt() == 1);
+        const QJsonObject historyReply = parseObject(scopeComposerHistory(
+            q(R"({"ok":true,"address":"0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266","transactions":[{"chainId":11155111}]})"), 1));
+        expect("history rows keep their own chain", "while the reply carries the cursor",
+               historyReply.value(QStringLiteral("chainId")).toInt() == 1
+               && historyReply.value(QStringLiteral("transactions")).toArray().at(0)
+                    .toObject().value(QStringLiteral("chainId")).toInt() == 11155111);
+        const QString verdict = verdictForChain(
+            q(R"({"ok":true,"chains":[{"chainId":1,"verdict":{"ok":true,"chainId":1,"mode":"off"}},{"chainId":11155111,"verdict":{"ok":true,"chainId":11155111,"mode":"required"}}]})"),
+            11155111);
+        expect("the global verdict report is selected by the local cursor", "required",
+               parseObject(verdict).value(QStringLiteral("mode")).toString() == QStringLiteral("required"));
     }
 
     std::printf("\nRESULT: %s\n", failures ? "FAILED" : "ALL PASS");

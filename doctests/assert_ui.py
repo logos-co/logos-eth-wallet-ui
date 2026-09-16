@@ -113,7 +113,7 @@ def sample():
         'JSON.stringify({acct:selected,chain:(net.chainId||0),name:netName,'
         'bk:balancesKnown,hk:historyKnown,tk:tokensKnown,'
         'bal:balanceExact(nativeToken),rows:history.length,'
-        'chip:chipText(chipState(vp,balancesRoute)),loading:dataLoading})'}).get("result")
+        'scope:networkScope,loading:dataLoading})'}).get("result")
     try: return json.loads(r)
     except Exception: return {}
 def settle(want_acct=None, want_chain=None, tries=60):
@@ -378,7 +378,7 @@ sync = qml_fn_body(picker.group(1) if picker else "", "syncIndex")
 check("sendTokenPicker re-asserts its index on a model change",
       bool(picker) and "onModelChanged: syncIndex()" in picker.group(1), True)
 check("...and syncIndex writes the token back, so the picker and the amount field agree",
-      "sendPage.selectToken(root.tokens[currentIndex])" in sync, True)
+      "sendPage.selectToken(root.chainTokens[Math.max(0, currentIndex)])" in sync, True)
 
 print("0e) the backend holds NO rule about what may reach the screen")
 # WHY THIS SECTION LOOKS NOTHING LIKE THE ELEVEN PASSES BEFORE IT.
@@ -418,7 +418,7 @@ check("...and laneFinish from exactly one", code.count("laneFinish("), 1)
 check("...and a lane's own claim is never touched around them", code.count(".flight"), 0)
 begun = sorted(set(re.findall(r"beginLane\((m_\w+)", code)))
 check("every lane is entered through beginLane", begun,
-      ["m_dataLane", "m_quoteLane", "m_tokenSearchLane"])
+      ["m_dataLane", "m_quoteLane"])
 check("...and every lane that is begun is also handed on",
       sorted(set(re.findall(r"handOnLane\((m_\w+)", code))), begun)
 print("   and no claim anywhere is taken for exactly as long as the call it covers — the")
@@ -447,10 +447,10 @@ for fn, transition in [("fetchTxDetails", "applyTxDetails("),
                        ("submitSend", "applySend(")]:
     check(f"{fn} snapshots, calls {transition[:-1]}, publishes",
           in_order(fn_body(fn), "scopeSnapshot()", transition, "publishScope("), True)
-print("   the event that names the new chain is TAKEN, not discarded: until it is adopted")
-print("   the values for the network being left are on screen and every reply for it is accepted")
-check("active_chain_changed adopts the chain it names, first",
-      handler("Active_chain_changed").strip().startswith("adoptChain(chainId);"), True)
+print("   there is no device active-chain event now. Registry events invalidate the snapshot")
+print("   before queueing a refresh, so a synchronous stale listing cannot reach the screen")
+check("networks_changed invalidates before it refreshes",
+      in_order(handler("Networks_changed"), "++m_registryGen", "refreshSoon()"), True)
 check("balances_updated ignores an account that is not on screen",
       "address.compare(selectedAccount()" in handler("Balances_updated"), True)
 check("leaving the section withdraws the figures, not just the timer",
@@ -460,7 +460,7 @@ for t in ["test_apply.cpp", "test_data_guard.cpp", "test_reply_scope.cpp",
           "test_scope_invariant.cpp", "test_sweep_decision.cpp"]:
     check(f"{t} exists", (Path(__file__).resolve().parent / t).exists(), True)
 
-print("0f) the two SYNC producers take a witness BEFORE the call, not after")
+print("0f) synchronous producers take a witness BEFORE the call, not after")
 # eth_wallet_backend is concurrency:"multi", so a synchronous call into it runs a nested event
 # loop and dispatches queued events inline. The selection can therefore move INSIDE the call,
 # and neither the answer nor the refusal that comes back is about the screen any more.
@@ -473,19 +473,17 @@ print("0f) the two SYNC producers take a witness BEFORE the call, not after")
 # The DECISION each one makes is a table row in test_apply.cpp (networkStep, mayAdopt,
 # applySend). What is asserted here is only that the witness reaches it, taken before the read.
 net = fn_body("loadNetwork")
-first, _, rest = net.partition("list_networks()")
-check("loadNetwork: witness, read, decide",
-      in_order(first, "gen = m_dataGen", "get_active_network()",
-               "networkStep(selectionHeld(gen)"), True)
-print("   anchored to the FIRST read's own region: the second read's re-read request sits")
-print("   200 characters further down and answered for this one until this pass")
-check("...and an answer older than the screen is asked for again", "m_refreshAgain" in first, True)
-print("   and the fix material was already on the wire: list_networks names the chain the")
-print("   backend is actually on, and the read kept only `networks`")
-check("a second witness is taken between the two reads",
-      in_order(net, "get_active_network()", "gen = m_dataGen", "list_networks()"), True)
-check("...and the later read's own answer decides the chain, under that witness",
-      in_order(rest, "activeChainId", "mayAdopt(selectionHeld(gen)", "adoptChain(now)"), True)
+check("loadNetwork: registry witness, read, decide",
+      in_order(net, "registryGen = m_registryGen", "list_networks()",
+               "registryGen != m_registryGen"), True)
+check("...and an answer older than the registry is asked for again",
+      in_order(net, "registryGen != m_registryGen", "m_refreshAgain = true", "return"), True)
+check("the UI cursor is chosen only from the answered in-scope registry",
+      in_order(net, "chooseChain(networks", "adoptChain(chosen)"), True)
+check("the same answer publishes in-scope rows and scope",
+      in_order(net, "setNetworksJson", "setNetworkScope"), True)
+check("...without publishing the out-of-scope registry into this UI contract",
+      "setConfiguredNetworksJson" in net, False)
 check("submitSend: witness, send, decide",
       in_order(fn_body("submitSend"), "gen = m_dataGen", ".send(requestJson)",
                "applySend(after, reply, selectionHeld(gen))"), True)
@@ -655,8 +653,7 @@ print("   one that was not: ~23s of frozen window on the only control an older r
 # is inventoried here — with where it runs, not with a claim that it is harmless — so a new
 # one fails this and has to be argued for.
 STILL_SYNC = {
-    "get_active_network": "refresh(), and its write IS the selection every check is made against",
-    "list_networks": "refresh(), under its own witness beside the read above",
+    "list_networks": "refresh(), under the registry generation witness",
     "list_tokens": "refresh()",
     "list_accounts": "refresh(), with the labels read that must land in the same turn",
     "get_account_labels": "refresh()",
@@ -667,7 +664,6 @@ STILL_SYNC = {
                      "so the view re-reads rather than editing its published copy",
     "save_contact": "the address book, which reaches no chain and writes one small file",
     "forget_contact": "the address book",
-    "set_active_chain": "a chain switch, which re-reads everything behind it anyway",
     "send": "the send path, whose ordering witness is taken around the call",
     "send_status": "the send poll",
     "cancel_send": "the send path",
@@ -676,7 +672,7 @@ STILL_SYNC = {
 called = set(re.findall(r"modules\(\)\.eth_wallet_backend\.(\w+)\(", code))
 sync = sorted(n for n in called
               if not n.endswith("AsyncResult") and not re.match(r"on[A-Z]", n))
-check("every synchronous backend call is one of the fourteen inventoried here",
+check("every synchronous backend call is inventoried here",
       sync, sorted(STILL_SYNC))
 check("...and the receipt re-read is no longer one of them", "refresh_tx_status" in sync, False)
 check("refreshTxStatus: claim, call, own the reply, re-read, lower the spinner",
@@ -707,9 +703,8 @@ check("...the lane lowers it too",
       bool(lane_lowers) and "setBalancesLoading(false)" in lane_lowers.group(0), True)
 
 print()
-print("   and a refusal has a way out. Nothing else in this view calls refresh(), the network")
-print("   retry covers a network read alone, and the receipt sweep cannot arm on a refusal —")
-print("   so without this button a failed first read is a wallet the user cannot re-read.")
+print("   and a global refusal has a local way out. Per-chain balance failures instead use")
+print("   the Tokens toolbar refresh asserted below, beside the rows that name the failure.")
 check("the banner carries a retry", qml_binding("errorRetryButton", "onClicked"),
       "onClicked: root.backend.refresh()")
 print("   and the gate is on the ROW, so the two cannot drift apart — and so the row")
@@ -728,7 +723,7 @@ print("   #5C5C5C or #969696 SVG stays dark whatever iconColor asks for — whic
 print("   the back chevron and the trash read as disabled. The five dark ones are vendored")
 print("   into assets/ as white copies; delete them when the design system normalises.")
 check("only the neutral design-system icons are used directly",
-      sorted(set(re.findall(r"LogosIcons\.(\w+)", qml))), ["check", "close", "grid"])
+      sorted(set(re.findall(r"LogosIcons\.(\w+)", qml))), ["check", "close", "grid", "warning"])
 check("...and the vendored copies are all neutral",
       sorted({f for p in (VIEW.parent / "assets").glob("*.svg")
               for f in re.findall(r'fill="([^"]+)"', p.read_text())}),
@@ -760,13 +755,13 @@ print("   any other")
 backs = [b for b in icon_buttons if "iconArrowLeft" in b]
 check("every back arrow is one size",
       sorted({re.search(r"iconSize: (\d+)", b).group(1) for b in backs}), ["20"])
-check("...on every screen there is to leave", len(backs), 5)
+check("...on every screen there is to leave", len(backs), 4)
 
-check("the five spinner-bearing claims",
+check("the four spinner-bearing claims",
       sorted(set(re.findall(r"beginClaim\((m_\w+)", code))),
-      ["m_detailsInFlight", "m_feesInFlight", "m_intentPriceInFlight", "m_tokenToggleInFlight",
+      ["m_detailsInFlight", "m_feesInFlight", "m_intentPriceInFlight",
        "m_txStatusInFlight"])
-print("   the pricing of another app's request is the fifth: its spinner is the dialog's fee")
+print("   the pricing of another app's request is one of them: its spinner is the dialog's fee")
 print("   line, and its send button waits on it")
 check("...and the send button waits on the pricing",
       "!root.intentSendPricing" in qml_binding("intentSendAccept", "enabled"), True)
@@ -934,91 +929,82 @@ check("...and the button is what opens that menu",
       "tokenSortMenu.popupUnder(tokenSortButton)" in " ".join(qml_item("tokenSortButton")), True)
 check("the strip is gone when there is nothing to order",
       qml_binding("tokenSortStrip", "visible"), "visible: root.tokens.length > 0")
-print("   and the PERSISTED order is adopted from whichever listing lands first. Taken off")
-print("   the catalogue search alone, it was restored only if the user opened Manage tokens")
-print("   and typed — an ordinary launch showed the default whatever was stored")
-check("all three reads take the order off their reply",
-      sorted(f for f in ("loadNetwork", "loadBalancesAndHistory", "runTokenSearch")
+balance_refresh = " ".join(qml_item("balancesRefreshButton"))
+check("the Tokens toolbar can refresh balances on demand",
+      "onClicked: root.backend.refresh()" in balance_refresh, True)
+check("...and cannot stack another read while the balance leg is live",
+      "enabled: root.ready && !root.balancesLoading" in balance_refresh, True)
+check("...with an accessible name for the icon-only control",
+      'ToolTip.text: "Refresh balances"' in balance_refresh, True)
+balance_error = " ".join(qml_item("balanceError_"))
+check("a failed chain replaces its balance with an error symbol",
+      "visible: !root.balancesPending && tokenRow.balanceFailure !== null" in balance_error,
+      True)
+check("...using the standard warning silhouette in the error colour",
+      "source: LogosIcons.warning" in balance_error
+      and "color: Theme.palette.error" in balance_error
+      and "brightness: 1.0" in balance_error, True)
+check("...and hovering it exposes the provider's description",
+      "ToolTip.text: balanceErrorIcon.description" in balance_error
+      and "root.balanceFailureDescription(modelData)" in balance_error, True)
+check("the old detached failure banner is gone", "balanceFailuresFrame" in qml, False)
+print("   and the PERSISTED order is adopted from whichever portfolio listing lands first")
+check("both reads take the order off their reply",
+      sorted(f for f in ("loadNetwork", "loadBalancesAndHistory")
              if "adoptTokenSort(" in fn_body(f)),
-      ["loadBalancesAndHistory", "loadNetwork", "runTokenSearch"])
-print("   three readers, one hazard: a listing issued under the previous order lands after")
+      ["loadBalancesAndHistory", "loadNetwork"])
+print("   two readers, one hazard: a listing issued under the previous order lands after")
 print("   the user has chosen a different one, naming the order they just replaced")
 check("the choice is counted before the call that can pump a stale reply in",
       in_order(fn_body("chooseTokenSort"), "++m_sortChoiceGen", "set_token_sort("), True)
 check("...and the rule that drops one older than it is a pure function, run by a table",
       "adoptedTokenSort(reply, issuedAt, m_sortChoiceGen)" in fn_body("adoptTokenSort"), True)
 
-print("0o) Manage tokens: a SCREEN pushed from the Settings tab, listing what the BACKEND")
-print("    answered for a query. doctests/probe_manage_tokens.qml drives it.")
-print("   the Settings tab is an INDEX: three rows that GO somewhere, the way a token row goes")
-print("   to a token. Each names its destination through one function, so the route into a")
-print("   screen and the work that route owes are in the same place.")
+print("0o) token membership belongs to Token Lists, not to a second editor in Wallet")
 settings = qml[qml.index('objectName: "settingsPage"'):qml.index("// ── token detail")]
-check("the Settings tab offers all three screens",
+check("the Settings tab pushes only the two screens Wallet owns",
       sorted(re.findall(r"onClicked: root\.(open\w+)\(\)", settings)),
-      ["openAddressBook", "openManageTokens", "openNetworks"])
-check("...and each of those PUSHES, so the screen has somewhere to go back to",
+      ["openAddressBook", "openNetworks"])
+check("...and those are the only settings components it pushes",
       sorted({m for m in re.findall(r"nav\.pushItem\((\w+Component)\)", qml)
-              if m in ("addressBookComponent", "networksComponent", "manageTokensComponent")}),
-      ["addressBookComponent", "manageTokensComponent", "networksComponent"])
-print("   opening the catalogue is also what READS it. Keep the two together: when the read")
-print("   sat apart from the route, a route appeared that did not read, and the screen showed")
-print("   an em-dash for ever.")
-check("...and opening it reads, rather than showing the last answer",
-      in_order(qml_fn_body(qml_body, "openManageTokens"),
-               "nav.pushItem(manageTokensComponent)", 'root.searchTokens("")'), True)
-check("...from exactly one place, so no route can reach the screen without it",
-      len([l for l in qml_lines
-           if 'root.searchTokens("")' in l and not l.strip().startswith("//")]), 1)
-print("   the query goes to the BACKEND. The embedded Uniswap list is thousands of rows, so")
-print("   a filter written here would mean pulling all of them across the wire first")
-check("the list renders what the backend answered",
-      qml_binding("manageTokensList", "model"), "model: availableModel")
-print("   as a ListModel grown in place: a ListView handed a NEW array scrolls back to its")
-print("   top, and a page lands while the user is at the bottom")
-_sync = qml_fn_body(qml_body, "syncAvailableModel")
-check("...which is filled from that reply's tokens", "root.availableTokens" in _sync, True)
-check("...appended from where it stands only when the answer says it grew",
-      in_order(_sync, "root.available.appended === true", "availableModel.count <= rows.length",
-               "if (!grows) availableModel.clear()", "for (var i = availableModel.count"), True)
-check("...and the next page is asked for as the end comes into view, once per answer",
-      in_order(" ".join(qml_item("manageTokensList")), "root.availableHasMore",
-               "askedAt === root.availableShown", "root.backend.loadMoreTokens()"), True)
-check("...which is that reply's own tokens, unfiltered and unsorted",
-      [w for w in ("filter(", "sort(", "toLowerCase", "indexOf")
-       if w in qml_decl("availableTokens")], [])
-check("...for THIS chain: a catalogue read under another network is not this one's answer",
-      "available.chainId === net.chainId" in qml_decl("availableForChain"), True)
-print("   which makes a network change withhold every row — and the chain can move without")
-print("   this screen doing anything. Nothing else re-searches, so the screen sat on its")
-print("   \"does not know\" em-dash permanently, recovering only if the user typed")
-chainwatch = [l.strip() for l in qml_lines if l.strip().startswith("onChainIdChanged:")]
-check("a chain change re-asks the catalogue", len(chainwatch), 1)
-check("...for the SAME query, never reset to the whole offered set",
-      "root.searchTokens(root.tokenQuery)" in " ".join(chainwatch), True)
-check("...and only while the screen that shows it is open",
-      "manageTokensOpen" in " ".join(chainwatch), True)
-check("the query the view re-asks with is the one it was given",
-      "root.tokenQuery = query" in qml_fn_body(qml_body, "searchTokens"), True)
-# A ListView inside a ScrollView is two scrollers fighting over one wheel event, and the inner
-# one is handed unbounded height — every row is built at once.
-manage = qml_lines[next(i for i, l in enumerate(qml_lines) if '"manageTokensPage"' in l):
-                   next(i for i, l in enumerate(qml_lines) if "── pending approval" in l)]
-check("the list scrolls itself rather than sitting inside a scroll view",
-      [l.strip() for l in manage if "ScrollView" in l], [])
-check("...and it is the design system's list view",
-      manage[next(i for i, l in enumerate(manage)
-                  if '"manageTokensList"' in l) - 1].strip(), "LogosListView {")
-print("   a press ASKS: set_token_enabled emits no event, so a screen that moved the row")
-print("   itself would be showing a state the backend has not agreed to")
-toggles = [f"EthWalletView.qml:{n}: {l.strip()}" for n, l in enumerate(qml_lines, 1)
-           if not l.strip().startswith("//") and "backend.setTokenEnabled" in l]
-check("exactly one line asks the backend to enable a token", len(toggles), 1)
-check("...and the switch puts its binding back rather than keeping the press",
-      in_order(" ".join(qml_item("manageTokenToggle_")), "var want = checked",
-               "Qt.binding", "root.setTokenEnabled(manageRow.row.address, want)"), True)
-check("...while a builtin, and the native token, cannot be pressed at all",
-      "!manageRow.locked" in qml_binding("manageTokenToggle_", "enabled"), True)
+              if m in ("addressBookComponent", "networksComponent")}),
+      ["addressBookComponent", "networksComponent"])
+token_lists_entry = " ".join(qml_item("tokenListsEntry"))
+check("Token lists is a direct Settings handoff",
+      'root.askFor("evm.token_lists.configure"' in token_lists_entry, True)
+check("...and it names the destination users see", qml_binding("tokenListsEntry", "text"),
+      'text: "Token lists"')
+print("   the old catalogue is absent all the way through the view contract and adapter:")
+print("   hiding its page while retaining its callable toggle would leave two owners.")
+rep = (SRC / "eth_wallet_ui.rep").read_text()
+ownership_surface = qml + hdr + rep + code
+forbidden_token_editor = ["manageTokensComponent", "manageTokensPage", "searchTokens(",
+                          "loadMoreTokens(", "setTokenEnabled(", "availableTokensJson",
+                          "tokenToggleBusy", "tokenToggleError", "list_available_tokens",
+                          "set_token_enabled"]
+check("Wallet exposes no catalogue or token-membership operation",
+      [name for name in forbidden_token_editor if name in ownership_surface], [])
+
+print("0o1) Ethereum RPC owns the network selector; Wallet only reports its in-scope answer")
+forbidden_network_editor = ["walletNetworkScopePicker", "walletChainEnabled_",
+                            "changeChainEnabled", "changeNetworkScope",
+                            "configuredNetworksJson"]
+check("Wallet exposes no network-registry writer or out-of-scope listing",
+      [name for name in forbidden_network_editor if name in ownership_surface], [])
+check("the read-only groups are derived from the in-scope network answer",
+      "networks.filter" in qml_decl("mainnetChains")
+      and "networks.filter" in qml_decl("testnetChains"), True)
+networks_page = qml[qml.index('objectName: "networksPage"'):
+                    qml.index("// The address book")]
+check("each row carries its own verification indication",
+      'objectName: "walletNetworkVerification_"' in networks_page
+      and "root.verificationText(modelData)" in networks_page, True)
+check("the settings handoff remains the one network-changing action",
+      'objectName: "openRpcSettingsButton"' in networks_page
+      and 'text: "Change network settings"' in networks_page
+      and 'root.askFor("evm.rpc.configure"' in networks_page, True)
+check("the aggregate verification badge is gone from the wallet header",
+      'objectName: "verifiedChip"' in qml, False)
 
 print("0o2) the token screen says WHERE a row's name and decimals came from, for every answer")
 print("     the backend can give. eth_wallet_backend's list_tokens documents the vocabulary:")
@@ -1038,107 +1024,32 @@ check("the note is conditional, not a standing claim",
 check("...and no longer says this wallet downloads no token lists",
       "does not download token lists" in qml, False)
 
-print("0p) Manage tokens says WHICH of its several nothings it is looking at. The reply")
-print("    carries three counts and an optional error, and the four answers they encode")
-print("    used to render as one silent screen. doctests/probe_manage_tokens.qml drives")
-print("    each; what is asserted here is that they cannot be COLLAPSED.")
-# The four: the read FAILED (listError), this chain has no list at all (listed: 0, which is
-# the ORDINARY sepolia answer), the answer was CUT (total > shown), and the query matched
-# nothing. Three of them look identical from the row count alone, which is why the row count
-# is not what any of them is keyed on.
-print("   `listed: 0` with no listError is a REAL, COMPLETE answer — the bundled list is a")
-print("   snapshot of a mainnet directory. Only a listError may be worded as a failure")
-check("the failure line is keyed on the error, and on nothing else",
-      qml_binding("manageTokensListNote", "visible"), "visible: root.availableFailed")
-check("...which is the presence of listError, not a count",
-      "available.listError !== undefined" in qml_decl("availableListError"), True)
-check("...and the empty-chain line is keyed on the count, with the error EXCLUDED",
-      in_order(qml_decl("catalogueEmptyForChain"),
-               "!availableFailed", "availableListed === 0"), True)
-check("...so no line can claim both", qml_binding("manageTokensNoCatalogue", "visible"),
-      "visible: root.catalogueEmptyForChain && root.availableTokens.length > 0")
-print("   an absent count is not a count of zero: a reply that named no total may not be")
-print("   rendered as a reply that matched none")
-check("a missing count answers −1, not 0",
-      in_order(qml_fn_body(qml_body, "catalogueCount"),
-               'typeof v === "number"', "? v : -1"), True)
-check("...and a further page is claimed on the answer's own word, not a count comparison",
-      "available.hasMore === true" in qml_decl("availableHasMore"), True)
-print("   and a further page is never silent: both figures reach the screen, on the line")
-print("   that says the list in front of the user is a slice of what matched")
-check("the count line names shown and total",
-      in_order(qml_binding("manageTokensCountNote", "text"),
-               "root.availableShown", "root.availableTotal"), True)
-check("...and is on screen exactly while another page follows",
-      qml_binding("manageTokensCountNote", "visible"), "visible: root.availableHasMore")
-print("   every count the reply carries is READ. A count published and never rendered is a")
-print("   truncation the screen is silent about")
-check("listed, total and shown all reach a property",
-      sorted({k for k in ("listed", "total", "shown")
-              if 'catalogueCount("%s")' % k in qml_body}), ["listed", "shown", "total"])
-print("   a refused write goes to the toggle's OWN line. lastError is at the top of the view,")
-print("   is cleared by the next refresh, and set_token_enabled answers nothing else at all")
-enabled_body = fn_body("setTokenEnabled")
-check("the refusal is published on its own property",
-      in_order(enabled_body, "if (!replyOk(reply))", "setTokenToggleError(refusal(reply"), True)
-check("...and never onto the view's error line, a screen away from the switch",
-      "setLastError" in enabled_body or "failed(" in enabled_body, False)
-check("...cleared before the call, so a stale one cannot stand over a new press",
-      in_order(enabled_body, "setTokenToggleError(QString())",
-               "set_token_enabledAsyncResult"), True)
-check("...and by a new query, which is a new question",
-      "setTokenToggleError(QString())" in fn_body("searchTokens"), True)
-check("the screen renders it beside the rows it is about",
-      qml_binding("manageTokensToggleError", "visible"),
-      "visible: root.tokenToggleError.length > 0")
-
-print("   the toggle is announced, not re-read. set_token_enabled now emits tokens_changed,")
-print("   so a re-read wired to the REPLY would fire twice for this view's own press and")
-print("   never at all for another app's import into token_list")
-check("the toggle's callback does not re-read",
-      any(c in enabled_body for c in ("refreshSoon()", "runTokenSearch()", "refresh()")), False)
+print("0p) Token Lists owns membership; Wallet observes its composer event")
 tokens_changed = handler("Tokens_changed")
-check("the event does, and moves both listings",
-      in_order(tokens_changed, "refreshSoon()", "runTokenSearch()"), True)
-check("...only for the chain on screen, since the payload names one",
-      in_order(tokens_changed, "chainId != shown().chainId", "return"), True)
-check("...and the order event adopts the order it carries",
+check("a token-list change refreshes the portfolio", "refreshSoon()" in tokens_changed, True)
+check("...for every changed chain, because the Tokens tab is a portfolio",
+      "Q_UNUSED(chainId)" in tokens_changed
+      and "chainId != shown().chainId" not in tokens_changed, True)
+check("...without maintaining a second catalogue",
+      any(c in tokens_changed for c in ("runTokenSearch()", "list_available_tokens",
+                                        "set_token_enabled")), False)
+check("the order event adopts the order it carries",
       in_order(handler("Token_sort_changed"), "setTokenSort(order)", "refreshSoon()"), True)
 print("   and eth_rpc is configured from ANOTHER app: applyVerdict stops the verdict poll on")
 print("   a confirmed `off`, so nothing else here would ever notice verification switched on")
 check("the networks event re-reads", "refreshSoon()" in handler("Networks_changed"), True)
 
-print("   WHERE a row's contract came from, on the row. A symbol is not evidence: enabling")
-print("   one is telling this wallet which contract that symbol means")
+print("   token detail still discloses where metadata came from. A symbol is not evidence.")
 src = qml_fn_body(qml_body, "tokenSource")
 check("`builtin` outranks the list that also names it",
       in_order(src, "native === true", "builtin === true", "t.source"), True)
-check("...and `source` is normalised to a closed set, so an unknown one is named as unknown",
+check("...and source is normalised to a closed set",
       in_order(src, '["allowlist", "custom", "downloaded", "embedded", "enabled"]',
                ': "unknown"'), True)
-check("every row carries it", qml_binding("manageTokenSource_", "text"),
-      "text: root.tokenSourceLabel(src)")
-print("   and never the word \"verified\": this view spends that on eth_rpc's proof-backed")
-print("   reads, and a token's provenance proves nothing whatever about a balance")
 lo, hi = qml_fn_lines("tokenSourceLabel")
 check("no provenance label claims verification",
       [f"EthWalletView.qml:{n}" for n in range(lo, hi + 1)
        if re.search(r"verif", qml_lines[n - 1], re.I)], [])
-print("   in flight, and slow. The call's own budget outlasts a user's patience, and rows")
-print("   left standing under a running search answer the query BEFORE it")
-check("both writers raise one busy state",
-      qml_decl("busy"), "readonly property bool busy: root.availableLoading || root.tokenToggleBusy")
-check("...and the line says which rows the user is looking at",
-      "still answer the previous query" in qml_fn_body(qml_body, "busyLine"), True)
-check("...only where there are rows to be wrong about",
-      qml_binding("manageTokensBusyNote", "visible"),
-      "visible: managePage.busy && root.availableTokens.length > 0")
-check("...while the centred block speaks when there are none",
-      qml_binding("manageTokensUnknownNote", "text"),
-      'text: managePage.busy ? managePage.busyLine(false) : "—"')
-check("the slow timer is armed by the busy state and disarmed with it",
-      in_order(" ".join(qml_item("manageTokensPage")), "managePage.searchSlow = false",
-               "slowSearch.restart()", "slowSearch.stop()"), True)
 
 print()
 print("every intent this view asks for is declared in `uses`. An UNDECLARED one fails")
@@ -1221,7 +1132,7 @@ print("write lives on the Address book screen and none of them is reachable from
 picker = qml_body[qml_body.index('objectName: "toAccountsMenu"'):
                   qml_body.index('objectName: "selfSendWarning"')]
 book = qml_body[qml_body.index("id: addressBookComponent"):
-                qml_body.index("id: manageTokensComponent")]
+                qml_body.index("// ── another app asks to send")]
 check("the picker writes nothing to the book",
       "saveContact(" in picker or "forgetContact(" in picker, False)
 check("...and it offers all three sources",
@@ -1265,15 +1176,9 @@ check("there is no Settings popup left to hold links to any of them",
 check("...nor three buttons in the chrome, which is what replaced it",
       [n for n in ("addressBookButton", "networksButton", "manageTokensButton")
        if n in qml_body], [])
-check("...each is a screen the Settings tab pushes, reached by one named function",
+check("...each Wallet-owned destination is reached by one named function",
       all(f"function open{n}()" in qml_body or f"function open{n}() {{" in qml_body
-          for n in ["AddressBook", "Networks", "ManageTokens"]), True)
-print()
-print("what the Tokens screen turns on and off is which tokens this wallet SHOWS. Where they")
-print("come from is device-wide and owned elsewhere, exactly as the endpoint is — so it asks")
-print("for the capability rather than naming the app that has it.")
-check("the Tokens screen offers the way to the lists",
-      'root.askFor("evm.token_lists.configure"' in qml_body, True)
+          for n in ["AddressBook", "Networks"]), True)
 
 print()
 print("overriding a design-system delegate replaces its background too, so a row that looks")

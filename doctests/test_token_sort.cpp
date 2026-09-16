@@ -1,11 +1,10 @@
 // The persisted token order: which replies may speak for it, and which one may not.
 //
-// THE DEFECT THIS EXISTS FOR: adoptTokenSort had exactly ONE call site — the catalogue search —
-// so the order the user chose was restored only if they happened to open Manage tokens and
-// type into it. On an ordinary launch the Tokens tab showed the default order whatever was
-// persisted. Three replies carry `tokenSort`; the rule below says what each may do with it.
+// THE DEFECT THIS EXISTS FOR: adoptTokenSort originally had no startup call site. The order
+// the user chose was therefore not restored on an ordinary launch. Both replies read for the
+// Tokens tab carry `tokenSort`; the rule below says what each may do with it.
 //
-// The second half is the hazard the first half creates. Adopting from three reads means a read
+// The second half is the hazard the first half creates. Adopting from two reads means a read
 // issued under the OLD order can land after the user has picked a new one, naming the order
 // they just replaced — and the menu moves back under their hand. The counter is what stops it.
 //
@@ -47,21 +46,15 @@ const char *TOKENS = R"({"ok":true,"chainId":1,"tokenSort":"balance","tokens":[]
 /// `get_balances`: the reply the Tokens tab is actually built from.
 const char *BALANCES =
     R"({"ok":true,"chainId":1,"address":"0xf39F","tokenSort":"balance","balances":[]})";
-/// `list_available_tokens`: the only one that used to be read.
-const char *CATALOGUE =
-    R"({"ok":true,"chainId":1,"tokenSort":"alpha","listed":40,"total":0,"shown":0,"tokens":[]})";
-
 } // namespace
 
 int main()
 {
-    std::printf("EVERY listing carries the persisted order, so it is restored by whichever\n");
-    std::printf("reply lands first — never only by a search on a screen nobody opened\n");
+    std::printf("Both portfolio listings carry the persisted order, so it is restored by\n");
+    std::printf("whichever reply lands first\n");
     same("the token list, read at startup", adoptedTokenSort(q(TOKENS), 0, 0), q("balance"));
     same("...the balances the tab is built from", adoptedTokenSort(q(BALANCES), 0, 0),
          q("balance"));
-    same("...and the catalogue search, as before", adoptedTokenSort(q(CATALOGUE), 0, 0),
-         q("alpha"));
 
     std::printf("\na reply that does not name an order says nothing about it: the published\n");
     std::printf("order is LEFT ALONE rather than reset to a default nobody chose\n");
@@ -76,30 +69,27 @@ int main()
     same("...nor an empty one", adoptedTokenSort(q(R"({"ok":true,"tokenSort":""})"), 0, 0),
          QString());
 
-    std::printf("\nTHE HAZARD ADOPTING FROM THREE READS CREATES: one issued under the previous\n");
+    std::printf("\nTHE HAZARD ADOPTING FROM TWO READS CREATES: one issued under the previous\n");
     std::printf("order lands after the user picked a different one, and names what they just\n");
     std::printf("replaced. A reply older than the choice may not speak for the order at all\n");
-    same("a listing that crossed the choice", adoptedTokenSort(q(CATALOGUE), 0, 1), QString());
-    same("...the balances too — same reply, same rule", adoptedTokenSort(q(BALANCES), 2, 3),
+    same("a balance listing that crossed the choice", adoptedTokenSort(q(BALANCES), 2, 3),
          QString());
     same("...and the startup token list", adoptedTokenSort(q(TOKENS), 7, 9), QString());
     std::printf("   while a read the choice stood still for is the persisted answer, and is\n");
     std::printf("   exactly how the menu confirms what the backend actually stored\n");
-    same("a read issued after the choice", adoptedTokenSort(q(CATALOGUE), 4, 4), q("alpha"));
-    same("...and one issued after several", adoptedTokenSort(q(BALANCES), 12, 12), q("balance"));
+    same("a read issued after the choice", adoptedTokenSort(q(BALANCES), 12, 12), q("balance"));
 
-    // The rule above is only ever reached from a call site, and the defect WAS the call
-    // sites: one of three. A table that ran the rule and nothing else would have been green
-    // throughout the bug.
+    // The rule above is only ever reached from a call site, and the original defect WAS the
+    // call sites. A table that ran the rule and nothing else would have been green throughout
+    // the bug.
     QFile f(QStringLiteral("../src/eth_wallet_ui_backend.cpp"));
     if (!f.open(QIODevice::ReadOnly)) {
         std::printf("  FAIL  the backend source could not be read\n");
         return 1;
     }
     const QString src = QString::fromUtf8(f.readAll());
-    std::printf("\nand the rule is reached from all three reads. This half is the defect: one\n");
-    std::printf("call site, on the one screen the user need never open\n");
-    for (const char *fn : {"loadNetwork", "loadBalancesAndHistory", "runTokenSearch"}) {
+    std::printf("\nand the rule is reached from both portfolio reads\n");
+    for (const char *fn : {"loadNetwork", "loadBalancesAndHistory"}) {
         const int at = src.indexOf(QStringLiteral("EthWalletUiBackend::%1(")
                                        .arg(QString::fromLatin1(fn)));
         const int end = at < 0 ? -1 : src.indexOf(QStringLiteral("\n}\n"), at);

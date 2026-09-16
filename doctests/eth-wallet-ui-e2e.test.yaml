@@ -16,9 +16,9 @@ sections:
   - title: "Build the pieces"
     step: true
     text: |
-      The wallet UI is one plugin over six modules. `eth_wallet_backend` is a
+      The wallet UI is one plugin over seven modules. `eth_wallet_backend` is a
       dependency of the view; `eth_rpc_module`, `fee_module`, `keystore_module`,
-      `token_list_module` and `tx_sender_module` are dependencies of *it*, and
+      `token_list_module`, `evm_assets_module` and `tx_sender_module` are dependencies of *it*, and
       only one level is bundled — so the rest are staged here rather than assumed.
 
       `capability_module` is not bundled with the standalone host either. Without
@@ -84,6 +84,13 @@ sections:
       - title: "The sender really produced modules"
         check_file: "result-sender/modules"
 
+      - title: "Build the assets module"
+        run: "nix build 'github:logos-co/logos-evm-assets-module#install' --no-write-lock-file -o result-assets"
+        code_block: "nix build 'github:logos-co/logos-evm-assets-module#install' --no-write-lock-file -o result-assets"
+
+      - title: "The assets module really produced modules"
+        check_file: "result-assets/modules"
+
       - title: "Build capability_module"
         run: "nix build 'github:logos-co/logos-capability-module#install' --no-write-lock-file -o result-capability"
         code_block: "nix build 'github:logos-co/logos-capability-module#install' --no-write-lock-file -o result-capability"
@@ -100,6 +107,7 @@ sections:
           cp -r result-rpc/modules/*        tree/modules/
           cp -r result-fee/modules/*        tree/modules/
           cp -r result-tokens/modules/*     tree/modules/
+          cp -r result-assets/modules/*     tree/modules/
           cp -r result-sender/modules/*     tree/modules/
           cp -r result-capability/modules/* tree/modules/
           cp -r result-ui/plugins/*         tree/plugins/
@@ -113,6 +121,7 @@ sections:
           cp -r result-rpc/modules/*      tree/modules/
           cp -r result-fee/modules/*      tree/modules/
           cp -r result-tokens/modules/*   tree/modules/
+          cp -r result-assets/modules/*   tree/modules/
           cp -r result-sender/modules/*   tree/modules/
           cp -r result-ui/plugins/*       tree/plugins/
         expect_contains:
@@ -120,6 +129,7 @@ sections:
           - "keystore_module"
           - "eth_rpc_module"
           - "tx_sender_module"
+          - "evm_assets_module"
           - "eth_wallet_ui"
 
   - title: "The five sections, over a real backend"
@@ -158,14 +168,11 @@ sections:
               property: "objectName"
               value: "ethWalletRoot"
 
-            - name: "The network chip answers, which only a wired backend can do"
-              # Not a literal in the QML: it is composed from what eth_rpc_module
-              # reports through eth_wallet_backend. An unwired view has no chip at
-              # all, and a wired one that could not read shows "—".
+            - name: "The scope chip answers, which only a wired backend can do"
               action: expect_property
               find_value: "chainChip"
               property: "text"
-              value: "ETHEREUM"
+              value: "MAINNETS"
 
             - name: "Tokens is section 0"
               action: call_method
@@ -244,50 +251,15 @@ sections:
               find_value: "nav"
               property: "depth"
               value: 1
-            - name: "...and its three rows are named"
+            - name: "...and its three destinations are named"
               action: wait_for
-              texts: ["Address book", "Networks"]
+              texts: ["Address book", "Networks", "Token lists"]
               timeout: 10000
               screenshot: "eth-wallet-ui-settings.png"
 
-            - name: "A row pushes its screen"
-              # A LogosItemDelegate, so this one IS clickable — unlike the tab bar.
-              action: click_object
-              find_value: "tokensEntry"
-            # A click is DELIVERED, not executed: the inspector returns once the event is
-            # posted, and the handler behind it runs on the app's own loop. Reading straight
-            # after asks a question the app has not reached yet — which is what failed here,
-            # on a loaded runner, having passed every time locally.
-            - name: "let the click be handled"
-              action: sleep
-              ms: 1500
-            - name: "...onto the pane under the strip"
+            - name: "Token lists is a handoff, not a Wallet-owned editor"
               action: expect_property
-              find_value: "nav"
-              property: "depth"
-              value: 2
-            - name: "...and the catalogue screen is really there"
-              action: expect_property
-              find_value: "manageTokensPage"
+              find_value: "tokenListsEntry"
               property: "visible"
               value: true
-            - name: "...with its own way back, which a section had no need of"
-              action: expect_property
-              find_value: "manageTokensTitle"
-              property: "text"
-              value: "Manage tokens"
-              screenshot: "eth-wallet-ui-tokens-screen.png"
-
-            - name: "Going back"
-              action: click_object
-              find_value: "manageTokensBackButton"
-            - name: "let the pop be handled"
-              action: sleep
-              ms: 1500
-            - name: "...leaves the stack where it started"
-              # The stack's depth, not the item's absence: a pop runs a transition, so the
-              # screen is still in the scene for a moment after it has been left.
-              action: expect_property
-              find_value: "nav"
-              property: "depth"
-              value: 1
+              screenshot: "eth-wallet-ui-token-lists-handoff.png"

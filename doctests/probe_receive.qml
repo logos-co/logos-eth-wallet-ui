@@ -71,10 +71,6 @@ Item {
         property string balancesRoute: "direct"
         property string tokensJson: JSON.stringify([{ symbol: "ETH", name: "Ether",
                                                       decimals: 18, native: true }])
-        property string availableTokensJson: ""
-        property bool availableTokensLoading: false
-        property bool tokenToggleBusy: false
-        property string tokenToggleError: ""
         property string historyJson: "[]"
         property string blockedChainsJson: "[]"
         property bool sweepingReceipts: false
