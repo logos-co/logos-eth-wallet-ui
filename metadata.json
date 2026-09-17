@@ -11,8 +11,14 @@
   "icon": "src/icons/eth_wallet.png",
   "view": "qml/EthWalletView.qml",
   "dependencies": [
-    "eth_wallet_backend",
-    "tx_sender_module"
+    {
+      "name": "eth_wallet_backend",
+      "version": "~0.1.0"
+    },
+    {
+      "name": "tx_sender_module",
+      "version": "~0.1.0"
+    }
   ],
   "uses": [
     {
