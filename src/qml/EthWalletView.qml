@@ -4042,7 +4042,9 @@ Item {
     // cannot do: it knows the request finished, not what finishing meant here.
     LogosDialog {
         objectName: "sendOutcomeDialog"
-        title: root.sendOutcome.status === "broadcast" ? "Sent" : "Not sent"
+        // `stuck` is a broadcast that never answered: it may be on chain, so never "Not sent".
+        title: root.sendOutcome.status === "broadcast" ? "Sent"
+             : root.sendOutcome.status === "stuck" ? "Not confirmed" : "Not sent"
         anchors.centerIn: parent
         visible: root.showOutcome
         contentItem: ColumnLayout {

@@ -59,10 +59,19 @@ Backend refusals are shown beside the control or review that caused them. A
 `verified_blocked` response remains a structured safety outcome; the UI does not turn it into
 a generic transport failure.
 
+A pending send is polled through `send_status` until the sender says `final`, and on nothing
+else: a refusal that may yet pass is asked again, never taken as the end of the send. A
+`stuck` broadcast — sent, never answered, possibly on chain — is titled "Not confirmed", not
+"Not sent". Cancel is refused once the broadcast is claimed; the send then ends however the
+poll says.
+
 The app also provides the `evm.transactions.send` intent for QML-only dapps. A request may
 name any enabled in-scope chain, even when it differs from the wallet's current Send cursor.
 The review names that requested network and every call before the signer sees it. Out-of-scope
-chains and inconsistent payloads are refused before approval.
+chains and inconsistent payloads are refused before approval. The app is answered once, when
+the send is final: `ok` with every hash for a broadcast, otherwise the sender's status word as
+the error. Basecamp's broker passes an error code it does not know — `stuck` is one — to the
+app as `failed`, without the data that carries the reason.
 
 ## Accounts and secrets
 
@@ -83,8 +92,8 @@ the header; failures belonging to other portfolio chains stay attached to those 
 
 ## Testing
 
-The local tables execute the pure state transitions, scope guards, intent validation, token
-identity, sweep behavior and QR encoder:
+The local tables execute the pure state transitions, scope guards, intent validation, the
+send-status rule, token identity, sweep behavior and QR encoder:
 
 ```bash
 ./doctests/run_tables.sh
