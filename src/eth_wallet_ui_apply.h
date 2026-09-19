@@ -1,5 +1,6 @@
 #pragma once
 
+#include "eth_wallet_ui_nonce.h"
 #include "eth_wallet_ui_scope.h"
 #include "eth_wallet_ui_sweep.h"
 
@@ -150,7 +151,8 @@ struct HistoryApplied {
     SweepVerdict sweep = SweepVerdict::Unchanged;
 };
 
-inline HistoryApplied applyHistory(ScopedState &s, const QString &reply)
+/// `now` dates the rows, which decides whether a waiting nonce is stuck yet.
+inline HistoryApplied applyHistory(ScopedState &s, const QString &reply, qint64 now)
 {
     // As applyBalances: a reply answering for another selection says nothing here — not about
     // the rows, and not about the sweep schedule.
@@ -161,11 +163,19 @@ inline HistoryApplied applyHistory(ScopedState &s, const QString &reply)
         // UNKNOWN, not "[]": an empty list renders as "No transactions yet", which is an answer
         // a read that FAILED may not give.
         s.history.clear();
+        s.blockedNonces.clear();
         return out;
     }
-    s.history = member(reply, "transactions");
+    const QJsonObject top = parseObject(reply);
+    const QJsonValue txs = top.value(QStringLiteral("transactions"));
+    const QJsonArray rows = markReplaced(txs.toArray());
+    s.history = txs.isArray() ? QString::fromUtf8(QJsonDocument(rows).toJson(QJsonDocument::Compact))
+                              : QString();
     const QString blocked = member(reply, "blockedChains");
     s.blockedChains = blocked.isEmpty() ? QStringLiteral("[]") : blocked;
+    s.blockedNonces = QString::fromUtf8(
+        QJsonDocument(blockedNonces(rows, top.value(QStringLiteral("strandedNonces")).toArray(), now))
+            .toJson(QJsonDocument::Compact));
     return out;
 }
 

@@ -352,6 +352,9 @@ Item {
     // Chains whose blocking proxy froze pending rows — including chains not shown here. Read
     // by the same call as the history, so it is unknown exactly when the history is.
     readonly property var blockedChains: historyKnown ? j(backend.blockedChainsJson, "[]") : []
+    // Per chain, the nonce holding up later sends. From the same read as the history.
+    readonly property var blockedNonces: historyKnown ? j(backend.blockedNoncesJson, "[]") : []
+    readonly property bool resendLoading: ready && backend.resendLoading === true
     readonly property bool sweeping: historyKnown && backend.sweepingReceipts
     // Extra detail for ONE transaction, read on demand. Scoped like every other figure, and it
     // names the transaction it is about — the screen renders it for that hash alone.
@@ -563,6 +566,26 @@ Item {
 
     // One line per chain whose blocking proxy froze rows during the last sweep. `network`
     // and `message` are the backend's own words; the count decides the verb.
+    // One stuck nonce, in words: what holds it, since when, and what waits behind it.
+    function stuckNonceLine(b) {
+        var at = root.networkNameFor(b.chainId) + ": nonce " + b.nonce
+        var when = b.since > 0 ? Qt.formatDateTime(new Date(b.since * 1000), "MMM d, HH:mm") : ""
+        var waiting = b.behind === 1 ? "1 later transaction is" : b.behind + " later transactions are"
+        if (b.why === "stranded")
+            return at + " was reserved but never sent, so " + waiting + " waiting behind it (since "
+                 + when + ")."
+        var what = at + " (" + (b.label || "a transaction") + ", sent " + when + ")"
+             + (b.why === "unresolved" ? " never reported whether it went out" : " has not confirmed")
+        return what + (b.behind > 0 ? ", and " + waiting + " waiting behind it." : ".")
+    }
+    function stuckNonceHint(b) {
+        if (b.resend !== undefined) return ""
+        var via = "send anything at nonce " + b.nonce + " from Send, under Advanced"
+        if (b.why === "stranded") return "To release them, " + via + "."
+        return (b.origin && b.origin !== "eth_wallet_backend" ? "Resend it from " + b.origin + ", or " : "To replace it, ")
+             + via + "."
+    }
+
     function blockedLine(b) {
         var n = b.count === 1 ? "1 transaction" : b.count + " transactions"
         var hint = root.actionHint(b.action)
@@ -838,10 +861,12 @@ Item {
     // Both are still `pending` on disk. Blocked means the chain was never asked at all —
     // the proxy on the row's OWN network is refusing; stalled means we gave up asking.
     function statusText(rec) {
+        if (rec.replaced === true) return "replaced"
         if (rec.verificationBlocked === true) return "not checked"
         return rec.stalled === true ? "unconfirmed" : (rec.status || "")
     }
     function statusColor(rec) {
+        if (rec.replaced === true) return Theme.palette.textSecondary
         return rec.status === "confirmed" ? Theme.palette.success
              : rec.status === "failed" ? Theme.palette.error
                                        : Theme.palette.warning
@@ -1579,6 +1604,54 @@ Item {
                         wrapMode: Text.WordWrap
                         color: Theme.palette.warning
                         text: root.blockedLine(modelData)
+                    }
+                }
+            }
+        }
+
+        // A nonce that holds up later sends, and the one-click way past it: the same transfer,
+        // pinned to that nonce, priced so a node takes it as the replacement.
+        LogosFrame {
+            objectName: "blockedNoncesFrame"
+            Layout.fillWidth: true
+            visible: root.ready && root.blockedNonces.length > 0
+
+            contentItem: ColumnLayout {
+                spacing: Theme.spacing.small
+                Repeater {
+                    model: root.blockedNonces
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: Theme.spacing.small
+                        ColumnLayout {
+                            Layout.fillWidth: true
+                            spacing: Theme.spacing.tiny
+                            LogosText {
+                                objectName: "stuckNonce_" + modelData.chainId
+                                Layout.fillWidth: true
+                                textFormat: Text.PlainText
+                                wrapMode: Text.WordWrap
+                                color: Theme.palette.warning
+                                text: root.stuckNonceLine(modelData)
+                            }
+                            LogosText {
+                                objectName: "stuckNonceHint_" + modelData.chainId
+                                visible: text.length > 0
+                                Layout.fillWidth: true
+                                textFormat: Text.PlainText
+                                wrapMode: Text.WordWrap
+                                color: Theme.palette.textSecondary
+                                font.pixelSize: Theme.typography.secondaryText
+                                text: root.stuckNonceHint(modelData)
+                            }
+                        }
+                        LogosButton {
+                            objectName: "resendNonceButton_" + modelData.chainId
+                            visible: modelData.resend !== undefined
+                            enabled: root.ready && !root.sendPending && !root.resendLoading
+                            text: root.resendLoading ? "Resending…" : "Resend with current fees"
+                            onClicked: root.backend.resendBlockedNonce(modelData.chainId)
+                        }
                     }
                 }
             }
@@ -3098,8 +3171,19 @@ Item {
                     }
 
                     LogosText {
+                        objectName: "txDetailReplacedNote"
+                        visible: txPage.rec.replaced === true
+                        Layout.fillWidth: true
+                        textFormat: Text.PlainText
+                        wrapMode: Text.WordWrap
+                        color: Theme.palette.textSecondary
+                        text: "Another transaction at nonce " + txPage.rec.nonce + " was mined, so this "
+                              + "one never will be. Nothing in it left this account."
+                    }
+
+                    LogosText {
                         objectName: "txDetailStalledNote"
-                        visible: txPage.rec.stalled === true
+                        visible: txPage.rec.stalled === true && txPage.rec.replaced !== true
                         Layout.fillWidth: true
                         textFormat: Text.PlainText
                         wrapMode: Text.WordWrap

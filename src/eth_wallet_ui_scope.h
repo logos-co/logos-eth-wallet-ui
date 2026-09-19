@@ -152,6 +152,8 @@ struct ScopedState {
     QString balancesRoute;
     QString history;
     QString blockedChains;
+    /// The nonce holding up each chain's later sends, from the same history read.
+    QString blockedNonces;
     QString quote = QStringLiteral("{}");
     /// The request the published quote priced. The Send screen renders a figure only while
     /// this still describes the form on screen.
@@ -201,6 +203,7 @@ inline bool enterScope(ScopedState &s, const Selection &to)
     s.balancesRoute.clear();
     s.history.clear();
     s.blockedChains.clear();
+    s.blockedNonces.clear();
     s.txDetails.clear();
     withdrawQuote(s);
     s.sendError.clear();

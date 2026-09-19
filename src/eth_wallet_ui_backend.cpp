@@ -1,5 +1,6 @@
 #include "eth_wallet_ui_backend.h"
 
+#include <QDateTime>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -73,6 +74,7 @@ ScopedState EthWalletUiBackend::scopeSnapshot() const
     s.balancesRoute = balancesRoute();
     s.history = historyJson();
     s.blockedChains = blockedChainsJson();
+    s.blockedNonces = blockedNoncesJson();
     s.quote = quoteJson();
     s.quoteRequest = quoteRequestJson();
     s.quoteStale = quoteStale();
@@ -93,6 +95,7 @@ void EthWalletUiBackend::publishScope(const ScopedState &s)
     setBalancesRoute(s.balancesRoute);
     setHistoryJson(s.history);
     setBlockedChainsJson(s.blockedChains);
+    setBlockedNoncesJson(s.blockedNonces);
     setQuoteJson(s.quote);
     setQuoteRequestJson(s.quoteRequest);
     setQuoteStale(s.quoteStale);
@@ -164,14 +167,16 @@ void EthWalletUiBackend::handOnLane(AsyncLane &lane)
         lane.setLoading(false);
 }
 
-bool EthWalletUiBackend::beginClaim(InFlight &claim, quint64 *slot, const SetLoading &setLoading)
+bool EthWalletUiBackend::beginClaim(InFlight &claim, quint64 *slot, const SetLoading &setLoading,
+                                    int legs)
 {
-    if (!claim.take(kOneCallBudgetMs, slot))
+    const int budgetMs = guardBudgetMs(legs);
+    if (!claim.take(budgetMs, slot))
         return false;
     setLoading(true);
     // The claim is a DEADLINE and a callback can simply never fire. Without this the spinner
     // outlives the call it is about and the button never comes back.
-    QTimer::singleShot(kOneCallBudgetMs + 1, this, [this, &claim, setLoading] {
+    QTimer::singleShot(budgetMs + 1, this, [this, &claim, setLoading] {
         if (!claim.busy())
             setLoading(false);
     });
@@ -420,7 +425,7 @@ void EthWalletUiBackend::applyBalancesReply(const QString &reply)
 void EthWalletUiBackend::applyHistoryReply(const QString &reply)
 {
     ScopedState s = scopeSnapshot();
-    const HistoryApplied h = applyHistory(s, reply);
+    const HistoryApplied h = applyHistory(s, reply, QDateTime::currentSecsSinceEpoch());
     if (h.sweep != SweepVerdict::Unchanged)
         setSweep(h.sweep == SweepVerdict::Run);
     publishScope(s);
@@ -668,6 +673,97 @@ void EthWalletUiBackend::refreshTxStatus(QString hashHex)
             setTxStatusLoading(false);
         },
         Timeout(kCallBudgetMs));
+}
+
+void EthWalletUiBackend::resendBlockedNonce(int chainId)
+{
+    QJsonObject blocked;
+    for (const QJsonValue &v : QJsonDocument::fromJson(blockedNoncesJson().toUtf8()).array())
+        if (v.toObject().value(QStringLiteral("chainId")).toInt() == chainId)
+            blocked = v.toObject();
+    if (blocked.value(QStringLiteral("resend")).toObject().isEmpty() || !pendingRequestId().isEmpty())
+        return;
+    quint64 slot = 0;
+    if (!beginClaim(m_resendInFlight, &slot, [this](bool on) { setResendLoading(on); }, 3))
+        return;
+    const quint64 gen = m_dataGen;
+    const QString hash = blocked.value(QStringLiteral("hash")).toString();
+    if (hash.isEmpty()) {
+        priceResend(blocked, slot, gen);
+        return;
+    }
+    // A stalled row may have mined after the sender stopped asking: then there is nothing to
+    // replace. Any other answer, an error included, still resends.
+    modules().eth_wallet_backend.refresh_tx_statusAsyncResult(selectedAccount(), hash,
+        [this, blocked, slot, gen](logos::AsyncResult<QString> res) {
+            if (!m_resendInFlight.isCurrent(slot) || gen != m_dataGen)
+                return endResend(slot);
+            const QString status = parseObject(res.ok() ? res.value : QString())
+                                       .value(QStringLiteral("status")).toString();
+            if (status == QLatin1String("confirmed") || status == QLatin1String("failed")) {
+                endResend(slot);
+                loadBalancesAndHistory();
+                return;
+            }
+            priceResend(blocked, slot, gen);
+        },
+        Timeout(kCallBudgetMs));
+}
+
+void EthWalletUiBackend::priceResend(const QJsonObject &blocked, quint64 slot, quint64 gen)
+{
+    const int chainId = blocked.value(QStringLiteral("chainId")).toInt();
+    modules().eth_wallet_backend.suggest_feesAsyncResult(chainId,
+        [this, blocked, slot, gen](logos::AsyncResult<QString> res) {
+            if (!m_resendInFlight.isCurrent(slot) || gen != m_dataGen)
+                return endResend(slot);
+            const QString reply = res.ok() ? res.value : QString();
+            const QString failure = QStringLiteral("resend nonce %1: %2")
+                                        .arg(blocked.value(QStringLiteral("nonce")).toInteger());
+            if (!replyOk(reply))
+                return endResend(slot, failure.arg(refusal(reply, QStringLiteral("current fees"))));
+            const QJsonObject tier = parseObject(reply).value(QStringLiteral("tiers")).toObject()
+                                         .value(QStringLiteral("normal")).toObject();
+            const ReplacementFees fees = replacementFees(
+                tier, blocked.value(QStringLiteral("floorMaxFeePerGas")).toString(),
+                blocked.value(QStringLiteral("floorMaxPriorityFeePerGas")).toString());
+            if (!fees.error.isEmpty())
+                return endResend(slot, failure.arg(fees.error));
+            submitResend(resendRequest(blocked, fees), slot);
+        },
+        Timeout(kCallBudgetMs));
+}
+
+void EthWalletUiBackend::submitResend(const QJsonObject &request, quint64 slot)
+{
+    modules().eth_wallet_backend.sendAsyncResult(toJsonCompact(request),
+        [this, request, slot](logos::AsyncResult<QString> res) {
+            if (!m_resendInFlight.isCurrent(slot))
+                return;
+            const QString reply = res.ok() ? res.value : QString();
+            if (!replyOk(reply))
+                return endResend(slot, QStringLiteral("resend nonce %1: %2")
+                                           .arg(request.value(QStringLiteral("nonce")).toInteger())
+                                           .arg(reply.isEmpty() ? QStringLiteral("the backend did not answer")
+                                                                : replyError(reply)));
+            endResend(slot);
+            // Taken even if the selection moved: the approval exists, and the poll ends it.
+            const QJsonObject o = parseObject(reply);
+            setLastSendOutcomeJson(QString());
+            setPendingApprovalHandle(o.value(QStringLiteral("handle")).toString());
+            setPendingRequestId(o.value(QStringLiteral("requestId")).toString());
+            m_sendPoll.start();
+        },
+        Timeout(kCallBudgetMs));
+}
+
+void EthWalletUiBackend::endResend(quint64 slot, const QString &error)
+{
+    m_resendInFlight.release(slot);
+    if (m_resendInFlight.isCurrent(slot))
+        setResendLoading(false);
+    if (!error.isEmpty())
+        setLastError(error);
 }
 
 void EthWalletUiBackend::fetchTxDetails(QString hashHex)

@@ -633,9 +633,9 @@ check("fetchTxDetails: claim, call, own the reply, apply, publish",
       in_order(fn_body("fetchTxDetails"), "beginClaim(m_detailsInFlight",
                "get_tx_detailsAsyncResult", "isCurrent(slot)", "applyTxDetails(",
                "publishScope("), True)
-check("...and the claim arms the lapse that lowers its spinner",
-      in_order(fn_body("beginClaim"), "take(kOneCallBudgetMs", "setLoading(true)",
-               "singleShot", "setLoading(false)"), True)
+check("...and the claim arms the lapse that lowers its spinner, on the claim's own budget",
+      in_order(fn_body("beginClaim"), "guardBudgetMs(legs)", "take(budgetMs", "setLoading(true)",
+               "singleShot(budgetMs", "setLoading(false)"), True)
 print("   control: the button is its own control, NOT the header refresh — that one re-reads")
 print("   the receipt, which is a different question with a different answer")
 check("the header refresh still calls refreshTxStatus",
@@ -757,10 +757,17 @@ check("every back arrow is one size",
       sorted({re.search(r"iconSize: (\d+)", b).group(1) for b in backs}), ["20"])
 check("...on every screen there is to leave", len(backs), 4)
 
-check("the four spinner-bearing claims",
+check("the five spinner-bearing claims",
       sorted(set(re.findall(r"beginClaim\((m_\w+)", code))),
       ["m_detailsInFlight", "m_feesInFlight", "m_intentPriceInFlight",
-       "m_txStatusInFlight"])
+       "m_resendInFlight", "m_txStatusInFlight"])
+print("   the resend holds one claim across its three legs: the receipt, the fees, the send")
+check("resendBlockedNonce: one claim for three legs, the receipt re-read first",
+      in_order(fn_body("resendBlockedNonce"), "beginClaim(m_resendInFlight", ", 3)",
+               "refresh_tx_statusAsyncResult", "priceResend("), True)
+check("...then the fees, priced past the floor, then the send",
+      in_order(fn_body("priceResend"), "suggest_feesAsyncResult", "replacementFees(",
+               "submitResend(") and "sendAsyncResult" in fn_body("submitResend"), True)
 print("   the pricing of another app's request is one of them: its spinner is the dialog's fee")
 print("   line, and its send button waits on it")
 check("...and the send button waits on the pricing",
