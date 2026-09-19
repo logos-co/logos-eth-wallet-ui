@@ -1,0 +1,6 @@
+module com.logos.module.eth_wallet_ui.kit
+DetailRow 1.0 DetailRow.qml
+FeeTierPicker 1.0 FeeTierPicker.qml
+TxAdvancedFields 1.0 TxAdvancedFields.qml
+TxFeeSummary 1.0 TxFeeSummary.qml
+TxReviewDialog 1.0 TxReviewDialog.qml

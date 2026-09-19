@@ -39,6 +39,7 @@ public:
     void cancelSend() override;
     void refreshTxStatus(QString hashHex) override;
     void resendBlockedNonce(int chainId) override;
+    void dismissResend() override;
     void fetchTxDetails(QString hashHex) override;
     void refreshVerifiedProxy() override;
     void refreshPending() override;
@@ -99,9 +100,9 @@ private:
     /// One quote, priced asynchronously.
     void runQuote(const QString &requestJson, bool interactive);
 
-    /// The resend's second and third legs: price it past the floor, then submit it.
+    /// The resend's second and third legs: price it past the floor, then quote it for review.
     void priceResend(const QJsonObject &blocked, quint64 slot, quint64 gen);
-    void submitResend(const QJsonObject &request, quint64 slot);
+    void quoteResend(const QJsonObject &request, quint64 slot, quint64 gen);
     void endResend(quint64 slot, const QString &error = QString());
 
     /// Take the order a listing reply rode back on. list_tokens and get_balances both carry
@@ -162,7 +163,7 @@ private:
     InFlight m_detailsInFlight;
     /// One receipt re-read at a time, on the same terms as the fetch above.
     InFlight m_txStatusInFlight;
-    /// One resend at a time, across its receipt check, fee read and send.
+    /// One resend at a time, across its receipt check, fee read and quote.
     InFlight m_resendInFlight;
     /// One quote at a time, with exactly one re-price coalesced behind it: a keystroke
     /// arriving mid-call must still be priced, but every keystroke must not be a round-trip.

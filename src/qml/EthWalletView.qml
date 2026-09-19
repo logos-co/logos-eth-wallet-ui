@@ -4,6 +4,7 @@ import QtQuick.Layouts 1.15
 import Logos.Controls
 import Logos.Icons
 import Logos.Theme
+import "kit" as Kit
 import "qrcodegen.js" as QrGen
 
 // The Ethereum wallet.
@@ -189,11 +190,13 @@ Item {
         function onPendingRequestIdChanged() {
             if (root.sendPending) {
                 root.sendSubmitting = false
+                sendReview.close()
                 // The transaction exists now, so leave the form for where it shows up.
                 // Tab first, then clear: an emptied form re-priced while still on screen
-                // is a quote for a send nobody is making.
+                // is a quote for a send nobody is making. A resend leaves the form alone.
                 root.selectTab(3)
-                sendPage.clearForm()
+                if (!root.resendSubmitted) sendPage.clearForm()
+                root.resendSubmitted = false
             } else if (root.intentSendRequestId !== "" && root.backend.lastSendOutcomeJson !== ""
                        && !root.intentSendOpen) {
                 // The outcome is published a beat BEFORE the id clears; whichever lands
@@ -202,7 +205,10 @@ Item {
             }
         }
         function onSendErrorChanged() {
-            if (root.backend.sendError.length > 0) root.sendSubmitting = false
+            if (root.backend.sendError.length > 0) {
+                root.sendSubmitting = false
+                root.resendSubmitted = false
+            }
         }
 
         // The handle arrives with the request id, and asking is the whole point of having it.
@@ -355,6 +361,29 @@ Item {
     // Per chain, the nonce holding up later sends. From the same read as the history.
     readonly property var blockedNonces: historyKnown ? j(backend.blockedNoncesJson, "[]") : []
     readonly property bool resendLoading: ready && backend.resendLoading === true
+    // A priced resend awaiting review: { request, quote }, withdrawn with the account.
+    readonly property var resendReview: scoped ? j(backend.resendReviewJson, "{}") : ({})
+    property bool resendSubmitted: false
+
+    // A priced transfer as the review shows it: what leaves, to whom, and the one call.
+    function transferRows(q, prefix, network) {
+        var isNative = q.token === null || q.token === undefined
+        var rows = [
+            { name: prefix + "Amount", label: "You send", value: (q.amountExact || "—") + " " + (q.amountSymbol || "") },
+            { name: prefix + "To", label: "To", value: root.namedAddr(q.to || "") },
+            { name: prefix + "Network", label: "Network", value: network }
+        ]
+        if (isNative && q.maxCostWeiDisplay !== undefined)
+            rows.push({ name: prefix + "Total", label: "Total",
+                        value: "at most " + q.maxCostWeiDisplay + " " + (q.nativeSymbol || root.nativeSymbol) })
+        return rows
+    }
+    function transferCalls(q) {
+        if (q.to === undefined) return []
+        var isNative = q.token === null || q.token === undefined
+        return [isNative ? { label: "Send " + (q.amountSymbol || ""), to: q.to, value: q.amount }
+                       : { label: "Transfer " + (q.amountSymbol || ""), to: q.tokenAddress, value: "0" }]
+    }
     readonly property bool sweeping: historyKnown && backend.sweepingReceipts
     // Extra detail for ONE transaction, read on demand. Scoped like every other figure, and it
     // names the transaction it is about — the screen renders it for that hash alone.
@@ -2053,12 +2082,8 @@ Item {
                         function clearForm() {
                             toField.text = ""
                             amountField.text = ""
-                            maxFeeField.text = ""
-                            maxPriorityFeeField.text = ""
-                            gasLimitField.text = ""
-                            nonceField.text = ""
-                            advanced.checked = false
-                            tierGroup.selected = "normal"
+                            advanced.clear()
+                            tierGroup.tier = "normal"
                         }
                         // Entering and leaving, in place of onOpened/onClosed: StackLayout
                         // gives exactly one child `visible`, and it falls the same way when
@@ -2095,18 +2120,20 @@ Item {
                                         // TOKEN units — "0.1" ETH, not 10^17 wei. `amount` still means base units
                                         // on the wire, so the two are separate fields and never reinterpreted.
                                         amountUnits: amountField.text.trim(),
-                                        tier: tierGroup.selected
+                                        tier: tierGroup.tier
                                     }
                                     if (sendPage.token.length) r.token = sendPage.token
                                     // The contract, exactly. `token` is a label two of them may share; this is the
                                     // field that decides which one moves, and the backend resolves it first.
                                     if (sendPage.tokenAddress.length) r.tokenAddress = sendPage.tokenAddress
-                                    if (advanced.checked) {
-                                        if (maxFeeField.text.length) r.maxFeePerGas = maxFeeField.text.trim()
-                                        if (maxPriorityFeeField.text.length) r.maxPriorityFeePerGas = maxPriorityFeeField.text.trim()
-                                        if (gasLimitField.text.length) r.gasLimit = gasLimitField.text.trim()
-                                        if (nonceField.text.length) r.nonce = parseInt(nonceField.text.trim())
+                                    // Both fee fields or neither: an older fee_module prices a lone one at the tier.
+                                    var o = advanced.overrides
+                                    if (o.maxFeePerGas !== undefined) {
+                                        r.maxFeePerGas = o.maxFeePerGas
+                                        r.maxPriorityFeePerGas = o.maxPriorityFeePerGas
                                     }
+                                    if (o.gasLimits !== undefined && o.gasLimits[0] !== null) r.gasLimit = o.gasLimits[0]
+                                    if (o.nonce !== undefined) r.nonce = o.nonce
                                     return JSON.stringify(r)
                                 }
 
@@ -2314,33 +2341,8 @@ Item {
                                                                               : "Amount"
                                 }
 
-                                // Fee tiers. Labelled Low / Market / Advanced after the reference; the wire names
-                                // stay slow/normal/fast, which is what fee_module speaks.
-                                // The variant binding is what makes the default visible: Market is already the
-                                // selected tier, but three identical Secondary buttons said so nowhere.
-                                RowLayout {
-                                    id: tierGroup
-                                    property string selected: "normal"
-                                    spacing: Theme.spacing.tiny
-                                    LogosButton {
-                                        objectName: "tierSlow"; text: "Low"
-                                        variant: tierGroup.selected === "slow" ? LogosButton.Variant.Primary
-                                                                               : LogosButton.Variant.Secondary
-                                        onClicked: tierGroup.selected = "slow"
-                                    }
-                                    LogosButton {
-                                        objectName: "tierNormal"; text: "Market"
-                                        variant: tierGroup.selected === "normal" ? LogosButton.Variant.Primary
-                                                                                 : LogosButton.Variant.Secondary
-                                        onClicked: tierGroup.selected = "normal"
-                                    }
-                                    LogosButton {
-                                        objectName: "tierFast"; text: "Fast"
-                                        variant: tierGroup.selected === "fast" ? LogosButton.Variant.Primary
-                                                                               : LogosButton.Variant.Secondary
-                                        onClicked: tierGroup.selected = "fast"
-                                    }
-                                }
+                                // Low / Market / Fast, the wire names fee_module's slow / normal / fast.
+                                Kit.FeeTierPicker { id: tierGroup }
 
                                 // Where the numbers came from. A wallet quietly pricing off legacy gasPrice is how
                                 // an overpayment goes unnoticed, so the source is on screen rather than in a log.
@@ -2353,16 +2355,13 @@ Item {
                                     running: visible
                                     ringColor: Theme.palette.textSecondary
                                 }
-                                LogosText {
-                                    objectName: "feeSourceLabel"
-                                    visible: !root.feesPending
-                                    textFormat: Text.PlainText
-                                    color: Theme.palette.textSecondary
-                                    // Gated on the FIGURES like everything else here: `root.fees` is read under no
-                                    // request, so it named a basis for a quote the form had already withdrawn.
-                                    text: sendForm.q.ok !== true ? ""
-                                        : sendForm.q.feeSource !== undefined ? "Fee basis: " + sendForm.q.feeSource
-                                        : root.fees.source !== undefined ? "Fee basis: " + root.fees.source : ""
+                                // What the quote priced, only while it priced the form on screen.
+                                Kit.TxFeeSummary {
+                                    id: feeSummary
+                                    objectName: "sendFeeSummary"
+                                    quote: sendForm.q.ok === true ? sendForm.q : ({})
+                                    tier: tierGroup.tier
+                                    nativeSymbol: root.nativeSymbol
                                 }
 
                                 // The chip in the header speaks for the balances only. These figures come from
@@ -2375,18 +2374,6 @@ Item {
                                     color: Theme.palette.textSecondary
                                     font.pixelSize: Theme.typography.secondaryText
                                     text: "Fee figures are " + root.routeNote(sendForm.q.feeRoute)
-                                }
-
-                                LogosText {
-                                    objectName: "quoteSummary"
-                                    textFormat: Text.PlainText
-                                    wrapMode: Text.WordWrap
-                                    Layout.fillWidth: true
-                                    text: sendForm.q.ok === true
-                                          ? "Gas limit " + sendForm.q.gasLimit
-                                            + " · max fee " + sendForm.q.maxFeePerGas
-                                            + " · nonce " + sendForm.q.nonce
-                                          : ""
                                 }
 
                                 // WHICH CONTRACT THE FIGURES PRICED, taken from prepare_send's own reply rather
@@ -2416,19 +2403,6 @@ Item {
                                     }
                                 }
 
-                                // "at most", never "the fee": maxFeePerGas is a ceiling the user is not charged.
-                                // A wallet presenting a ceiling as a price is how an overpayment goes unnoticed.
-                                LogosText {
-                                    objectName: "feeEstimate"
-                                    textFormat: Text.PlainText
-                                    Layout.fillWidth: true
-                                    wrapMode: Text.WordWrap
-                                    text: sendForm.q.feeCeilingWeiDisplay !== undefined
-                                          ? "Network fee at most " + sendForm.q.feeCeilingWeiDisplay + " "
-                                            + (sendForm.q.nativeSymbol || "") + " (" + tierGroup.selected + ")"
-                                          : ""
-                                }
-
                                 // The figures are withdrawn the moment the request changes, so this is the only
                                 // thing standing where they were. Text, not a spinner: this column already speaks
                                 // in sentences and a fourth idiom would not read as one screen.
@@ -2450,42 +2424,10 @@ Item {
                                           + "you submit it."
                                 }
 
-                                LogosCheckbox {
+                                // The user's own fees, gas limit and nonce, in wei per gas, over the quote's.
+                                Kit.TxAdvancedFields {
                                     id: advanced
-                                    objectName: "advancedToggle"
-                                    text: "Advanced"
-                                }
-
-                                // Prefilled from the quote, so every field shows where its value came from rather
-                                // than sitting empty. These stay in WEI PER GAS: they are prices, not amounts,
-                                // and a gas price in token units would be nonsense.
-                                ColumnLayout {
-                                    visible: advanced.checked
-                                    Layout.fillWidth: true
-                                    LogosTextField {
-                                        id: maxFeeField; objectName: "maxFeeField"; Layout.fillWidth: true
-                                        placeholderText: sendForm.q.maxFeePerGas !== undefined
-                                                         ? "Max fee (wei per gas, suggested " + sendForm.q.maxFeePerGas + ")"
-                                                         : "Max fee (wei per gas)"
-                                    }
-                                    LogosTextField {
-                                        id: maxPriorityFeeField; objectName: "maxPriorityFeeField"; Layout.fillWidth: true
-                                        placeholderText: sendForm.q.maxPriorityFeePerGas !== undefined
-                                                         ? "Priority fee (wei per gas, suggested " + sendForm.q.maxPriorityFeePerGas + ")"
-                                                         : "Priority fee (wei per gas)"
-                                    }
-                                    LogosTextField {
-                                        id: gasLimitField; objectName: "gasLimitField"; Layout.fillWidth: true
-                                        placeholderText: sendForm.q.gasLimit !== undefined
-                                                         ? "Gas limit (estimated " + sendForm.q.gasLimit + ")"
-                                                         : "Gas limit"
-                                    }
-                                    LogosTextField {
-                                        id: nonceField; objectName: "nonceField"; Layout.fillWidth: true
-                                        placeholderText: sendForm.q.nonce !== undefined
-                                                         ? "Nonce (next is " + sendForm.q.nonce + ")"
-                                                         : "Nonce"
-                                    }
+                                    quote: sendForm.q.ok === true ? sendForm.q : ({})
                                 }
 
                                 // Beside the control that caused it, rather than on the wallet's own error
@@ -2526,11 +2468,8 @@ Item {
                                         objectName: "sendSubmitButton"
                                         text: root.netKnown ? "Send on " + root.networkLabel() : "Send"
                                         enabled: root.ready && !root.sendPending && !root.sendSubmitting
-                                                 && sendForm.q.ok === true
-                                        onClicked: {
-                                            root.sendSubmitting = true
-                                            root.backend.submitSend(sendForm.formRequest)
-                                        }
+                                                 && sendForm.q.ok === true && advanced.error.length === 0
+                                        onClicked: sendReview.open()
                                     }
                                 }
                             }
@@ -3967,129 +3906,96 @@ Item {
     // (attested by the shell), what they claim it is for, every call with its contract and
     // value, and the fee ceiling the sender priced. Declining answers the app `cancelled`;
     // sending makes it the wallet's own pending send, and the app hears the outcome.
-    LogosDialog {
+    Kit.TxReviewDialog {
         objectName: "intentSendDialog"
         title: "An app asks to send"
-        anchors.centerIn: parent
+        prefix: "intentSend"
         width: 480
         visible: root.intentSendOpen
-        contentItem: ColumnLayout {
-            spacing: Theme.spacing.small
-            DetailRow {
-                objectName: "intentSendRequester"
-                label: "Asked by"
-                value: root.intentSend.requester !== undefined && String(root.intentSend.requester).length
-                       ? String(root.intentSend.requester) : "an app the shell did not name"
-            }
-            DetailRow {
-                objectName: "intentSendPurpose"
-                label: "Purpose (claimed)"
-                value: root.intentSend.purpose !== undefined ? String(root.intentSend.purpose) : ""
-            }
-            DetailRow {
-                objectName: "intentSendFrom"
-                label: "From"
-                mono: true
-                value: root.namedAddr(root.intentSend.from || "")
-            }
-            DetailRow {
-                objectName: "intentSendNetwork"
-                label: "Network"
-                value: root.networkNameFor(root.intentSend.chainId)
-            }
-            LogosText {
-                text: "Transactions to approve"
-                color: Theme.palette.textSecondary
-                font.pixelSize: Theme.typography.secondaryText
-            }
-            Repeater {
-                model: root.intentSend.calls !== undefined ? root.intentSend.calls : []
-                ColumnLayout {
-                    Layout.fillWidth: true
-                    spacing: 0
-                    // No raw wei here: the ether every call carries is summed by the sender and
-                    // shown in the native unit on the Value row below.
-                    LogosText {
-                        objectName: "intentSendCall_" + index
-                        Layout.fillWidth: true
-                        textFormat: Text.PlainText
-                        wrapMode: Text.WordWrap
-                        text: (index + 1) + ". " + (modelData.label || "") + " · " + root.namedAddr(modelData.to)
-                              + (modelData.value !== undefined && String(modelData.value) !== "0"
-                                 && String(modelData.value) !== "0x0" ? " · carries ether" : "")
-                    }
-                    LogosText {
-                        objectName: "intentSendCallData_" + index
-                        Layout.fillWidth: true
-                        visible: modelData.data !== undefined && String(modelData.data).length > 2
-                        textFormat: Text.PlainText
-                        elide: Text.ElideMiddle
-                        color: Theme.palette.textSecondary
-                        font.family: Theme.typography.mono
-                        font.pixelSize: Theme.typography.secondaryText
-                        text: modelData.data !== undefined ? String(modelData.data) : ""
-                    }
-                }
-            }
-            DetailRow {
-                objectName: "intentSendValue"
-                visible: root.intentSend.fee !== undefined && root.intentSend.fee.valueWeiDisplay !== undefined
-                label: "Ether sent"
-                value: root.intentSend.fee !== undefined && root.intentSend.fee.valueWeiDisplay !== undefined
-                       ? root.intentSend.fee.valueWeiDisplay + " " + (root.intentSend.fee.nativeSymbol || root.nativeSymbol)
-                       : ""
-            }
-            LogosText {
-                objectName: "intentSendFee"
-                Layout.fillWidth: true
-                textFormat: Text.PlainText
-                wrapMode: Text.WordWrap
-                color: root.intentSend.feeError !== undefined ? Theme.palette.error : Theme.palette.text
-                text: root.intentSendPricing ? "Pricing…"
-                    : root.intentSend.fee !== undefined && root.intentSend.fee.feeCeilingWeiDisplay !== undefined
-                      ? "Network fee at most " + root.intentSend.fee.feeCeilingWeiDisplay + " "
-                        + (root.intentSend.fee.nativeSymbol || root.nativeSymbol)
-                    : root.intentSend.feeError !== undefined ? "Fee: " + root.intentSend.feeError : ""
-            }
-            LogosText {
-                objectName: "intentSendNote"
-                Layout.fillWidth: true
-                wrapMode: Text.WordWrap
-                color: Theme.palette.textSecondary
-                font.pixelSize: Theme.typography.secondaryText
-                text: "The signer asks once for all of them. Nothing is sent until it says yes, "
-                      + "and the app is told how it ended."
-            }
-            LogosText {
-                objectName: "intentSendError"
-                visible: root.intentSend.sendError !== undefined
-                Layout.fillWidth: true
-                textFormat: Text.PlainText
-                wrapMode: Text.WordWrap
-                color: Theme.palette.error
-                text: root.intentSend.sendError !== undefined ? String(root.intentSend.sendError) : ""
-            }
-            RowLayout {
-                Layout.fillWidth: true
-                LogosButton {
-                    objectName: "intentSendDecline"
-                    text: "Decline"
-                    onClicked: {
-                        root.backend.declineIntentSend()
-                        root.answerIntent(false, ({}), "cancelled")
-                    }
-                }
-                Item { Layout.fillWidth: true }
-                LogosButton {
-                    objectName: "intentSendAccept"
-                    variant: LogosButton.Variant.Primary
-                    text: root.intentSend.chainId !== undefined
-                          ? "Send on " + root.networkNameFor(root.intentSend.chainId) : "Send"
-                    enabled: root.ready && !root.sendPending && !root.intentSendPricing
-                    onClicked: root.backend.acceptIntentSend()
-                }
-            }
+        readonly property var fee: root.intentSend.fee !== undefined ? root.intentSend.fee : ({})
+        quote: fee
+        nativeSymbol: root.nativeSymbol
+        pricing: root.intentSendPricing
+        feeError: root.intentSend.feeError !== undefined ? String(root.intentSend.feeError) : ""
+        rows: [
+            { name: "intentSendRequester", label: "Asked by",
+              value: root.intentSend.requester !== undefined && String(root.intentSend.requester).length
+                     ? String(root.intentSend.requester) : "an app the shell did not name" },
+            { name: "intentSendPurpose", label: "Purpose (claimed)",
+              value: root.intentSend.purpose !== undefined ? String(root.intentSend.purpose) : "" },
+            { name: "intentSendFrom", label: "From", mono: true, value: root.namedAddr(root.intentSend.from || "") },
+            { name: "intentSendNetwork", label: "Network", value: root.networkNameFor(root.intentSend.chainId) }
+        ].concat(fee.valueWeiDisplay !== undefined
+                 ? [{ name: "intentSendValue", label: "Ether sent", value: fee.valueWeiDisplay + " " + (fee.nativeSymbol || root.nativeSymbol) }]
+                 : [])
+        callList: root.intentSend.calls !== undefined ? root.intentSend.calls : []
+        showCallData: true
+        nameOf: root.namedAddr
+        note: "The signer asks once for all of them. Nothing is sent until it says yes, and the app is told how it ended."
+        error: root.intentSend.sendError !== undefined ? String(root.intentSend.sendError) : ""
+        cancelText: "Decline"
+        confirmText: root.intentSend.chainId !== undefined ? "Send on " + root.networkNameFor(root.intentSend.chainId) : "Send"
+        confirmEnabled: root.ready && !root.sendPending && !root.intentSendPricing
+        onCancelled: {
+            root.backend.declineIntentSend()
+            root.answerIntent(false, ({}), "cancelled")
         }
+        onConfirmed: root.backend.acceptIntentSend()
+    }
+
+    // ── review, before anything is asked of the sender ────────────────────────────
+    //
+    // What the signer will be asked to approve, in the wallet's own terms, with the fee
+    // ceiling and the nonce. Confirm is the old Send: a refusal stays here, beside its reason.
+    Kit.TxReviewDialog {
+        id: sendReview
+        objectName: "sendReviewDialog"
+        title: "Review send"
+        prefix: "sendReview"
+        readonly property var sq: sendForm.q.ok === true ? sendForm.q : ({})
+        quote: sq
+        tier: tierGroup.tier
+        nativeSymbol: root.nativeSymbol
+        rows: root.transferRows(sq, "sendReview", root.networkLabel())
+        callList: root.transferCalls(sq)
+        nameOf: root.namedAddr
+        error: root.ready ? root.backend.sendError : ""
+        confirmText: "Confirm send"
+        busy: root.sendSubmitting
+        confirmEnabled: root.ready && !root.sendPending && sendForm.q.ok === true
+        onConfirmed: {
+            root.sendSubmitting = true
+            root.backend.submitSend(sendForm.formRequest)
+        }
+        onCancelled: close()
+    }
+
+    // ── a stuck nonce's resend, reviewed ─────────────────────────────────────────
+    //
+    // The same transfer, pinned to the nonce holding the queue up, at fees a node takes as its
+    // replacement. Confirm goes out through submitSend, like any send.
+    Kit.TxReviewDialog {
+        objectName: "resendReviewDialog"
+        title: "Resend with current fees"
+        prefix: "resendReview"
+        readonly property var rq: root.resendReview.quote !== undefined ? root.resendReview.quote : ({})
+        visible: root.ready && root.resendReview.request !== undefined
+        quote: rq
+        tier: "normal"
+        nativeSymbol: root.nativeSymbol
+        rows: root.transferRows(rq, "resendReview", root.networkNameFor(rq.chainId))
+        callList: root.transferCalls(rq)
+        nameOf: root.namedAddr
+        error: root.ready ? root.backend.sendError : ""
+        confirmText: "Resend"
+        busy: root.sendSubmitting
+        confirmEnabled: root.ready && !root.sendPending
+        onConfirmed: {
+            root.sendSubmitting = true
+            root.resendSubmitted = true
+            root.backend.submitSend(JSON.stringify(root.resendReview.request))
+        }
+        onCancelled: root.backend.dismissResend()
     }
 
     // ── pending approval ──────────────────────────────────────────────────────────
