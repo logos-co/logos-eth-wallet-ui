@@ -2,10 +2,10 @@ name: CI
 
 # The offline half of this view's suite — the half that needs no app.
 #
-# What runs: the nine C++ tables over the pure headers in src/, the JS table
-# over the view's own QR encoder, the zbar decode of the codes it renders (the
-# one check here with a non-Qt system dependency), the eight QML probes that
-# load the real view against a fabricated backend, and the source assertions in
+# What runs: the C++ tables over the pure headers in src/, the JS table over
+# the view's own QR encoder, the zbar decode of the codes it renders (the one
+# check here with a non-Qt system dependency), the QML probes that load the
+# real view against a fabricated backend, and the source assertions in
 # assert_ui.py --grep-only.
 #
 # What does NOT run, and why: sections 1 and up of assert_ui.py, and
