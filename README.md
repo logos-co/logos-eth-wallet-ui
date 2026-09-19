@@ -82,7 +82,8 @@ pending transaction's and at least 10% above it on both fields, the minimum a no
 accept a replacement. The receipt is re-read first, so a row that mined after the sender
 stopped asking is not resent. Another app's call and a gap get a hint instead: replace it from
 Send with the nonce under Advanced. A row whose nonce another transaction mined reads
-"replaced".
+"replaced": tx_sender settles it so itself, and for a sender that predates that status the
+wallet sees it from another row at the same nonce.
 
 The app also provides the `evm.transactions.send` intent for QML-only dapps. A request may
 name any enabled in-scope chain, even when it differs from the wallet's current Send cursor.
