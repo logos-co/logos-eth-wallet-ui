@@ -3326,7 +3326,10 @@ Item {
                                     spacing: 2
                                     DetailRow {
                                         objectName: "txDetailTransferAmount_" + index
-                                        label: modelData.mine === true ? "Sent" : "Transferred"
+                                        // Received: what came in, such as a swap's other side.
+                                        label: modelData.mine === true ? "Sent"
+                                             : root.sameHex(modelData.to, txPage.rec.from) ? "Received"
+                                             : "Transferred"
                                         value: root.transferAmount(modelData)
                                         // The exact figure where we have one; the raw integer is
                                         // already exact, and is what a user would paste elsewhere.

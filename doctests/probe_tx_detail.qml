@@ -97,7 +97,10 @@ Item {
               known: true, mine: true, symbol: "WETH", decimals: 18,
               amountDisplay: "<0.00001", amountExact: "0.000001" },
             { contract: probe.stranger, from: probe.them, to: probe.me, amount: "42000000",
-              known: false, mine: false }
+              known: false, mine: false },
+            { contract: probe.weth, from: probe.them, to: probe.stranger, amount: "5",
+              known: true, mine: false, symbol: "WETH", decimals: 18,
+              amountDisplay: "<0.00001", amountExact: "0.000000000000000005" }
         ]
     }, {
         // A plain ether send: recipient and target are the same address, so there is no second
@@ -275,6 +278,10 @@ Item {
         check("...and so are the second transfer's, which is not ours",
               row("txDetailTransferFrom_1Copy").value, probe.them)
         check("...both ends of it", row("txDetailTransferTo_1Copy").value, probe.me)
+        check("a transfer INTO this account says so",
+              row("txDetailTransferAmount_1").label, "Received")
+        check("...and one between two other addresses says neither",
+              row("txDetailTransferAmount_2").label, "Transferred")
         check("what the cap dropped is counted", row("txDetailTransfersMore").text,
               "+3 more transfers in this transaction")
 
