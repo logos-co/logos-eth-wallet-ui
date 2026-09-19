@@ -27,8 +27,8 @@ concurrency:
 
 jobs:
 
-  # The e2e spec only. The offline half of this repo's suite — seven C++ tables,
-  # eight QML probes and assert_ui.py's source assertions — is ci.yml's job and
+  # The e2e spec only. The offline half of this repo's suite — the C++ tables,
+  # the QML probes and assert_ui.py's source assertions — is ci.yml's job and
   # runs in minutes. This one stands a real host up over five real modules and
   # takes far longer, so the two are deliberately separate workflows: a red
   # square here means the shipped plugin does not come up, which is a different
