@@ -1,7 +1,6 @@
-.pragma library
-
 // The kit's rules, as strings throughout: wei outgrows a JS number, and a rounded fee is a
 // claim nobody made. Components format with these; doctests/fees_table.mjs runs them.
+// Plain JavaScript, no `.pragma library`: the functions hold no state, and CodeQL cannot read one.
 
 function tierName(tier) {
     return tier === "slow" ? "Low" : tier === "normal" ? "Market" : tier === "fast" ? "Fast" : String(tier || "")
