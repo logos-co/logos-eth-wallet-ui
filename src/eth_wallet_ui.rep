@@ -91,6 +91,12 @@ class EthWalletUi
     // True while the receipt sweep is still scheduled. False once no recorded transaction
     // can move again — which is also the answer a failed read must NOT be allowed to give.
     PROP(bool sweepingReceipts=false READONLY)
+    // Per chain, the nonce holding up later sends: [{ chainId, nonce, behind, why, since,
+    // hash?, label?, origin?, resend? }]. `why` is pending | stalled | unresolved | stranded.
+    // Read by the same call as the history, so empty means unknown, as there.
+    PROP(QString blockedNoncesJson="" READONLY)
+    // A resend is being checked, priced or submitted.
+    PROP(bool resendLoading=false READONLY)
 
     // Extra detail for ONE transaction, fetched on demand: { ok, hash, chainId, route,
     // fetchedAt, gasPriceUnit, block?, transaction?, blockError?, transactionError? }.
@@ -165,6 +171,9 @@ class EthWalletUi
     SLOT(void pollSend())
     SLOT(void cancelSend())
     SLOT(void refreshTxStatus(QString hashHex))
+    // Send the transfer at a blocked nonce again, pinned to it, at fees a node will take as
+    // its replacement. Nothing happens for a chain with nothing to resend.
+    SLOT(void resendBlockedNonce(int chainId))
     // Read the block and transaction fields no receipt carries, for one recorded transaction.
     SLOT(void fetchTxDetails(QString hashHex))
     // Re-read the verdict alone. Deliberately not a full refresh: the chip polls it.

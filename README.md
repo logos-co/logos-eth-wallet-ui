@@ -65,6 +65,17 @@ else: a refusal that may yet pass is asked again, never taken as the end of the 
 "Not sent". Cancel is refused once the broadcast is claimed; the send then ends however the
 poll says.
 
+A nonce that holds up later sends is named above the tabs, one line per chain: the lowest
+nonce still waiting, once it has waited three minutes with a later send queued behind it, or
+has stalled on its own. A number the sender reserved and never sent (`strandedNonces`) counts
+too, once a send has waited on it. For a transfer this wallet can rebuild from the row's
+`meta`, "Resend with current fees" sends it again, pinned to that nonce. The fees are the
+Market tier's, raised where needed to more than the pending transaction's and at least 10%
+above it on both fields, the minimum a node needs to accept a replacement. The receipt is
+re-read first, so a row that mined after the sender stopped asking is not resent. Another
+app's call and a gap get a hint instead: replace it from Send with the nonce under Advanced.
+A row whose nonce another transaction mined reads "replaced".
+
 The app also provides the `evm.transactions.send` intent for QML-only dapps. A request may
 name any enabled in-scope chain, even when it differs from the wallet's current Send cursor.
 The review names that requested network and every call before the signer sees it. Out-of-scope
@@ -93,7 +104,8 @@ the header; failures belonging to other portfolio chains stay attached to those 
 ## Testing
 
 The local tables execute the pure state transitions, scope guards, intent validation, the
-send-status rule, token identity, sweep behavior and QR encoder:
+send-status rule, the stuck-nonce rule and its replacement pricing, token identity, sweep
+behavior and QR encoder:
 
 ```bash
 ./doctests/run_tables.sh

@@ -38,6 +38,7 @@ public:
     void pollSend() override;
     void cancelSend() override;
     void refreshTxStatus(QString hashHex) override;
+    void resendBlockedNonce(int chainId) override;
     void fetchTxDetails(QString hashHex) override;
     void refreshVerifiedProxy() override;
     void refreshPending() override;
@@ -86,7 +87,7 @@ private:
     /// the callback never fires. `InFlight` expires by itself; a published spinner does not, so
     /// one without the other is a spinner nobody takes down. No queue: this covers a claim a
     /// BUTTON takes, and the button is disabled while it is held.
-    bool beginClaim(InFlight &claim, quint64 *slot, const SetLoading &setLoading);
+    bool beginClaim(InFlight &claim, quint64 *slot, const SetLoading &setLoading, int legs = 1);
 
     void loadNetwork();
     void loadAccounts();
@@ -97,6 +98,11 @@ private:
 
     /// One quote, priced asynchronously.
     void runQuote(const QString &requestJson, bool interactive);
+
+    /// The resend's second and third legs: price it past the floor, then submit it.
+    void priceResend(const QJsonObject &blocked, quint64 slot, quint64 gen);
+    void submitResend(const QJsonObject &request, quint64 slot);
+    void endResend(quint64 slot, const QString &error = QString());
 
     /// Take the order a listing reply rode back on. list_tokens and get_balances both carry
     /// it, so the persisted order reaches the view on whichever lands first. `issuedAt` is
@@ -156,6 +162,8 @@ private:
     InFlight m_detailsInFlight;
     /// One receipt re-read at a time, on the same terms as the fetch above.
     InFlight m_txStatusInFlight;
+    /// One resend at a time, across its receipt check, fee read and send.
+    InFlight m_resendInFlight;
     /// One quote at a time, with exactly one re-price coalesced behind it: a keystroke
     /// arriving mid-call must still be priced, but every keystroke must not be a round-trip.
     AsyncLane m_quoteLane;
