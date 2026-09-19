@@ -10,7 +10,8 @@
 // Another app's request to send transactions from this wallet — `evm.transactions.send` —
 // checked and reshaped here, as pure functions doctests/test_intent_send.cpp runs. The app
 // hands over calls and a purpose; it never sees a key, and it is answered only once the send
-// has settled, with every hash or with why not.
+// has settled, with every hash or with why not. What settled means is `sendPolled`, which
+// doctests/test_send_status.cpp runs.
 
 /// The most calls one request may carry: the sender's own bundle limit.
 constexpr int kMaxIntentCalls = 8;
@@ -156,6 +157,49 @@ inline IntentSendChecked checkIntentSend(const QString &requestJson, const Selec
                                          const QStringList &accounts, bool sending)
 {
     return checkIntentSend(requestJson, shown, accounts, QList<int>{shown.chainId}, sending);
+}
+
+/// What one `send_status` reply means for the send on screen. Not `settled`: ask again. Settled:
+/// the poll stops, and `outcome` — `{ status, hash?, hashes?, reason? }` — is what it came to.
+struct SendPolled {
+    bool settled = false;
+    QJsonObject outcome;
+};
+
+/// The sender's `final` decides, a refusal's included: one that may yet pass is asked again, or
+/// an approved send is never broadcast. A backend that predates `final` is read the way it
+/// behaves — `awaitingApproval` and `broadcasting` still move, and no refusal is final. A final
+/// refusal is a send the sender no longer holds, and settles `failed` in its words. A
+/// `cancel_send` reply reads the same: taken, it is the cancelled send; refused, the broadcast
+/// is already claimed and the poll says how it ends.
+inline SendPolled sendPolled(const QString &reply)
+{
+    SendPolled p;
+    const QJsonObject r = parseObject(reply);
+    const bool ok = r.value(QStringLiteral("ok")).toBool();
+    const QString status = r.value(QStringLiteral("status")).toString();
+    const QJsonValue fin = r.value(QStringLiteral("final"));
+    p.settled = fin.isBool() ? fin.toBool()
+                             : ok && status != QLatin1String("awaitingApproval")
+                                   && status != QLatin1String("broadcasting");
+    if (!p.settled)
+        return p;
+    if (!ok) {
+        p.outcome = QJsonObject{{QStringLiteral("status"), QStringLiteral("failed")},
+                                {QStringLiteral("reason"), replyError(reply)}};
+        return p;
+    }
+    p.outcome = QJsonObject{{QStringLiteral("status"), status}};
+    for (const auto &key : {QStringLiteral("hash"), QStringLiteral("reason")}) {
+        const QString v = r.value(key).toString();
+        if (!v.isEmpty())
+            p.outcome.insert(key, v);
+    }
+    // Every hash of the send: a bundle another app asked for is more than one, and the app
+    // is answered with all of them.
+    if (r.contains(QStringLiteral("hashes")))
+        p.outcome.insert(QStringLiteral("hashes"), r.value(QStringLiteral("hashes")));
+    return p;
 }
 
 /// The answer to the requester once the send has settled, from the wallet's own outcome

@@ -694,6 +694,43 @@ Item {
         pressInDialog("intentSendDialog", "intentSendDecline")
     }
 
+    // `stuck` is a broadcast that never answered: the money may be on chain. The backend only
+    // publishes an outcome the sender calls final, so this is the view's half — its words.
+    function assertAStuckSendIsNotCalledUnsent() {
+        console.log("")
+        console.log("a stuck send may already be on chain: the receipt says it is not confirmed,")
+        console.log("never that it was not sent, and the app that asked hears the sender's word")
+        var root = view.item
+        var reason = "the broadcast has not answered; this send may already be on chain and must not be sent again"
+        root.dismissOutcome(); fake.lastSendOutcomeJson = ""
+        var calls = [{ to: "0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45", value: "0x0", data: "0x5ae401dc", label: "Swap" }]
+        shell.intentRequested("req_13", "evm.transactions.send", ({ purpose: "p", calls: calls }), "some_app")
+        fake.intentSendJson = JSON.stringify({ requestId: "req_13", requester: "some_app", chainId: 11155111,
+                                               from: probe.me, purpose: "p", tier: "normal", calls: calls })
+        pressInDialog("intentSendDialog", "intentSendAccept")
+        fake.intentSendJson = ""
+        fake.pendingRequestId = "snd_13"; fake.pendingApprovalHandle = probe.handle
+        probe.answer({ ok: true })
+        var before = probe.responses.length
+        fake.lastSendOutcomeJson = JSON.stringify({ status: "stuck", reason: reason })
+        fake.pendingRequestId = ""; fake.pendingApprovalHandle = ""
+        check("stuck is titled Not confirmed", find(view.item, "sendOutcomeDialog").title, "Not confirmed")
+        check("...and says why, in the sender's words", inDialog("sendOutcomeDialog", "sendOutcomeLabel").text, reason)
+        check("the app is answered once", probe.responses.length, before + 1)
+        check("...for its own request", probe.lastResponse().requestId, "req_13")
+        check("...not ok", probe.lastResponse().ok, false)
+        check("...in the sender's word", probe.lastResponse().error, "stuck")
+        check("...with the warning not to send it again", probe.lastResponse().data.reason, reason)
+
+        console.log("   the other titles are unchanged")
+        root.dismissOutcome()
+        fake.lastSendOutcomeJson = JSON.stringify({ status: "failed", reason: "nonce too low" })
+        check("a failure is Not sent", find(view.item, "sendOutcomeDialog").title, "Not sent")
+        fake.lastSendOutcomeJson = JSON.stringify({ status: "broadcast", hash: probe.txHash })
+        check("a broadcast is Sent", find(view.item, "sendOutcomeDialog").title, "Sent")
+        root.dismissOutcome()
+    }
+
     Loader {
         id: view
         anchors.fill: parent
@@ -725,6 +762,7 @@ Item {
             probe.assertRpcSettingsHop()
             probe.assertTokenListsHop()
             probe.assertAnotherAppsSendIsReviewedAndAnswered()
+            probe.assertAStuckSendIsNotCalledUnsent()
 
             console.log("")
             console.log(probe.failures ? "RESULT: FAILURES" : "RESULT: ALL PASS")
