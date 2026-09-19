@@ -24,7 +24,6 @@
       url = "github:logos-co/logos-evm-assets-module";
       inputs.logos-module-builder.follows = "logos-module-builder";
       inputs.eth_rpc_module.follows = "eth_rpc_module";
-      inputs.token_list_module.follows = "token_list_module";
     };
     # Every dependency builds against THIS module-builder. Without the follows each drags
     # its own, and a skewed generated ABI segfaults the module inside provider init.
