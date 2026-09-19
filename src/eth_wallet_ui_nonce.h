@@ -35,7 +35,8 @@ inline bool rowWaiting(const QJsonObject &row)
            && row.value(QStringLiteral("replaced")).toBool() == false;
 }
 
-/// Flags each waiting row whose nonce another row on the same chain has mined: it never will.
+/// Flags each row the sender settled `replaced`, and each waiting row whose nonce another row on
+/// the same chain has mined, for a sender that predates the status: it never will be mined.
 inline QJsonArray markReplaced(QJsonArray rows)
 {
     QSet<QPair<int, qint64>> mined;
@@ -48,8 +49,9 @@ inline QJsonArray markReplaced(QJsonArray rows)
     for (int i = 0; i < rows.size(); ++i) {
         QJsonObject r = rows.at(i).toObject();
         qint64 n = 0;
-        if (rowWaiting(r) && nonceOf(r, &n)
-            && mined.contains({r.value(QStringLiteral("chainId")).toInt(), n})) {
+        const bool settled = r.value(QStringLiteral("status")).toString() == QLatin1String("replaced");
+        if (settled || (rowWaiting(r) && nonceOf(r, &n)
+                        && mined.contains({r.value(QStringLiteral("chainId")).toInt(), n}))) {
             r.insert(QStringLiteral("replaced"), true);
             rows.replace(i, r);
         }

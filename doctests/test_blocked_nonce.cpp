@@ -112,6 +112,12 @@ int main()
         const QJsonArray lost = markReplaced({with(ZERO_TIP, "status", "unknown"), resent});
         expect("unknown", "an unresolved row at a mined nonce is replaced too",
                lost.at(0).toObject().value("replaced").toBool());
+        // What the sender settles itself, including a nonce another wallet's transaction took.
+        const QJsonArray sender = markReplaced({with(ZERO_TIP, "status", "replaced")});
+        expect("sender", "a row the sender settled replaced reads replaced with no sibling in view",
+               sender.at(0).toObject().value("replaced").toBool());
+        expect("sender", "...and holds nothing up",
+               blockedNonces(sender, {}, NOW + 60).isEmpty() && !rowWaiting(sender.at(0).toObject()));
     }
 
     std::printf("\nwhat is not called stuck\n");
