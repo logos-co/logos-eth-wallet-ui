@@ -276,8 +276,8 @@ Item {
         console.log("flight the signer is often not loaded yet, so silence and absence look")
         console.log("identical there. This side knows, so it withdraws the record instead of")
         console.log("leaving a clock to race a human")
-        for (var i = 0; i < 4; ++i) {
-            var code = ["bad_request", "not_declared", "timeout", "cancelled"][i]
+        for (var i = 0; i < 3; ++i) {
+            var code = ["bad_request", "not_declared", "timeout"][i]
             var before = fake.cancelCalls
             fake.pendingApprovalHandle = ""
             fake.pendingApprovalHandle = probe.handle
@@ -298,6 +298,14 @@ Item {
         probe.answer({ ok: false, data: undefined, error: "unavailable" })
         check("  unavailable leaves the record standing", fake.cancelCalls - before, 0)
         console.log("")
+        console.log("...nor `cancelled`: the Signer sends it for Back and displacement, which leave the")
+        console.log("record approvable, and for a rejection, which send_status reports in its own word")
+        var c = fake.cancelCalls
+        fake.pendingApprovalHandle = ""
+        fake.pendingApprovalHandle = probe.handle
+        probe.answer({ ok: false, data: undefined, error: "cancelled" })
+        check("  cancelled leaves it standing", fake.cancelCalls - c, 0)
+        console.log("")
         console.log("nor does success: the send is settled by send_status, and withdrawing an")
         console.log("approval the human just granted would be the worst outcome of all")
         var b = fake.cancelCalls
@@ -305,6 +313,22 @@ Item {
         fake.pendingApprovalHandle = probe.handle
         probe.answer({ ok: true, data: {}, error: "" })
         check("  ok leaves it standing", fake.cancelCalls - b, 0)
+    }
+
+    function assertALateAnswerMovesNothing() {
+        console.log("")
+        console.log("an answer about an EARLIER send moves nothing. cancelSend withdraws whatever")
+        console.log("send is pending NOW, so acting on a late answer would end the wrong one")
+        fake.pendingApprovalHandle = ""
+        fake.pendingApprovalHandle = "apr_earlier"
+        var late = probe.reply
+        fake.pendingApprovalHandle = probe.handle
+        var before = fake.cancelCalls
+        late({ ok: false, data: undefined, error: "timeout" })
+        check("  a late timeout withdraws nothing", fake.cancelCalls - before, 0)
+        check("  ...nor writes over this send's note", inDialog("pendingDialog", "pendingLabel").text,
+              "Waiting for this transaction to be approved.")
+        probe.answer({ ok: true, data: {}, error: "" })
     }
 
     function assertTheReceiptCarriesTheWholeHash() {
@@ -688,6 +712,7 @@ Item {
             probe.assertEveryOtherCodeNamesItself()
             probe.assertAClosedPathWithdrawsTheRecord()
             probe.assertTheFallbackCodesLeaveItAlone()
+            probe.assertALateAnswerMovesNothing()
             probe.assertTheSubmitWaitEndsBothWays()
             probe.assertAnUnnamedAccountBorrowsItsWalletName()
             probe.assertNoHandleAsksNothing()

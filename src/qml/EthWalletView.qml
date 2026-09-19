@@ -147,19 +147,17 @@ Item {
     // Cancelling here is what lets the keystore's own timer be garbage collection for a dead
     // requester rather than a clock racing a human.
     //
-    // `cancelled` is on this list, and that is a decision rather than an omission. It means
-    // the user dismissed the chooser or walked away from the signer — they declined to route
-    // it. Leaving the record standing put them in front of a "Waiting for approval" dialog
-    // whose only button was "Cancel send": asked to say no a second time, with no other
-    // option on offer.
+    // `cancelled` is NOT, because it is not final. The Signer answers it for Back, for a newer
+    // request taking its screen and for Reject: the first two leave the record approvable, and
+    // a rejection reaches `send_status` in its own word. The shell's dismissed chooser says the
+    // same word, so that send waits until it expires or is cancelled here.
     //
     // `unavailable` is NOT, and must not be. It may mean the signer is merely unreachable BY
     // INTENT while still openable by hand, and that manual path is the fallback this whole
     // design rests on — withdrawing there would delete the record the user was just told to
     // go and approve.
     function intentPathIsClosed(error) {
-        return error === "bad_request" || error === "not_declared"
-            || error === "timeout" || error === "cancelled"
+        return error === "bad_request" || error === "not_declared" || error === "timeout"
     }
 
     function askToApprove() {
@@ -167,9 +165,10 @@ Item {
         if (handle === "") return
         root.approvalNote = ""
         logos.request("evm.signing.approve", ({ handle: handle }), function (res) {
-            if (res.ok) return
-            // Declining is not a fault to report back at them; it is just the end of it.
-            if (res.error === "cancelled") { root.backend.cancelSend(); return }
+            // An answer about a send that is no longer the pending one moves nothing.
+            if (!root.ready || root.backend.pendingApprovalHandle !== handle) return
+            // `cancelled` is not a fault to report back at them, nor the end of the send.
+            if (res.ok || res.error === "cancelled") return
             root.approvalNote = res.error === "unavailable"
                 ? "Approve this transaction in the Signer app to send it."
                 : "Could not reach a signer (" + res.error + ")."
