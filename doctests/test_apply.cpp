@@ -30,6 +30,7 @@ int failures = 0;
 
 const char *ALICE = "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266";
 const char *BOB = "0x70997970C51812dc3A010C7d01b50e0d17dc79C8";
+const qint64 NOW = 2000;
 
 void expect(const char *label, const char *claim, bool got)
 {
@@ -105,7 +106,7 @@ int main()
     std::printf("\nhistory: the rows AND the sweep schedule the same reply carries\n");
     {
         ScopedState s = screen();
-        const HistoryApplied h = applyHistory(s, q(R"({"ok":true,"chainId":1,"address":"0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266","transactions":[],"stillDue":false})"));
+        const HistoryApplied h = applyHistory(s, q(R"({"ok":true,"chainId":1,"address":"0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266","transactions":[],"stillDue":false})"), NOW);
         expect("a reply for another chain", "is not acted on", !h.acted);
         expect("...and says nothing about the sweep", "on an idle wallet nothing restarts it",
                h.sweep == SweepVerdict::Unchanged);
@@ -113,17 +114,34 @@ int main()
     }
     {
         ScopedState s = screen();
-        const HistoryApplied h = applyHistory(s, q(R"({"ok":false,"error":"module context not ready"})"));
+        s.blockedNonces = q(R"([{"chainId":11155111,"nonce":40}])");
+        const HistoryApplied h = applyHistory(s, q(R"({"ok":false,"error":"module context not ready"})"), NOW);
         expect("a read that FAILED", "leaves the schedule alone",
                h.acted && h.sweep == SweepVerdict::Unchanged);
         std::printf("   UNKNOWN, not \"[]\": an empty list renders as \"No transactions yet\"\n");
         same("...and the rows read as unknown", s.history, QString());
+        same("...and so do the stuck nonces", s.blockedNonces, QString());
     }
     {
         ScopedState s = screen();
-        const HistoryApplied h = applyHistory(s, q(R"({"ok":true,"chainId":11155111,"address":"0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266","transactions":[{"status":"pending"}]})"));
+        const HistoryApplied h = applyHistory(s, q(R"({"ok":true,"chainId":11155111,"address":"0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266","transactions":[{"status":"pending"}]})"), NOW);
         expect("a pending row", "schedules the sweep", h.sweep == SweepVerdict::Run);
         same("...and the blocked list defaults to none", s.blockedChains, q("[]"));
+        same("...as does the stuck-nonce list", s.blockedNonces, q("[]"));
+    }
+    {
+        ScopedState s = screen();
+        applyHistory(s, q(R"({"ok":true,"chainId":11155111,"address":"0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266","transactions":[)"
+                          R"({"chainId":11155111,"nonce":43,"status":"pending","timestamp":1100},)"
+                          R"({"chainId":11155111,"nonce":41,"status":"pending","timestamp":1000},)"
+                          R"({"chainId":11155111,"nonce":40,"status":"pending","timestamp":900},)"
+                          R"({"chainId":11155111,"nonce":40,"status":"confirmed","timestamp":950}],)"
+                          R"("strandedNonces":[{"chainId":11155111,"nonce":42}]})"), NOW);
+        std::printf("   rows another transaction at their nonce mined read as replaced\n");
+        expect("the superseded row", "is marked replaced",
+               s.history.contains(q(R"("nonce":40,"replaced":true)")));
+        same("...and the lowest waiting nonce above it is named", s.blockedNonces,
+             q(R"([{"behind":1,"chainId":11155111,"nonce":41,"since":1000,"why":"pending"}])"));
     }
 
     std::printf("\nfee tiers and the token list: read for another network they are WRONG under\n");
