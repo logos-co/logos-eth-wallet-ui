@@ -95,8 +95,11 @@ class EthWalletUi
     // hash?, label?, origin?, resend? }]. `why` is pending | stalled | unresolved | stranded.
     // Read by the same call as the history, so empty means unknown, as there.
     PROP(QString blockedNoncesJson="" READONLY)
-    // A resend is being checked, priced or submitted.
+    // A resend is being checked or priced.
     PROP(bool resendLoading=false READONLY)
+    // A priced resend for the human to review: { request, quote }. Confirm sends `request`
+    // through submitSend; empty when there is none.
+    PROP(QString resendReviewJson="" READONLY)
 
     // Extra detail for ONE transaction, fetched on demand: { ok, hash, chainId, route,
     // fetchedAt, gasPriceUnit, block?, transaction?, blockError?, transactionError? }.
@@ -171,9 +174,11 @@ class EthWalletUi
     SLOT(void pollSend())
     SLOT(void cancelSend())
     SLOT(void refreshTxStatus(QString hashHex))
-    // Send the transfer at a blocked nonce again, pinned to it, at fees a node will take as
-    // its replacement. Nothing happens for a chain with nothing to resend.
+    // Price the transfer at a blocked nonce again, pinned to it, at fees a node will take as
+    // its replacement, and put it up for review. Nothing happens for a chain with nothing to resend.
     SLOT(void resendBlockedNonce(int chainId))
+    // Withdraw the resend under review without sending it.
+    SLOT(void dismissResend())
     // Read the block and transaction fields no receipt carries, for one recorded transaction.
     SLOT(void fetchTxDetails(QString hashHex))
     // Re-read the verdict alone. Deliberately not a full refresh: the chip polls it.

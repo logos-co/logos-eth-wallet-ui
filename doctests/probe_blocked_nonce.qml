@@ -37,6 +37,11 @@ Item {
         }
         return null
     }
+    function inDialog(dialogName, name, key) {
+        var d = find(view.item, dialogName)
+        var hit = (d && d.contentItem) ? find(d.contentItem, name) : null
+        return hit ? hit[key] : "<absent>"
+    }
     function prop(name, key) {
         var o = find(view.item, name)
         return o ? o[key] : "<absent>"
@@ -65,6 +70,15 @@ Item {
         tx(probe.resentHash, 40, "confirmed", probe.t1 - 100, { blockNumber: 26011969 }),
         tx(probe.replacedHash, 40, "pending", probe.t0, { stalled: true, replaced: true })
     ])
+    readonly property var resendRequest: ({ chainId: 1, from: probe.me, to: probe.payee, amount: "100000000000",
+                                           nonce: 44, maxFeePerGas: "372524310", maxPriorityFeePerGas: "37979581" })
+    readonly property var resendQuote: ({ ok: true, chainId: 1, to: probe.payee, amount: "100000000000",
+                                          amountExact: "0.0000001", amountSymbol: "ETH", token: null, nativeSymbol: "ETH",
+                                          nonce: 44, gasLimit: 21000, maxFeePerGas: "372524310",
+                                          maxPriorityFeePerGas: "37979581", feeCeilingWeiDisplay: "0.0000078",
+                                          maxCostWeiDisplay: "0.0000079", feeSource: "custom",
+                                          replaces: { nonce: 44, raised: false,
+                                                      pendingMaxFeePerGas: "338658463", pendingMaxPriorityFeePerGas: "0" } })
     readonly property string blocked: JSON.stringify([
         { chainId: 1, nonce: 44, behind: 1, why: "stalled", since: probe.t1, hash: probe.stuckHash,
           label: "Send ETH", origin: "eth_wallet_backend",
@@ -102,6 +116,11 @@ Item {
         property string blockedChainsJson: "[]"
         property string blockedNoncesJson: probe.blocked
         property bool resendLoading: false
+        property string resendReviewJson: ""
+        property int dismissed: 0
+        property var submitted: []
+        function submitSend(r) { fake.submitted = fake.submitted.concat([r]) }
+        function dismissResend() { fake.dismissed++; fake.resendReviewJson = "" }
         property bool sweepingReceipts: false
         property string txDetailsJson: ""
         property bool txDetailsLoading: false
@@ -199,6 +218,24 @@ Item {
                 check("...and not that checking stopped", prop("txDetailStalledNote", "visible"), false)
                 view.item.openTxDetail(probe.stuckHash)
             } else if (probe.phase === 6) {
+                console.log("")
+                console.log("the resend is priced, then reviewed: nothing leaves before Resend")
+                fake.resendReviewJson = JSON.stringify({ request: probe.resendRequest, quote: probe.resendQuote })
+            } else if (probe.phase === 7) {
+                check("the transfer, again", inDialog("resendReviewDialog", "resendReviewAmount", "value"), "0.0000001 ETH")
+                check("to the same recipient", inDialog("resendReviewDialog", "resendReviewTo", "value"), "0x0ADB…d3A7")
+                check("at the fees it goes out with", inDialog("resendReviewDialog", "resendReviewFee", "value"),
+                      "at most 0.0000078 ETH (custom)")
+                check("pinned to the stuck nonce", inDialog("resendReviewDialog", "resendReviewNonce", "value"), "44")
+                check("...and saying what it replaces", inDialog("resendReviewDialog", "resendReviewReplaces", "text"),
+                      "Replaces the transaction still pending at nonce 44.")
+                check("the review sent nothing", fake.submitted.length, 0)
+                find(find(view.item, "resendReviewDialog").contentItem, "resendReviewConfirm").clicked()
+                check("Resend submits the request that was priced", JSON.stringify(fake.submitted),
+                      JSON.stringify([JSON.stringify(probe.resendRequest)]))
+                find(find(view.item, "resendReviewDialog").contentItem, "resendReviewCancel").clicked()
+                check("Back withdraws it", fake.dismissed, 1)
+            } else if (probe.phase === 8) {
                 check("a stalled row keeps its own note", prop("txDetailStalledNote", "visible"), true)
                 check("...and no replaced one", prop("txDetailReplacedNote", "visible"), false)
                 fake.historyJson = ""

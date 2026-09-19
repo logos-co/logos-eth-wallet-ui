@@ -368,7 +368,12 @@ check("the re-price hangs off the request and the entry, nowhere else", len(site
 check("and Submit is armed by a quote that priced THIS form, and disarmed by a click in flight",
       qml_binding("sendSubmitButton", "enabled"),
       "enabled: root.ready && !root.sendPending && !root.sendSubmitting "
-      "&& sendForm.q.ok === true")
+      "&& sendForm.q.ok === true && advanced.error.length === 0")
+print("   Send opens the review; only the review's Confirm submits, and it submits the form")
+check("Send opens the review rather than submitting",
+      "onClicked: sendReview.open()" in " ".join(qml_item("sendSubmitButton")), True)
+check("...and the review's Confirm submits the form on screen",
+      "root.backend.submitSend(sendForm.formRequest)" in " ".join(qml_item("sendReviewDialog")), True)
 print("   the token picker answers with the field beside it, as accountPicker already did:")
 print("   ComboBox resets currentIndex when its model is re-read, and sendPage.token did not")
 print("   asserted against syncIndex's OWN body: onActivated three lines up carries the same")
@@ -532,7 +537,7 @@ print("   and the fee basis speaks for the FIGURES beside it. `root.fees` is rea
 print("   request and no account, so the fallback kept naming a basis for a quote the form")
 print("   had already withdrawn — the figures went, the line claiming their provenance stayed")
 check("the basis is gated on the quote that priced THIS form",
-      qml_binding("feeSourceLabel", "text").startswith('text: sendForm.q.ok !== true ? ""'), True)
+      qml_binding("sendFeeSummary", "quote"), "quote: sendForm.q.ok === true ? sendForm.q : ({})")
 
 print("0h) the transaction screen: every new figure belongs to ONE transaction, and none")
 print("    of them is computed here")
@@ -765,13 +770,14 @@ print("   the resend holds one claim across its three legs: the receipt, the fee
 check("resendBlockedNonce: one claim for three legs, the receipt re-read first",
       in_order(fn_body("resendBlockedNonce"), "beginClaim(m_resendInFlight", ", 3)",
                "refresh_tx_statusAsyncResult", "priceResend("), True)
-check("...then the fees, priced past the floor, then the send",
+check("...then the fees, priced past the floor, then a quote for the human to review",
       in_order(fn_body("priceResend"), "suggest_feesAsyncResult", "replacementFees(",
-               "submitResend(") and "sendAsyncResult" in fn_body("submitResend"), True)
+               "quoteResend(") and "prepare_sendAsyncResult" in fn_body("quoteResend")
+      and "sendAsyncResult(" not in fn_body("quoteResend").replace("prepare_sendAsyncResult(", ""), True)
 print("   the pricing of another app's request is one of them: its spinner is the dialog's fee")
 print("   line, and its send button waits on it")
 check("...and the send button waits on the pricing",
-      "!root.intentSendPricing" in qml_binding("intentSendAccept", "enabled"), True)
+      "!root.intentSendPricing" in qml_binding("intentSendDialog", "confirmEnabled"), True)
 check("...and the button it drives says it is running",
       "!root.txStatusLoading" in qml_binding("txDetailRefresh", "enabled"), True)
 
@@ -1113,9 +1119,7 @@ check("...and Cancel empties it and goes back to Tokens",
       any("sendPage.clearForm(); root.selectTab(0)" in l for l in clears), True)
 check("...and clearing empties the recipient, the amount and every fee override",
       all(f in qml_fn_body(qml_body, "clearForm")
-          for f in ["toField.text", "amountField.text", "maxFeeField.text",
-                    "maxPriorityFeeField.text", "gasLimitField.text", "nonceField.text",
-                    "advanced.checked"]), True)
+          for f in ["toField.text", "amountField.text", "advanced.clear()", 'tierGroup.tier = "normal"']), True)
 
 print()
 print("the recipient picker offers three sources and writes into the field rather than")
@@ -1260,7 +1264,7 @@ check("submit label", props("sendSubmitButton").get("text"), "Send on Sepolia (t
 
 print("4) the seven advanced fee controls, plus the token picker and the fee estimate")
 for n in ["tierSlow","tierNormal","tierFast","maxFeeField","maxPriorityFeeField","gasLimitField",
-          "nonceField","sendTokenPicker","feeEstimate","sendErrorLabel","quoteStaleNote"]:
+          "nonceField","sendTokenPicker","feeRow","sendErrorLabel","quoteStaleNote"]:
     check(f"control {n}", oid(n) is not None, True)
 
 print("5) fee provenance speaks for the figures beside it, and only while they stand")
@@ -1383,17 +1387,17 @@ check("live chip text", props("verifiedChip").get("text"),
 print("14) a mode flip clears the open quote")
 call("evaluate",{"expression":'logos.module("eth_wallet_ui").quote(JSON.stringify({from:"0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",to:"0x70997970C51812dc3A010C7d01b50e0d17dc79C8",amountUnits:"0.000001"}))'})
 time.sleep(2.5)
-check("a quote is on screen first", props("quoteSummary").get("text"), "Gas limit", "contains")
+check("a quote is on screen first", props("gasLimitRow").get("visible"), True)
 check("and Send is live", props("sendSubmitButton").get("enabled"), True)
 print("   ask #4: the ceiling is named as a ceiling, and the tier it was priced at")
-check("fee estimate on screen", props("feeEstimate").get("text"), "Network fee at most", "contains")
-check("Market is the default tier", props("feeEstimate").get("text"), "(normal)", "contains")
+check("fee estimate on screen", props("feeRow").get("value"), "at most", "contains")
+check("Market is the default tier", props("feeRow").get("value"), "(Market)", "contains")
 print("   flip the mode — the numbers were priced under the OLD one. Through eth_rpc, which")
 print("   OWNS it: the wallet's setter is gone and that is what makes the split enforced.")
 call("evaluate",{"expression":'logos.callModule("eth_rpc_module","set_verified_proxy_mode",["11155111","required"])'})
 call("evaluate",{"expression":'logos.module("eth_wallet_ui").refreshVerifiedProxy()'})
 time.sleep(6)
-check("quote withdrawn", props("quoteSummary").get("text"), "")
+check("quote withdrawn", props("gasLimitRow").get("visible"), False)
 check("and Send refuses", props("sendSubmitButton").get("enabled"), False)
 
 print("15) the verified banner wraps INSIDE its frame — measured")
@@ -1523,7 +1527,7 @@ check("the request carries token units", '"amountUnits":"0.25"' in str(req), Tru
 check("...and names the token", '"token":"ETH"' in str(req), True)
 print("   control: the base-units field must NOT also be set — they mean different units")
 check("no base-units amount on the wire", '"amount"' in str(req), False)
-check("and a real quote came back for it", props("quoteSummary").get("text"), "Gas limit", "contains")
+check("and a real quote came back for it", props("gasLimitRow").get("visible"), True)
 check("...and NOW the basis names where those figures came from",
       props("feeSourceLabel").get("text"), "Fee basis", "contains")
 
@@ -1656,12 +1660,11 @@ print("27) changing WHAT is being sent withdraws the figures priced for the old 
 open_send()
 call("setProperty",{"objectId":oid("toField"),"property":"text","value":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8"})
 call("setProperty",{"objectId":oid("amountField"),"property":"text","value":"0.001"}); time.sleep(3)
-check("a quote is on screen for the request as typed", props("quoteSummary").get("text"),
-      "Gas limit", "contains")
-check("and the ceiling names the tier it was priced at", props("feeEstimate").get("text"),
-      "(normal)", "contains")
+check("a quote is on screen for the request as typed", props("gasLimitRow").get("visible"), True)
+check("and the ceiling names the tier it was priced at", props("feeRow").get("value"),
+      "(Market)", "contains")
 print("   the defect: nothing bumped a guard when the REQUEST changed, so the reply for the")
-print("   previous tier was applied and feeEstimate read the new tier's label beside the old")
+print("   previous tier was applied and the fee row read the new tier's label beside the old")
 print("   ceiling. Gas limit differs ~2.5x between a native send and an ERC-20 one.")
 call("callMethod",{"objectId":oid("tierFast"),"method":"clicked","args":[]})
 priced=[]
@@ -1679,7 +1682,7 @@ check("...and the screen said so rather than leaving a gap",
       props("quotePricingNote").get("text"), "Pricing…")
 check("the re-price does land", priced[-1][0], True)
 check("and the ceiling now names the tier actually asked for",
-      props("feeEstimate").get("text"), "(fast)", "contains")
+      props("feeRow").get("value"), "(Fast)", "contains")
 call("callMethod",{"objectId":oid("sendCancelButton"),"method":"clicked","args":[]}); time.sleep(0.8)
 
 print("28) a form edit that re-prices NOTHING still withdraws the figures it invalidated")
@@ -1689,14 +1692,13 @@ print("28) a form edit that re-prices NOTHING still withdraws the figures it inv
 open_send()
 call("setProperty",{"objectId":oid("toField"),"property":"text","value":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8"})
 call("setProperty",{"objectId":oid("amountField"),"property":"text","value":"0.001"}); time.sleep(3)
-check("a quote is on screen for the request as typed", props("quoteSummary").get("text"),
-      "Gas limit", "contains")
+check("a quote is on screen for the request as typed", props("gasLimitRow").get("visible"), True)
 print("   clear the amount: there is nothing to price, so nothing is called — and the figures")
 print("   priced for the amount that is gone may not stay standing beside an empty field")
 call("setProperty",{"objectId":oid("amountField"),"property":"text","value":""}); time.sleep(1.5)
 check("the gas limit, ceiling and nonce went with the amount",
-      props("quoteSummary").get("text"), "")
-check("...and so did the fee ceiling", props("feeEstimate").get("text"), "")
+      props("gasLimitRow").get("visible"), False)
+check("...and so did the fee ceiling", props("feeRow").get("value"), "—")
 check("...and the line claiming their fee basis", props("feeSourceLabel").get("text"), "")
 check("...and the advanced fields stopped suggesting the old request's numbers",
       ev('JSON.stringify([sendForm.q.gasLimit===undefined, sendForm.q.nonce===undefined])'),
@@ -1712,8 +1714,7 @@ print("29) re-entering on a different token does not render the previous token's
 open_send()
 call("setProperty",{"objectId":oid("toField"),"property":"text","value":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8"})
 call("setProperty",{"objectId":oid("amountField"),"property":"text","value":"0.001"}); time.sleep(3)
-priced_native = props("quoteSummary").get("text")
-check("an ETH send is priced", priced_native, "Gas limit", "contains")
+check("an ETH send is priced", props("gasLimitRow").get("visible"), True)
 call("callMethod",{"objectId":oid("sendCancelButton"),"method":"clicked","args":[]}); time.sleep(0.8)
 check("leaving the section withdrew the quote with it", ev("quoteRequest"), "")
 erc20 = [t for t in json.loads(ev("JSON.stringify(tokens)") or "[]") if t.get("native") is not True]
@@ -1733,7 +1734,7 @@ else:
     check("the amount field names the token being sent",
           props("amountField").get("placeholderText"), "Amount in %s" % erc20[0]["symbol"])
     check("no quote from the previous token is standing under it",
-          props("quoteSummary").get("text"), "")
+          props("gasLimitRow").get("visible"), False)
     check("...and Submit is not armed by it", props("sendSubmitButton").get("enabled"), False)
     call("callMethod",{"objectId":oid("sendCancelButton"),"method":"clicked","args":[]})
     time.sleep(0.8)

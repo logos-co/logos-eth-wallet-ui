@@ -65,16 +65,24 @@ else: a refusal that may yet pass is asked again, never taken as the end of the 
 "Not sent". Cancel is refused once the broadcast is claimed; the send then ends however the
 poll says.
 
+Send opens a review before the signer is asked: what leaves, to whom, on which network, the
+most it can cost, the fee ceiling and the nonce, and the one transaction. Only its Confirm
+submits, and a refusal stays on it beside its reason. Another app's request is reviewed in the
+same dialog. The fee tiers, the fee summary, the Advanced fields and the review come from
+[logos-evm-tx-kit](https://github.com/logos-co/logos-evm-tx-kit), vendored in `src/qml/kit`;
+CI checks the copy against the commit in `src/qml/kit/VERSION`.
+
 A nonce that holds up later sends is named above the tabs, one line per chain: the lowest
 nonce still waiting, once it has waited three minutes with a later send queued behind it, or
 has stalled on its own. A number the sender reserved and never sent (`strandedNonces`) counts
 too, once a send has waited on it. For a transfer this wallet can rebuild from the row's
-`meta`, "Resend with current fees" sends it again, pinned to that nonce. The fees are the
-Market tier's, raised where needed to more than the pending transaction's and at least 10%
-above it on both fields, the minimum a node needs to accept a replacement. The receipt is
-re-read first, so a row that mined after the sender stopped asking is not resent. Another
-app's call and a gap get a hint instead: replace it from Send with the nonce under Advanced.
-A row whose nonce another transaction mined reads "replaced".
+`meta`, "Resend with current fees" prices it again, pinned to that nonce, and opens it for
+review; Resend sends it. The fees are the Market tier's, raised where needed to more than the
+pending transaction's and at least 10% above it on both fields, the minimum a node needs to
+accept a replacement. The receipt is re-read first, so a row that mined after the sender
+stopped asking is not resent. Another app's call and a gap get a hint instead: replace it from
+Send with the nonce under Advanced. A row whose nonce another transaction mined reads
+"replaced".
 
 The app also provides the `evm.transactions.send` intent for QML-only dapps. A request may
 name any enabled in-scope chain, even when it differs from the wallet's current Send cursor.
