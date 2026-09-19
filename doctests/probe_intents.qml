@@ -623,21 +623,21 @@ Item {
               "1. Swap USDC for ETH on Uniswap V3 · 0x68b3…Fc45")
         check("...and its calldata, whole", inDialog("intentSendDialog", "intentSendCallData_0").text, "0x5ae401dc")
         fake.intentSendPricing = true
-        check("while the sender prices it, the fee line says so", inDialog("intentSendDialog", "intentSendFee").text, "Pricing…")
-        check("...and the send button waits", inDialog("intentSendDialog", "intentSendAccept").enabled, false)
+        check("while the sender prices it, the fee line says so", inDialog("intentSendDialog", "intentSendFee").value, "Pricing…")
+        check("...and the send button waits", inDialog("intentSendDialog", "intentSendConfirm").enabled, false)
         fake.intentSendPricing = false
         fake.intentSendJson = JSON.stringify(Object.assign(JSON.parse(fake.intentSendJson),
                                                            { fee: { ok: true, feeCeilingWeiDisplay: "0.0004", valueWeiDisplay: "1.5", nativeSymbol: "ETH" } }))
-        check("the fee is a ceiling, never a price", inDialog("intentSendDialog", "intentSendFee").text,
-              "Network fee at most 0.0004 ETH")
+        check("the fee is a ceiling, never a price", inDialog("intentSendDialog", "intentSendFee").value,
+              "at most 0.0004 ETH")
         check("the ether the calls carry is the sender's sum, in ether, never bare wei",
               inDialog("intentSendDialog", "intentSendValue").value, "1.5 ETH")
         check("...and the button offers the send on the named network",
-              inDialog("intentSendDialog", "intentSendAccept").text, "Send on Sepolia (testnet)")
+              inDialog("intentSendDialog", "intentSendConfirm").text, "Send on Sepolia (testnet)")
 
         console.log("   the human says yes: the backend sends, and the request becomes the wallet's")
         console.log("   own pending send — same signer hand-off — while the app waits")
-        pressInDialog("intentSendDialog", "intentSendAccept")
+        pressInDialog("intentSendDialog", "intentSendConfirm")
         check("accept reaches the backend", probe.accepted, 1)
         fake.intentSendJson = ""
         fake.pendingRequestId = "snd_7"; fake.pendingApprovalHandle = probe.handle
@@ -657,7 +657,7 @@ Item {
         shell.intentRequested("req_8", "evm.transactions.send", ({ purpose: "p", calls: calls }), "some_app")
         fake.intentSendJson = JSON.stringify({ requestId: "req_8", requester: "some_app", chainId: 11155111,
                                                from: probe.me, purpose: "p", tier: "normal", calls: calls })
-        pressInDialog("intentSendDialog", "intentSendDecline")
+        pressInDialog("intentSendDialog", "intentSendCancel")
         check("the backend clears it", probe.declined, 1)
         check("the app hears cancelled", probe.lastResponse().error, "cancelled")
         check("...for its own request", probe.lastResponse().requestId, "req_8")
@@ -673,7 +673,7 @@ Item {
         shell.intentRequested("req_10", "evm.transactions.send", ({ purpose: "p", calls: calls }), "some_app")
         fake.intentSendJson = JSON.stringify({ requestId: "req_10", requester: "some_app", chainId: 11155111,
                                                from: probe.me, purpose: "p", tier: "normal", calls: calls })
-        pressInDialog("intentSendDialog", "intentSendAccept")
+        pressInDialog("intentSendDialog", "intentSendConfirm")
         fake.intentSendJson = ""
         fake.pendingRequestId = "snd_10"; fake.pendingApprovalHandle = probe.handle
         probe.answer({ ok: true })
@@ -691,7 +691,7 @@ Item {
         check("...and the second is the one under review", root.intentSendRequestId, "req_12")
         fake.intentSendJson = JSON.stringify({ requestId: "req_12", requester: "app_b", chainId: 11155111,
                                                from: probe.me, purpose: "p", tier: "normal", calls: calls })
-        pressInDialog("intentSendDialog", "intentSendDecline")
+        pressInDialog("intentSendDialog", "intentSendCancel")
     }
 
     // `stuck` is a broadcast that never answered: the money may be on chain. The backend only
@@ -707,7 +707,7 @@ Item {
         shell.intentRequested("req_13", "evm.transactions.send", ({ purpose: "p", calls: calls }), "some_app")
         fake.intentSendJson = JSON.stringify({ requestId: "req_13", requester: "some_app", chainId: 11155111,
                                                from: probe.me, purpose: "p", tier: "normal", calls: calls })
-        pressInDialog("intentSendDialog", "intentSendAccept")
+        pressInDialog("intentSendDialog", "intentSendConfirm")
         fake.intentSendJson = ""
         fake.pendingRequestId = "snd_13"; fake.pendingApprovalHandle = probe.handle
         probe.answer({ ok: true })

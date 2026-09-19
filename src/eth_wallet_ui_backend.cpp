@@ -75,6 +75,7 @@ ScopedState EthWalletUiBackend::scopeSnapshot() const
     s.history = historyJson();
     s.blockedChains = blockedChainsJson();
     s.blockedNonces = blockedNoncesJson();
+    s.resendReview = resendReviewJson();
     s.quote = quoteJson();
     s.quoteRequest = quoteRequestJson();
     s.quoteStale = quoteStale();
@@ -96,6 +97,7 @@ void EthWalletUiBackend::publishScope(const ScopedState &s)
     setHistoryJson(s.history);
     setBlockedChainsJson(s.blockedChains);
     setBlockedNoncesJson(s.blockedNonces);
+    setResendReviewJson(s.resendReview);
     setQuoteJson(s.quote);
     setQuoteRequestJson(s.quoteRequest);
     setQuoteStale(s.quoteStale);
@@ -591,6 +593,8 @@ void EthWalletUiBackend::submitSend(QString requestJson)
     const QString reply = modules().eth_wallet_backend.send(requestJson);
     ScopedState after = scopeSnapshot();
     const SendApplied sent = applySend(after, reply, selectionHeld(gen));
+    if (sent.accepted)
+        after.resendReview.clear();
     publishScope(after);
     if (!sent.accepted)
         return;
@@ -693,7 +697,7 @@ void EthWalletUiBackend::resendBlockedNonce(int chainId)
         return;
     }
     // A stalled row may have mined after the sender stopped asking: then there is nothing to
-    // replace. Any other answer, an error included, still resends.
+    // replace. Any other answer, an error included, still goes on to the review.
     modules().eth_wallet_backend.refresh_tx_statusAsyncResult(selectedAccount(), hash,
         [this, blocked, slot, gen](logos::AsyncResult<QString> res) {
             if (!m_resendInFlight.isCurrent(slot) || gen != m_dataGen)
@@ -729,17 +733,17 @@ void EthWalletUiBackend::priceResend(const QJsonObject &blocked, quint64 slot, q
                 blocked.value(QStringLiteral("floorMaxPriorityFeePerGas")).toString());
             if (!fees.error.isEmpty())
                 return endResend(slot, failure.arg(fees.error));
-            submitResend(resendRequest(blocked, fees), slot);
+            quoteResend(resendRequest(blocked, fees), slot, gen);
         },
         Timeout(kCallBudgetMs));
 }
 
-void EthWalletUiBackend::submitResend(const QJsonObject &request, quint64 slot)
+void EthWalletUiBackend::quoteResend(const QJsonObject &request, quint64 slot, quint64 gen)
 {
-    modules().eth_wallet_backend.sendAsyncResult(toJsonCompact(request),
-        [this, request, slot](logos::AsyncResult<QString> res) {
-            if (!m_resendInFlight.isCurrent(slot))
-                return;
+    modules().eth_wallet_backend.prepare_sendAsyncResult(toJsonCompact(request),
+        [this, request, slot, gen](logos::AsyncResult<QString> res) {
+            if (!m_resendInFlight.isCurrent(slot) || gen != m_dataGen)
+                return endResend(slot);
             const QString reply = res.ok() ? res.value : QString();
             if (!replyOk(reply))
                 return endResend(slot, QStringLiteral("resend nonce %1: %2")
@@ -747,14 +751,20 @@ void EthWalletUiBackend::submitResend(const QJsonObject &request, quint64 slot)
                                            .arg(reply.isEmpty() ? QStringLiteral("the backend did not answer")
                                                                 : replyError(reply)));
             endResend(slot);
-            // Taken even if the selection moved: the approval exists, and the poll ends it.
-            const QJsonObject o = parseObject(reply);
-            setLastSendOutcomeJson(QString());
-            setPendingApprovalHandle(o.value(QStringLiteral("handle")).toString());
-            setPendingRequestId(o.value(QStringLiteral("requestId")).toString());
-            m_sendPoll.start();
+            // Reviewed before it is sent: Confirm goes out through submitSend like any send.
+            ScopedState s = scopeSnapshot();
+            s.resendReview = toJsonCompact(QJsonObject{{QStringLiteral("request"), request},
+                                                       {QStringLiteral("quote"), parseObject(reply)}});
+            publishScope(s);
         },
         Timeout(kCallBudgetMs));
+}
+
+void EthWalletUiBackend::dismissResend()
+{
+    ScopedState s = scopeSnapshot();
+    s.resendReview.clear();
+    publishScope(s);
 }
 
 void EthWalletUiBackend::endResend(quint64 slot, const QString &error)

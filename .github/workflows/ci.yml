@@ -125,15 +125,27 @@ jobs:
           if grep -q "SKIP" /tmp/tables.log; then
             echo "::error::the view probes skipped instead of running"; exit 1
           fi
-          for p in probe_token_identity probe_tokens_sort probe_tx_detail probe_intents probe_recipients probe_balances_states probe_receive probe_blocked_nonce; do
+          for p in probe_token_identity probe_tokens_sort probe_tx_detail probe_intents probe_recipients probe_balances_states probe_receive probe_blocked_nonce probe_send_review; do
             grep -q -- "--- $p.qml" /tmp/tables.log \
               || { echo "::error::probe never ran: $p"; exit 1; }
           done
-          # Ten C++ tables, the QR table, the zbar decode, and eight probes each sign off
+          # Ten C++ tables, the QR table, the zbar decode, and nine probes each sign off
           # with one RESULT line; a probe reaching its last phase is the only thing that
           # prints one. A header with silence under it counts here and passes nothing.
-          # 10 + 1 + 1 + 8 = 20 — the floor keeps both QR sections in the run.
+          # 10 + 1 + 1 + 9 = 21 — the floor keeps both QR sections in the run.
           n=$(grep -c "RESULT: ALL PASS" /tmp/tables.log)
-          echo "sections that reported: $n"; [ "$n" -ge 20 ]
+          echo "sections that reported: $n"; [ "$n" -ge 21 ]
           n=$(grep -c "  PASS  " /tmp/tables.log)
-          echo "assertions: $n"; [ "$n" -ge 874 ]
+          echo "assertions: $n"; [ "$n" -ge 913 ]
+
+  kit:
+    name: src/qml/kit is logos-evm-tx-kit as pinned
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: scripts/check.sh at the pinned commit
+        run: |
+          set -euo pipefail
+          git clone -q https://github.com/logos-co/logos-evm-tx-kit "$RUNNER_TEMP/kit"
+          git -C "$RUNNER_TEMP/kit" checkout -q "$(cat src/qml/kit/VERSION)"
+          "$RUNNER_TEMP/kit/scripts/check.sh" .

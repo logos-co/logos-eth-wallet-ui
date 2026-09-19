@@ -61,6 +61,7 @@ ScopedState readScreen()
     s.history = R"([{"hash":"0xdead","status":"confirmed"}])";
     s.blockedChains = R"([{"chainId":11155111,"count":2}])";
     s.blockedNonces = R"([{"chainId":11155111,"nonce":40,"behind":1}])";
+    s.resendReview = R"({"request":{"nonce":40},"quote":{"ok":true}})";
     s.quote = R"({"ok":true,"gasLimit":21000})";
     s.quoteRequest = R"({"to":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","amountUnits":"0.1"})";
     s.quoteStale = true;
@@ -93,6 +94,8 @@ void check(const char *label, const char *account, const char *network, Want w)
     expect(label, "blockedChainsJson", !s.blockedChains.isEmpty(), w.keepsAccountData);
     // Its resend is the account's own transfer: left standing, it would send it from the next.
     expect(label, "blockedNoncesJson", !s.blockedNonces.isEmpty(), w.keepsAccountData);
+    // A review of the account's own resend: left up, Confirm would send it from the next account.
+    expect(label, "resendReviewJson", !s.resendReview.isEmpty(), w.keepsAccountData);
     expect(label, "quoteJson", s.quote != QLatin1String("{}"), w.keepsAccountData);
     expect(label, "quoteRequestJson", !s.quoteRequest.isEmpty(), w.keepsAccountData);
     expect(label, "quoteStale", s.quoteStale, w.keepsAccountData);
