@@ -625,6 +625,24 @@ for end in ["From", "To"]:
           qml_binding("txDetailTransfer%s_" % end, "address"),
           'address: modelData.%s || ""' % end.lower())
 
+print("   EIP-7708: the system address logs ETHER with the ERC-20 Transfer topic. It is never a")
+print("   token here, whatever an older sender filed it as, and the ether gets its own card")
+check("the token list drops the system emitter",
+      "root.isSystemEmitter(t.contract)" in qml_decl("transfers"), True)
+check("...which is the system address, case-folded",
+      'sameHex(a, "0xfffffffffffffffffffffffffffffffffffffffe")'
+      in qml_fn_body(qml_body, "isSystemEmitter"), True)
+check("the ether card is shown only for a non-empty list",
+      qml_binding("txDetailNativeTransfersCard", "visible"),
+      "visible: txPage.nativeTransfers.length > 0")
+check("...which leaves out the transaction's own value, already the headline figure",
+      "t.txValue !== true" in qml_decl("nativeTransfers"), True)
+check("...and renders the backend's figure, scaling nothing itself",
+      qml_binding("txDetailNativeTransferAmount_", "value"),
+      "value: root.transferAmount(modelData)")
+check("a call row's title reads the backend's total of the ether that came back",
+      "rec.nativeReceivedWeiDisplay" in qml_fn_body(qml_body, "txTitle"), True)
+
 print("   the ceiling appears beside a fee that was PAID. While pending the fee row already")
 print("   IS the ceiling, and one number under two labels explains nothing")
 check("the ceiling row wants both figures",

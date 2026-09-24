@@ -29,6 +29,11 @@ Item {
     readonly property string freshHash: "0x2f88000000000000000000000000000000000000000000000000000000000005"
     readonly property string callHash: "0x1d66000000000000000000000000000000000000000000000000000000000006"
     readonly property string router: "0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45"
+    readonly property string usdc: "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238"
+    // EIP-7708's emitter: it logs ETHER with the ERC-20 Transfer topic.
+    readonly property string system: "0xfffffffffffffffffffffffffffffffffffffffe"
+    readonly property string swapEthHash: "0x4a99000000000000000000000000000000000000000000000000000000000007"
+    readonly property string legacyHash: "0x6b77000000000000000000000000000000000000000000000000000000000008"
     // A SwapRouter02 multicall(deadline, bytes[]) with nothing in it: the selector and three
     // words, which is the 100 bytes the Data row must count.
     readonly property string swapInput: "0x5ae401dc" + "0".repeat(56) + "68b6a7d0"
@@ -129,7 +134,11 @@ Item {
         totalWei: "10021000000000000", totalWeiExact: "0.010021",
         valueSymbol: "ETH", valueDecimals: 18, valueDisplay: "0.01", valueExact: "0.01",
         nativeSymbol: "ETH", stalled: false, unresolved: false, verificationBlocked: false,
-        txTo: probe.them, interactedWithDiffers: false
+        txTo: probe.them, interactedWithDiffers: false,
+        // After EIP-7708 the send logs its own value, which the sender marks `txValue`.
+        nativeTransfers: [{ from: probe.me, to: probe.them, amount: "10000000000000000",
+                            mine: true, txValue: true, symbol: "ETH", decimals: 18,
+                            amountDisplay: "0.01", amountExact: "0.01" }]
     }, {
         // A REVERTED send, carrying the measured fee pair from F-2: two different numbers
         // whose bounded strings are both "<0.00001". The screen exists to compare them.
@@ -181,6 +190,45 @@ Item {
         label: "Swap 10 USDC for at least 0.0033 WETH", origin: "uniswap_ui",
         purpose: "Swap 10 USDC for WETH on Uniswap", leg: 1, legs: 2,
         meta: { kind: "swap" }, txInput: probe.swapInput
+    }, {
+        // A USDC -> ETH swap after EIP-7708: the router unwraps WETH and pays this account in
+        // ether, and the system address logs both hops. Same day as the rows above.
+        hash: probe.swapEthHash, chainId: 11155111, from: probe.me, to: probe.router,
+        value: "0", kind: "call", status: "confirmed", timestamp: 1756690800,
+        nonce: 32, gasLimit: 210000, gasUsed: "150000", gasUsedPercent: 71,
+        gasPriceUnit: "gwei", blockNumber: 25890010,
+        feeWei: "180000000000000", feeWeiDisplay: "0.00018", feeWeiExact: "0.00018",
+        valueSymbol: "ETH", valueDecimals: 18, valueDisplay: "0", valueExact: "0",
+        nativeSymbol: "ETH", stalled: false, unresolved: false, verificationBlocked: false,
+        txTo: probe.router, interactedWithDiffers: false,
+        label: "Swap 10 USDC for ETH", origin: "uniswap_ui", leg: 1, legs: 2,
+        meta: { kind: "swap" },
+        transfers: [
+            { contract: probe.usdc, from: probe.me, to: probe.router, amount: "10000000",
+              known: true, mine: true, symbol: "USDC", decimals: 6,
+              amountDisplay: "10", amountExact: "10" }
+        ],
+        nativeTransfers: [
+            { from: probe.router, to: probe.me, amount: "3300000000000000", mine: false,
+              symbol: "ETH", decimals: 18, amountDisplay: "0.0033", amountExact: "0.0033" },
+            { from: probe.weth, to: probe.router, amount: "3300000000000000", mine: false,
+              symbol: "ETH", decimals: 18, amountDisplay: "0.0033", amountExact: "0.0033" }
+        ],
+        nativeReceivedWei: "3300000000000000", nativeReceivedWeiDisplay: "0.0033",
+        nativeReceivedWeiExact: "0.0033"
+    }, {
+        // An ether send settled by a sender that PREDATES EIP-7708 handling: it filed the
+        // system address's log as a token transfer, and an undecorated reply passes it on.
+        hash: probe.legacyHash, chainId: 11155111, from: probe.me, to: probe.them,
+        value: "20000000000000000", kind: "native", status: "confirmed", timestamp: 1756690900,
+        nonce: 33, gasLimit: 21000, gasUsed: "21000", gasUsedPercent: 100,
+        gasPriceUnit: "gwei", blockNumber: 25890020,
+        feeWei: "21000000000000", feeWeiDisplay: "0.00002", feeWeiExact: "0.000021",
+        valueSymbol: "ETH", valueDecimals: 18, valueDisplay: "0.02", valueExact: "0.02",
+        nativeSymbol: "ETH", stalled: false, unresolved: false, verificationBlocked: false,
+        txTo: probe.them, interactedWithDiffers: false,
+        transfers: [{ contract: probe.system, from: probe.me, to: probe.them,
+                      amount: "20000000000000000", known: false, mine: true }]
     }]
 
     // A HALF answer, which is the normal case: the block landed and the transaction leg did
@@ -327,6 +375,11 @@ Item {
               row("txDetailTransfersCard").visible, false)
         check("...and nothing is recorded in their place: this is not an erc20 send",
               row("txDetailRecordedCard").visible, false)
+        console.log("   after EIP-7708 the send logs its own value too. That IS the headline")
+        console.log("   figure and the To row, so it adds no section: the screen stays as quiet")
+        check("no ether section for the send's own value",
+              row("txDetailNativeTransfersCard").visible, false)
+        check("...and no heading for one", row("txDetailNativeTransfersHeading").visible, false)
         check("the fee that was paid", row("txDetailFeeRow").value, "0.00002 ETH")
         check("...beside the ceiling it was quoted at", row("txDetailCeilingRow").value,
               "0.00004 ETH")
@@ -476,6 +529,44 @@ Item {
 
     // The Activity list the screens above were opened from. Six rows over two days, so the
     // heading the delegate computes against its neighbour must appear exactly twice.
+    function assertEtherTransfersScreen() {
+        console.log("")
+        console.log("a USDC -> ETH swap after EIP-7708. The ether that came back is logged by the")
+        console.log("system address with the ERC-20 Transfer topic, decoded APART from the tokens")
+        console.log("and shown in ether, never as a token of unknown decimals")
+        check("the title names the ether that came back", row("txDetailTitle").text,
+              "Swap 10 USDC for ETH · +0.0033 ETH")
+        check("the ether section is shown", row("txDetailNativeTransfersCard").visible, true)
+        check("...headed in the chain's own currency",
+              row("txDetailNativeTransfersHeading").text, "ETH transferred")
+        check("what came back to the account, in ether",
+              row("txDetailNativeTransferAmount_0").value, "0.0033 ETH")
+        check("...labelled as received", row("txDetailNativeTransferAmount_0").label, "Received")
+        check("...copying every digit", row("txDetailNativeTransferAmount_0").copyValue, "0.0033")
+        check("...from the router, whole", row("txDetailNativeTransferFrom_0Copy").value,
+              probe.router)
+        check("the unwrap between two contracts is neither sent nor received",
+              row("txDetailNativeTransferAmount_1").label, "Transferred")
+        check("nothing was dropped, so nothing is claimed",
+              row("txDetailNativeTransfersMore").visible, false)
+        check("the token that left is still a token", row("txDetailTransferAmount_0").value,
+              "10 USDC")
+        check("...and the only one", find(screen(), "txDetailTransfer_1"), null)
+    }
+
+    function assertLegacyEtherScreen() {
+        console.log("")
+        console.log("the same kind of log from a sender that predates EIP-7708 handling, filed as")
+        console.log("a TOKEN transfer of 0xFfff…FFfE. It is not one: no token section, and no")
+        console.log("\"not in this wallet's token list\" note about the system address")
+        check("no tokens-transferred section", row("txDetailTransfersCard").visible, false)
+        check("...and no heading for one", row("txDetailTransfersHeading").visible, false)
+        check("no unknown-token note", find(screen(), "txDetailUnknownToken_0"), null)
+        check("no ether section either: that sender decoded none",
+              row("txDetailNativeTransfersCard").visible, false)
+        check("the title is the send it always was", row("txDetailTitle").text, "Sent 0.02 ETH")
+    }
+
     function assertActivityHeadings() {
         console.log("")
         console.log("the activity list groups by day, MetaMask-style. The model is a plain JS")
@@ -541,6 +632,9 @@ Item {
               find(view.item, "txToCopy_" + probe.ethHash).visible, true)
         check("...which the call row does not carry",
               find(view.item, "txToCopy_" + probe.callHash).visible, false)
+        check("a call row names the ether that came back",
+              find(view.item, "txTitle_" + probe.swapEthHash).text,
+              "Swap 10 USDC for ETH · +0.0033 ETH")
     }
 
     // A heading that dated itself off `new Date()` had no binding dependency at all, and the
@@ -550,7 +644,7 @@ Item {
     function assertHeadingsAge() {
         console.log("")
         console.log("the headings read a ticker on the root, not the wall clock. Nothing below")
-        console.log("touches the model: the same six rows are on screen throughout")
+        console.log("touches the model: the same rows are on screen throughout")
         var head = find(view.item, "txDay_" + probe.ercHash)
         var key = Qt.formatDate(new Date(probe.rows[0].timestamp * 1000), "yyyy-MM-dd")
         var dated = Qt.formatDate(new Date(probe.rows[0].timestamp * 1000), "MMM d, yyyy")
@@ -591,6 +685,10 @@ Item {
             probe.assertFreshErc20Screen()
             item.openTxDetail(probe.callHash)
             probe.assertCallScreen()
+            item.openTxDetail(probe.swapEthHash)
+            probe.assertEtherTransfersScreen()
+            item.openTxDetail(probe.legacyHash)
+            probe.assertLegacyEtherScreen()
             probe.assertATabClickLeavesThePushedScreen()
             // The list itself, which needs a layout pass the handler it is asserted from
             // cannot wait for: its delegates do not exist until the view has laid out.

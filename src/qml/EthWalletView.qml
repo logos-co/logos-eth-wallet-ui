@@ -924,6 +924,9 @@ Item {
             var title = rec.label && rec.label.length ? rec.label : "Contract call"
             if (rec.valueDisplay !== undefined && rec.valueDisplay !== "0")
                 title += " · " + rec.valueDisplay + " " + (rec.valueSymbol || "")
+            // The ether that came back (EIP-7708 logs), totalled by the backend.
+            if (rec.nativeReceivedWeiDisplay !== undefined)
+                title += " · +" + rec.nativeReceivedWeiDisplay + " " + (rec.nativeSymbol || "")
             return title
         }
         if (rec.valueDisplay !== undefined)
@@ -1084,6 +1087,9 @@ Item {
         if (t.amountDisplay !== undefined) return t.amountDisplay + " " + (t.symbol || "")
         return t.amount + " base units"
     }
+
+    // EIP-7708: this address logs ETHER with the ERC-20 Transfer topic. It is never a token.
+    function isSystemEmitter(a) { return sameHex(a, "0xfffffffffffffffffffffffffffffffffffffffe") }
 
     // ── shared pieces ─────────────────────────────────────────────────────────────
     // Inline components cannot see the ids of the file that declares them, so anything they
@@ -2972,7 +2978,13 @@ Item {
                                        ? txPage.rec
                                        : (txPage.det.transaction || ({}))
             readonly property var transfers: txPage.rec.transfers !== undefined
-                                             ? txPage.rec.transfers : []
+                                             ? txPage.rec.transfers.filter(function (t) { return !root.isSystemEmitter(t.contract) })
+                                             : []
+            // EIP-7708 ether transfers. The transaction's own value is one of them, and the
+            // screen already shows it, so it is left out.
+            readonly property var nativeTransfers: txPage.rec.nativeTransfers !== undefined
+                                                   ? txPage.rec.nativeTransfers.filter(function (t) { return t.txValue !== true })
+                                                   : []
             // The transaction's own calldata, sourced exactly as `tip` above: the row's where
             // it was recorded with one, the fetch's otherwise. Empty is UNKNOWN — an older row
             // carries no `txInput` at all, and the Fetch button at the bottom backfills it.
@@ -3291,6 +3303,68 @@ Item {
                                 label: "Block"
                                 value: txPage.rec.blockNumber !== undefined
                                        ? String(txPage.rec.blockNumber) : "—"
+                            }
+                        }
+                    }
+
+                    // ── ether transferred ─────────────────────────────────────────
+                    // EIP-7708 logs ether moving the way ERC-20 logs a token, so these are decoded
+                    // off the receipt too: a swap's proceeds, a refund. Absent, never "none".
+                    LogosText {
+                        objectName: "txDetailNativeTransfersHeading"
+                        visible: txPage.nativeTransfers.length > 0
+                        text: (txPage.rec.nativeSymbol || "Native currency") + " transferred"
+                        font.pixelSize: Theme.typography.subtitleText
+                        font.weight: Theme.typography.weightMedium
+                    }
+
+                    LogosFrame {
+                        objectName: "txDetailNativeTransfersCard"
+                        visible: txPage.nativeTransfers.length > 0
+                        Layout.fillWidth: true
+
+                        contentItem: ColumnLayout {
+                            spacing: Theme.spacing.small
+
+                            Repeater {
+                                model: txPage.nativeTransfers
+                                ColumnLayout {
+                                    objectName: "txDetailNativeTransfer_" + index
+                                    Layout.fillWidth: true
+                                    spacing: 2
+                                    DetailRow {
+                                        objectName: "txDetailNativeTransferAmount_" + index
+                                        label: modelData.mine === true ? "Sent"
+                                             : root.sameHex(modelData.to, txPage.rec.from) ? "Received"
+                                             : "Transferred"
+                                        value: root.transferAmount(modelData)
+                                        copyValue: modelData.amountExact !== undefined
+                                                   ? modelData.amountExact : modelData.amount
+                                        onCopied: function (v) { root.lastCopiedValue = v }
+                                    }
+                                    NamedAddressRow {
+                                        objectName: "txDetailNativeTransferFrom_" + index
+                                        label: "From"
+                                        address: modelData.from || ""
+                                        onCopied: function (v) { root.lastCopiedValue = v }
+                                    }
+                                    NamedAddressRow {
+                                        objectName: "txDetailNativeTransferTo_" + index
+                                        label: "To"
+                                        address: modelData.to || ""
+                                        onCopied: function (v) { root.lastCopiedValue = v }
+                                    }
+                                }
+                            }
+
+                            LogosText {
+                                objectName: "txDetailNativeTransfersMore"
+                                visible: txPage.rec.nativeTransfersMore !== undefined
+                                         && txPage.rec.nativeTransfersMore > 0
+                                color: Theme.palette.textSecondary
+                                font.pixelSize: Theme.typography.secondaryText
+                                text: "+" + txPage.rec.nativeTransfersMore + " more "
+                                      + (txPage.rec.nativeSymbol || "native") + " transfers in this transaction"
                             }
                         }
                     }
