@@ -28,6 +28,7 @@ public:
     EthWalletUiBackend();
 
     void refresh() override;
+    void refreshAccounts() override;
     void saveContact(QString address, QString name) override;
     void forgetContact(QString address) override;
     void selectAccount(QString address) override;
@@ -143,6 +144,8 @@ private:
     quint64 m_registryGen = 0;
     /// Polls a pending send until it settles. Stopped once nothing is in flight.
     QTimer m_sendPoll;
+    QTimer m_accountsPoll;
+    InFlight m_accountsRead;
     /// Sweeps broadcast transactions for receipts. Runs only while a row is pending.
     QTimer m_pendingPoll;
     /// Re-reads the verified-proxy verdict. Stopped only on a confirmed "off" mode.

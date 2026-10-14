@@ -1,4 +1,5 @@
 import QtQuick 2.15
+import "AccountOrigin.js" as AccountOrigin
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
 import Logos.Controls
@@ -878,13 +879,11 @@ Item {
         return n.length ? n + " (" + shortAddr(a) + ")" : shortAddr(a)
     }
 
-    // What a CLOSED picker shows: the name, or the short address when there is none. Not
-    // both — the selected account's address is displayed beside the control, and a 220px box
-    // holding a name and an address elides, taking the address with it. The open list shows
-    // both, on two lines, which is what `AccountPicker` below is for.
+    // The same source order in the closed selector, popup and selected-account detail.
+    function accountSource(a) { return AccountOrigin.source(accountWallet(a)) }
     function accountDisplay(a) {
-        var n = displayName(a)
-        return n.length ? n : shortAddr(a)
+        if (!a) return "Select an account"
+        return AccountOrigin.summary(accountWallet(a), a, accountLabel(a), shortAddr(a))
     }
 
     // Both are still `pending` on disk. Blocked means the chain was never asked at all —
@@ -1198,69 +1197,126 @@ Item {
         }
     }
 
-    // An account picker whose ROWS carry both halves without either cutting the other.
-    //
-    // A LogosComboBox row is one elided line, so "Name (0xa1E2…247E)" in it loses the
-    // address — already shortened from 42 characters to 11, and then trimmed again into
-    // something that identifies nothing. Two lines fixes that rather than choosing between
-    // them: the name may elide, because it is this wallet's own word and a user can widen the
-    // window; the short address may not, because there is nothing left to take.
-    //
-    // The model is ADDRESSES, not display strings. Names are resolved per row, so a rename
-    // lands without rebuilding the model — and the closed control asks the same resolver.
-    component AccountPicker: LogosComboBox {
-        id: picker
-        property var addresses: []
-        readonly property string currentAddress:
-            currentIndex >= 0 && currentIndex < addresses.length ? addresses[currentIndex] : ""
-
-        model: addresses
-        displayText: root.accountDisplay(picker.currentAddress)
-
-        // Overriding `delegate` replaces LogosComboBox's OWN, and with it the highlight and
-        // the pointer cursor that made a row look clickable. Both are restored here rather
-        // than left to the style: an ItemDelegate's default background is transparent, so
-        // without this the list is inert-looking text that happens to respond.
-        delegate: ItemDelegate {
-            id: accountItem
-            width: picker.popupListView ? picker.popupListView.width : picker.width
-            objectName: "accountRow_" + index
-            highlighted: picker.highlightedIndex === index
-            background: Rectangle {
-                color: accountItem.highlighted ? Theme.palette.surface : "transparent"
+    // Every selection and popup entry reserves the same three-line height. A
+    // device with one known wallet needs only its device and account lines.
+    component AccountIdentity: Item {
+        id: identity
+        property string address: ""
+        property string namePrefix: ""
+        readonly property var wallet: root.accountWallet(address)
+        readonly property bool showWallet: AccountOrigin.showWallet(wallet,
+            root.accounts.map(function(a) { return root.accountWallet(a) }))
+        implicitHeight: 76
+        implicitWidth: 320
+        ColumnLayout {
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.verticalCenter: parent.verticalCenter
+            spacing: 3
+            LogosText {
+                objectName: identity.namePrefix + "Device"
+                Layout.fillWidth: true
+                text: identity.address ? AccountOrigin.device(identity.wallet) : "Select an account"
+                textFormat: Text.PlainText
+                elide: Text.ElideRight
             }
-            HoverHandler {
-                cursorShape: accountItem.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+            LogosText {
+                objectName: identity.namePrefix + "Wallet"
+                Layout.fillWidth: true
+                visible: identity.address.length > 0 && identity.showWallet
+                text: AccountOrigin.wallet(identity.wallet)
+                textFormat: Text.PlainText
+                color: Theme.palette.textSecondary
+                font.pixelSize: Theme.typography.secondaryText
+                elide: Text.ElideRight
             }
-            contentItem: ColumnLayout {
-                spacing: 0
+            RowLayout {
+                visible: identity.address.length > 0
+                Layout.fillWidth: true
+                spacing: 6
                 LogosText {
-                    Layout.fillWidth: true
-                    objectName: "accountRowName_" + index
+                    objectName: identity.namePrefix + "Name"
                     visible: text.length > 0
+                    Layout.maximumWidth: Math.max(0, identity.width - accountAddress.implicitWidth - accountCopy.width - 18)
+                    text: root.accountLabel(identity.address)
                     textFormat: Text.PlainText
-                    text: root.displayName(modelData)
+                    font.pixelSize: Theme.typography.secondaryText
                     elide: Text.ElideRight
                 }
                 LogosText {
-                    Layout.fillWidth: true
-                    objectName: "accountRowAddress_" + index
+                    id: accountAddress
+                    objectName: identity.namePrefix + "Address"
+                    Layout.minimumWidth: implicitWidth
+                    text: root.shortAddr(identity.address)
                     textFormat: Text.PlainText
-                    text: root.shortAddr(modelData)
                     color: Theme.palette.textSecondary
                     font.family: Theme.typography.mono
                     font.pixelSize: Theme.typography.secondaryText
-                    // Never elided. It is already the mid-ellided form; a second cut leaves a
-                    // prefix that matches thousands of addresses.
                     elide: Text.ElideNone
                 }
+                LogosCopyButton {
+                    id: accountCopy
+                    objectName: identity.namePrefix + "Copy"
+                    value: identity.address
+                    ToolTip.text: "Copy address"
+                    ToolTip.visible: hovered
+                    ToolTip.delay: 400
+                    onCopied: function(v) { root.lastCopiedValue = v }
+                }
+                Item { Layout.fillWidth: true }
             }
         }
     }
 
-    // A pick-one row for the recipient lists. Same two-line shape as the account picker's,
-    // and for the same reason — one line carrying a name and an address is a line that
-    // elides the address. The name may go; the short address may not.
+    component AccountPicker: LogosComboBox {
+        id: picker
+        Connections {
+            target: picker.popup
+            function onOpened() {
+                if (root.ready) root.backend.refreshAccounts()
+            }
+        }
+        property var addresses: []
+        readonly property string currentAddress:
+            currentIndex >= 0 && currentIndex < addresses.length ? addresses[currentIndex] : ""
+        implicitHeight: 88
+        leftPadding: 12
+        rightPadding: 36
+        topPadding: 6
+        bottomPadding: 6
+        ToolTip.visible: hovered
+        ToolTip.text: root.accountDisplay(currentAddress) + "\n" + currentAddress
+        Accessible.name: root.accountDisplay(currentAddress)
+        model: addresses
+        displayText: root.accountDisplay(currentAddress)
+        contentItem: AccountIdentity {
+            address: picker.currentAddress
+            namePrefix: picker.objectName + "Selected"
+        }
+        delegate: ItemDelegate {
+            id: accountItem
+            width: picker.popupListView ? picker.popupListView.width : picker.width
+            height: 88
+            leftPadding: 12
+            rightPadding: 12
+            topPadding: 6
+            bottomPadding: 6
+            objectName: "accountRow_" + index
+            highlighted: picker.highlightedIndex === index
+            Accessible.name: root.accountDisplay(modelData)
+            ToolTip.visible: hovered
+            ToolTip.text: root.accountDisplay(modelData) + "\n" + modelData
+            background: Rectangle {
+                color: accountItem.highlighted ? Theme.palette.surface : "transparent"
+            }
+            HoverHandler { cursorShape: accountItem.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor }
+            contentItem: AccountIdentity {
+                address: modelData
+                namePrefix: "accountRow_" + index
+            }
+        }
+    }
+
     component PickableAddress: ItemDelegate {
         id: pick
         property string address: ""
@@ -1494,7 +1550,7 @@ Item {
             AccountPicker {
                 id: accountPicker
                 objectName: "accountPicker"
-                Layout.preferredWidth: 220
+                Layout.preferredWidth: Math.min(440, root.width * 0.75)
                 addresses: root.accounts
                 enabled: root.ready && root.accounts.length > 0
                 onActivated: if (root.ready) root.backend.selectAccount(root.accounts[currentIndex])
@@ -1516,6 +1572,7 @@ Item {
             // address it names, where a word of chrome pushes the two apart. LogosIconButton
             // carries no text of its own, so the tooltip is the only thing naming it and is
             // not decoration.
+            LogosInfoButton { objectName: "accountOriginInfo"; title: "Where accounts come from"; Accessible.name: "Help: Where accounts come from"; text: "The selector shows the device or Keystore, the wallet or recovery group when available, and the account name and address. Accounts are supplied by their source app. Manage file-backed accounts in Keystore and card-backed accounts in Keycard. Selecting an account does not move funds or copy its private key." }
             HoverIcon {
                 objectName: "manageAccountsButton"
                 size: 32
@@ -1531,31 +1588,16 @@ Item {
             Item { Layout.fillWidth: true }
         }
 
-        // The selected account's address and the device-wide portfolio scope. Send has its own
+        // The device-wide portfolio scope. Send has its own
         // explicit chain picker below.
+
         RowLayout {
             Layout.fillWidth: true
             spacing: Theme.spacing.small
 
-            // The one identifier a user hands out, so it is copyable wherever it appears.
-            LogosSelectableText {
-                objectName: "addressLabel"
-                text: root.shortAddr(root.selected)
-                color: Theme.palette.textSecondary
-                font.family: Theme.typography.mono
-            }
-            LogosCopyButton {
-                // Named like the two buttons beside it in the address book row, which had one
-                // each while this had none — the only unlabelled control in the group.
-                ToolTip.text: "Copy"
-                ToolTip.visible: hovered
-                ToolTip.delay: 400
-                objectName: "addressCopyButton"
-                value: root.selected
-                onCopied: function (v) { root.lastCopiedValue = v }
-            }
-
             Item { Layout.fillWidth: true }
+
+            LogosInfoButton { objectName: "networkScopeInfo"; title: "Which networks are shown"; Accessible.name: "Help: Which networks are shown"; text: "Tokens and activity use the enabled networks in the selected mainnet or testnet scope. The same address can have different balances on different networks. Sending uses the network chosen in the Send tab." }
 
             // This is a portfolio scope, not an "active network": the read-only tabs now
             // compose every enabled chain in the selected scope.

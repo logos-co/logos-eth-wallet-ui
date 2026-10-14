@@ -95,8 +95,10 @@ app as `failed`, without the data that carries the reason.
 
 ## Accounts and secrets
 
-The UI holds no secret. It reads the keystore's account inventory, labels and wallet
-provenance through the composer. Passwords are handled only by `evm_signer_ui`; seed phrases
+The UI holds no secret. It reads the signer manager's account inventory, labels and wallet
+provenance through the composer. The selector checks for newly available accounts every
+15 seconds and when opened, so opening Keycard later also discovers its saved accounts.
+A failed discovery check retains the current list and selection. Passwords are handled only by `evm_signer_ui`; seed phrases
 and imports belong only to `evm_keystore_ui`.
 
 Receive encodes the selected EIP-55 address locally as a QR code. It includes no amount and
@@ -135,3 +137,20 @@ nix build .#install
 
 Icons in `src/qml/assets/` are local UI resources. The `metadata.json` icon is packaged for
 host chrome and is a separate mechanism.
+
+### Account selector origins
+
+Account selectors show device → recovery source → account name and address. The
+source comes from the signer manager's chosen provider, not an address-book label.
+Keycard names and short card IDs survive disconnection; two remembered cards holding
+the same key are both named. Keystore recovery sources use their verified local seed
+link (or the legacy derivation group), with a saved group name when available. These
+are public identifiers, never the recovery words. Imported keys/files explicitly say
+that no phrase is recorded. Missing metadata is shown as unknown.
+
+The selected value and dropdown entries use Device, Wallet and Account lines at a
+fixed height. Devices with one known wallet omit the middle line; the remaining lines
+are centered in the same space. The address remains separately visible and copyable. The model and selection remain addresses;
+renaming a device or source cannot change the account selected for signing.
+
+Run `node doctests/account_origins.mjs` for the formatting cases.
