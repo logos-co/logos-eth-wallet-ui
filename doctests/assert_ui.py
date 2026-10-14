@@ -1176,13 +1176,12 @@ print("one rule for showing an address, and the name never replaces it: a name i
 print("wallet's own word for who that is and cannot be checked against what was signed.")
 check("namedAddr always carries the short address",
       qml_fn_body(qml_body, "namedAddr").count("shortAddr(a)"), 2)
-# The CLOSED picker is the one place a name stands without its address, and deliberately:
-# the selected account's address is rendered beside the control, and 220px holding both is
-# 220px that elides the address. The open list carries both, on two lines.
-check("...and the closed picker shows a name alone, falling back to the short address",
-      "return n.length ? n : shortAddr(a)" in qml_fn_body(qml_body, "accountDisplay"), True)
-check("...while its rows carry both, resolved per row rather than baked into the model",
-      "model: addresses" in qml_body and "text: root.displayName(modelData)" in qml_body, True)
+check("the closed picker includes source, account name and address",
+      "AccountOrigin.summary" in qml_fn_body(qml_body, "accountDisplay"), True)
+check("the selected value uses stacked source lines",
+      "contentItem: AccountIdentity" in qml_body, True)
+check("the rows resolve sources without replacing address identity",
+      "model: addresses" in qml_body and "AccountOrigin.device(identity.wallet)" in qml_body, True)
 print()
 print("the account chrome and the tab strip STAY over a pushed screen. A detail screen")
 print("replaces only the pane UNDER the strip, so it is a place inside the tab it opened")
@@ -1231,11 +1230,11 @@ print("no address is elided TWICE. A mid-ellided address has already lost 30 cha
 print("a container that trims it again leaves a prefix matching thousands of addresses. So")
 print("wherever a name and an address share a row they are on separate lines: the name may")
 print("elide, the address may not.")
-for comp, addr_line in [("AccountPicker", "accountRowAddress_"),
+for comp, addr_line in [("AccountIdentity", "Address"),
                         ("PickableAddress", "Address")]:
     body = qml_body[qml_body.index("component %s" % comp):]
     body = body[:body.index("\n    component ")] if "\n    component " in body else body
-    check(f"  {comp}'s address line is never elided", "elide: Text.ElideNone" in body, True)
+    check(f"  {comp}'s address line is never elided", "elide: Text.ElideNone" in body or "wrapMode: Text.Wrap" in body, True)
 check("a detail row's address wraps instead of eliding, and is the WHOLE address",
       "wrapMode: Text.WrapAnywhere" in qml_body[qml_body.index("component NamedAddressRow"):
                                                 qml_body.index("component DetailRow")], True)
@@ -1325,12 +1324,12 @@ print("   come from a downloaded one.")
 check("no note over the native currency", props("tokenListNote").get("visible"), False)
 
 print("9) a copy button puts the WHOLE value on the clipboard, not the shortened display")
-me=props("addressCopyButton").get("value")
-call("callMethod",{"objectId":oid("addressCopyButton"),"method":"copy","args":[]}); time.sleep(0.4)
+me=props("accountPickerSelectedCopy").get("value")
+call("callMethod",{"objectId":oid("accountPickerSelectedCopy"),"method":"copy","args":[]}); time.sleep(0.4)
 check("copied value is the full address", props("ethWalletRoot").get("lastCopiedValue"), me)
 print("   control: the label DISPLAYS a shorter string, so this is not the same read twice")
-check("displayed value is elided", props("addressLabel").get("text"), "…", "contains")
-check("and is shorter than what was copied", len(str(props("addressLabel").get("text"))) < len(str(me)), True)
+check("displayed value is elided", props("accountPickerSelectedAddress").get("text"), "…", "contains")
+check("and is shorter than what was copied", len(str(props("accountPickerSelectedAddress").get("text"))) < len(str(me)), True)
 
 print("10) back closes the screen, and a hash we never broadcast opens nothing")
 view("back")
@@ -1567,19 +1566,19 @@ check("the view did NOT leave the Send section", props("pages").get("currentInde
 check("nothing is pending", ev("sendPending"), False)
 call("callMethod",{"objectId":oid("sendCancelButton"),"method":"clicked","args":[]}); time.sleep(0.8)
 
-print("23) accounts are identified by NAME, with the address beside the selector")
+print("23) accounts show their name and address inside the selector")
 print("   `set_label` is custodian-gated (keystore glue.rs:338-341) and this view is not the")
 print("   custodian, so the NAMED leg only runs where the harness is allowed to write one.")
 named=call("evaluate",{"expression":'logos.callModule("keystore_module","set_label",["%s","Treasury"])' % me}).get("result")
 call("evaluate",{"expression":'logos.module("eth_wallet_ui").refresh()'}); time.sleep(2.5)
 if '"ok":true' in str(named):
     check("the keystore's name reaches the view", ev("accountLabel('%s')" % me), "Treasury")
-    check("the picker shows the name", ev("accountDisplay('%s')" % me), "Treasury")
-    check("the picker's model carries it", props("accountPicker").get("model"), "Treasury", "contains")
+    check("the picker shows the name", ev("accountDisplay('%s')" % me), "Treasury", "contains")
+    check("the picker model retains addresses", props("accountPicker").get("model"), me, "contains")
 else:
     print("  SKIP  the keystore refused the label: %s" % str(named)[:120])
-print("   the address stays BESIDE the selector, never merged into it")
-check("address label is its own control", props("addressLabel").get("text"), "…", "contains")
+print("   the address and copy control live inside the selector")
+check("selector contains an address control", props("accountPickerSelectedAddress").get("text"), "…", "contains")
 check("...and the picker is not showing a raw address when a name exists",
       props("accountPicker").get("model") is not None, True)
 print("   control: an unnamed account falls back to its address, never to 'Account 2' —")

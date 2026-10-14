@@ -13,6 +13,7 @@ namespace {
 
 constexpr int kSendPollMs = 1500;
 constexpr int kPendingPollMs = 5000;
+constexpr int kAccountsPollMs = 15000;
 // eth_rpc's verdict TTL is also 5s, so a tick typically MISSES that cache and pays a real
 // probe. Every poll below is asynchronous for exactly that reason.
 constexpr int kVerifiedPollMs = 5000;
@@ -214,6 +215,11 @@ void EthWalletUiBackend::applyVerifiedProxy(const QString &verdictJson)
 
 void EthWalletUiBackend::onContextReady()
 {
+    // A signer loaded after this view may already hold accounts without emitting a change.
+    // Re-read periodically so discovery does not depend on the order apps were opened.
+    m_accountsPoll.setInterval(kAccountsPollMs);
+    QObject::connect(&m_accountsPoll, &QTimer::timeout, this, [this] { refreshAccounts(); });
+    m_accountsPoll.start();
     m_sendPoll.setInterval(kSendPollMs);
     QObject::connect(&m_sendPoll, &QTimer::timeout, [this] { pollSend(); });
     m_pendingPoll.setInterval(kPendingPollMs);
@@ -359,6 +365,27 @@ void EthWalletUiBackend::loadAccounts()
     // moves the scope exactly as a click on the picker does.
     if (!stillThere)
         setSelectedAccount(list.isEmpty() ? QString() : list.first().toString());
+}
+
+void EthWalletUiBackend::refreshAccounts()
+{
+    if (m_inFlight)
+        return;
+    quint64 slot = 0;
+    if (!m_accountsRead.take(kOneCallBudgetMs, &slot))
+        return;
+    modules().eth_wallet_backend.list_accountsAsyncResult(
+        [this, slot](logos::AsyncResult<QString> result) {
+            if (!m_accountsRead.isCurrent(slot))
+                return;
+            const bool timely = m_accountsRead.busy();
+            m_accountsRead.release(slot);
+            // Discovery is a background hint. Failed reads never erase the current roster.
+            if (!timely || !result.ok() || !replyOk(result.value))
+                return;
+            if (member(result.value, "accounts") != accountsJson())
+                refreshSoon(); // Read names/origins together and preserve the selection.
+        }, Timeout(kCallBudgetMs));
 }
 
 void EthWalletUiBackend::loadBalancesAndHistory()

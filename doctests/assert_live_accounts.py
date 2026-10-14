@@ -125,17 +125,17 @@ print("2) the RENAME — the case the user reported")
 print("   `set_label` moves no count, so a subscriber diffing counts would see nothing here")
 named = custodian("name_account", [addr, NAME, PW])
 check("the custodian's rename succeeded", named.get("ok"), True)
-shown, secs = until(lambda: NAME if ev("accountDisplay('%s')" % addr) == NAME else None)
+shown, secs = until(lambda: NAME if NAME in str(ev("accountDisplay('%s')" % addr)) else None)
 check("the picker's name for that account changed on its own in %.1fs" % secs, shown, NAME)
 check("...and the picker's own model carries it", props("accountPicker").get("model"), NAME, "contains")
 
 print("3) the picker and the address beside it do not disagree")
 sel = ev("selected") or ""
 check("the picker has a row for the selected account", ev("accountIndex('%s')" % sel) >= 0, True)
-check("the address label is the selected account", props("addressLabel").get("text"),
+check("the address label is the selected account", props("accountPickerSelectedAddress").get("text"),
       ev("shortAddr('%s')" % sel))
 print("   control: the address is NOT the name — they are two controls answering two questions")
-check("the address label is still an address", props("addressLabel").get("text"), "0x", "contains")
+check("the address label is still an address", props("accountPickerSelectedAddress").get("text"), "0x", "contains")
 
 print("4) the control — this script never asked for a re-read")
 # Spelled in pieces so the check cannot match itself, which is how the first version of it

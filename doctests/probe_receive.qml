@@ -274,9 +274,9 @@ Item {
         // this passes whatever they are named: onScreen() looks inside walletHome, and the
         // header's copy button is declared outside it.
         check("...and the header's button is a different object",
-              find(screen(), "addressCopyButton"), null)
+              find(screen(), "accountPickerSelectedCopy"), null)
         check("...which is still on screen while this page is open",
-              find(view.item, "addressCopyButton") !== null, true)
+              find(view.item, "accountPickerSelectedCopy") !== null, true)
     }
 
     // ── the state with nothing to encode ─────────────────────────────────────

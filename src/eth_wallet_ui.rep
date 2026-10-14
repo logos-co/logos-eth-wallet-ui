@@ -161,6 +161,7 @@ class EthWalletUi
     PROP(bool intentSendPricing=false READONLY)
 
     SLOT(void refresh())
+    SLOT(void refreshAccounts())
     SLOT(void selectAccount(QString address))
 
     // UI-local cursor used only by Send. It changes no device state.
