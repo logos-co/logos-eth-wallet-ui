@@ -70,6 +70,7 @@ int main()
            guardBudgetMs(2) > 2 * kCallBudgetMs);
     expect("one call", "is what a quote and a probe each take", kOneCallBudgetMs == guardBudgetMs(1));
     expect("two", "is what balances-then-history takes", kTwoCallBudgetMs == guardBudgetMs(2));
+    expect("one send-path call", "outlives its own longer transport", kOneSendCallBudgetMs > kSendCallBudgetMs);
     std::printf("   equal-to is the defect, and the quote lane HAD it: take(kCallBudgetMs)\n");
     std::printf("   against Timeout(kCallBudgetMs) is a guard that lapses at the instant its\n");
     std::printf("   own call times out\n");

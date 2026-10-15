@@ -41,7 +41,7 @@ EthWalletUiBackend::EthWalletUiBackend()
     };
     m_dataLane.rerun = [this] { loadBalancesAndHistory(); };
 
-    m_quoteLane.budgetMs = kOneCallBudgetMs;
+    m_quoteLane.budgetMs = kOneSendCallBudgetMs;
     m_quoteLane.setLoading = [this](bool on) { setQuoteLoading(on); };
     m_quoteLane.rerun = [this] {
         const bool wasEdit = m_quoteAgainInteractive;
@@ -171,9 +171,9 @@ void EthWalletUiBackend::handOnLane(AsyncLane &lane)
 }
 
 bool EthWalletUiBackend::beginClaim(InFlight &claim, quint64 *slot, const SetLoading &setLoading,
-                                    int legs)
+                                    int legs, int callMs)
 {
-    const int budgetMs = guardBudgetMs(legs);
+    const int budgetMs = guardBudgetMs(legs, callMs);
     if (!claim.take(budgetMs, slot))
         return false;
     setLoading(true);
@@ -477,7 +477,7 @@ void EthWalletUiBackend::loadFeeTiers()
     // whole fees allowance. Not moved to the Send dialog's open path instead — that would
     // relocate the same freeze onto a click.
     quint64 slot = 0;
-    if (!beginClaim(m_feesInFlight, &slot, [this](bool on) { setFeeTiersLoading(on); }))
+    if (!beginClaim(m_feesInFlight, &slot, [this](bool on) { setFeeTiersLoading(on); }, 1, kSendCallBudgetMs))
         return;
     const quint64 gen = m_dataGen;
     if (shown().chainId == 0) {
@@ -495,7 +495,7 @@ void EthWalletUiBackend::loadFeeTiers()
             publishScope(s);
             setFeeTiersLoading(false);
         },
-        Timeout(kCallBudgetMs));
+        Timeout(kSendCallBudgetMs));
 }
 
 void EthWalletUiBackend::refresh()
@@ -587,7 +587,7 @@ void EthWalletUiBackend::runQuote(const QString &requestJson, bool interactive)
             }
             handOnLane(m_quoteLane);
         },
-        Timeout(kCallBudgetMs));
+        Timeout(kSendCallBudgetMs));
 }
 
 void EthWalletUiBackend::setQuoteAutoRefresh(bool on)
@@ -617,7 +617,7 @@ void EthWalletUiBackend::submitSend(QString requestJson)
     // The witness is taken before the call, exactly as loadNetwork's is: `send` is SYNC into a
     // multi module, so it dispatches queued events inline and the selection can move inside it.
     const quint64 gen = m_dataGen;
-    const QString reply = modules().eth_wallet_backend.send(requestJson);
+    const QString reply = modules().eth_wallet_backend.send(requestJson, nullptr, Timeout(kSendCallBudgetMs));
     ScopedState after = scopeSnapshot();
     const SendApplied sent = applySend(after, reply, selectionHeld(gen));
     if (sent.accepted)
@@ -715,7 +715,7 @@ void EthWalletUiBackend::resendBlockedNonce(int chainId)
     if (blocked.value(QStringLiteral("resend")).toObject().isEmpty() || !pendingRequestId().isEmpty())
         return;
     quint64 slot = 0;
-    if (!beginClaim(m_resendInFlight, &slot, [this](bool on) { setResendLoading(on); }, 3))
+    if (!beginClaim(m_resendInFlight, &slot, [this](bool on) { setResendLoading(on); }, 3, kSendCallBudgetMs))
         return;
     const quint64 gen = m_dataGen;
     const QString hash = blocked.value(QStringLiteral("hash")).toString();
@@ -762,7 +762,7 @@ void EthWalletUiBackend::priceResend(const QJsonObject &blocked, quint64 slot, q
                 return endResend(slot, failure.arg(fees.error));
             quoteResend(resendRequest(blocked, fees), slot, gen);
         },
-        Timeout(kCallBudgetMs));
+        Timeout(kSendCallBudgetMs));
 }
 
 void EthWalletUiBackend::quoteResend(const QJsonObject &request, quint64 slot, quint64 gen)
@@ -784,7 +784,7 @@ void EthWalletUiBackend::quoteResend(const QJsonObject &request, quint64 slot, q
                                                        {QStringLiteral("quote"), parseObject(reply)}});
             publishScope(s);
         },
-        Timeout(kCallBudgetMs));
+        Timeout(kSendCallBudgetMs));
 }
 
 void EthWalletUiBackend::dismissResend()
@@ -959,7 +959,8 @@ void EthWalletUiBackend::reviewIntentSend(QString requestJson)
     // Price it, so the human sees the ceiling before deciding. A refusal here is shown and
     // stops nothing: the sender refuses again at `send` if it still cannot be paid for.
     quint64 slot = 0;
-    if (!beginClaim(m_intentPriceInFlight, &slot, [this](bool on) { setIntentSendPricing(on); }))
+    if (!beginClaim(m_intentPriceInFlight, &slot, [this](bool on) { setIntentSendPricing(on); }, 1,
+                    kSendCallBudgetMs))
         return;
     const QString forRequest = checked.review.value(QStringLiteral("requestId")).toString();
     modules().tx_sender_module.prepareAsyncResult(toJsonCompact(checked.senderRequest),
@@ -980,7 +981,7 @@ void EthWalletUiBackend::reviewIntentSend(QString requestJson)
                            reply.isEmpty() ? QStringLiteral("the sender did not answer") : replyError(reply));
             setIntentSendJson(toJsonCompact(cur));
         },
-        Timeout(kCallBudgetMs));
+        Timeout(kSendCallBudgetMs));
 }
 
 void EthWalletUiBackend::acceptIntentSend()
@@ -989,7 +990,7 @@ void EthWalletUiBackend::acceptIntentSend()
     if (review.isEmpty() || review.contains(QStringLiteral("error")))
         return;
     quint64 slot = 0;
-    if (!m_intentSendInFlight.take(kOneCallBudgetMs, &slot))
+    if (!m_intentSendInFlight.take(kOneSendCallBudgetMs, &slot))
         return;
     QStringList held;
     for (const QJsonValue &v : QJsonDocument::fromJson(accountsJson().toUtf8()).array())
@@ -1041,7 +1042,7 @@ void EthWalletUiBackend::acceptIntentSend()
             setIntentSendJson(QString());
             m_sendPoll.start();
         },
-        Timeout(kCallBudgetMs));
+        Timeout(kSendCallBudgetMs));
 }
 
 void EthWalletUiBackend::declineIntentSend()

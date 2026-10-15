@@ -89,7 +89,8 @@ private:
     /// the callback never fires. `InFlight` expires by itself; a published spinner does not, so
     /// one without the other is a spinner nobody takes down. No queue: this covers a claim a
     /// BUTTON takes, and the button is disabled while it is held.
-    bool beginClaim(InFlight &claim, quint64 *slot, const SetLoading &setLoading, int legs = 1);
+    bool beginClaim(InFlight &claim, quint64 *slot, const SetLoading &setLoading, int legs = 1,
+                    int callMs = kCallBudgetMs);
 
     void loadNetwork();
     void loadAccounts();
