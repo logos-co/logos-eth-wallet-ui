@@ -162,11 +162,11 @@
         "verified_proxy_module": "verified_proxy_module"
       },
       "locked": {
-        "lastModified": 1789860982,
-        "narHash": "sha256-H4IX0WIZ8ugOVYORrnB6BouI5pidvhgO+7XA+LB7Ag4=",
+        "lastModified": 1792075922,
+        "narHash": "sha256-8mFaiZCQfeVyUol3H2Tjwgh7RJBcGY5i2YUseZHWryo=",
         "owner": "logos-co",
         "repo": "logos-evm-eth-rpc-module",
-        "rev": "49158948e873326a176dc136f2889daab8053d43",
+        "rev": "1ec26efe66d9ec8ddeb34b4626df726ca9a6b0ba",
         "type": "github"
       },
       "original": {
@@ -201,11 +201,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1792066893,
-        "narHash": "sha256-j4H9iXlHnWgLrqel20tGGWhw0e+WifeHQdLUpLfHZp0=",
+        "lastModified": 1792075987,
+        "narHash": "sha256-QLMVMygC06SJeSh7gmioek56gsdAYKsPss+BueBijwA=",
         "owner": "logos-co",
         "repo": "logos-eth-wallet-backend",
-        "rev": "ab52d31a5984a0148f1382ba8c9e9e15d1e6e84d",
+        "rev": "4aa3d0fac7ba7de97a487efa7cd4151187eb431d",
         "type": "github"
       },
       "original": {
@@ -247,11 +247,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1789863493,
-        "narHash": "sha256-OaEz3UGNNSyN1VDtus1KRzRbM5ucxBugy5NnOwC0lvk=",
+        "lastModified": 1792076774,
+        "narHash": "sha256-yN2tWW458zhGrbzCjcC+JcnKkYJIA6v+Y3XxZ9NhWHc=",
         "owner": "logos-co",
         "repo": "logos-evm-fee-module",
-        "rev": "5bf49b768cf178d2e8c58267f17822060f813fbf",
+        "rev": "fb4fdfe449fc4ac2fc968851ea17831a2e551005",
         "type": "github"
       },
       "original": {
@@ -18291,19 +18291,20 @@
         "fee_module": [
           "fee_module"
         ],
-        "keystore_module": [
-          "keystore_module"
-        ],
         "logos-module-builder": [
           "logos-module-builder"
+        ],
+        "signer_manager_module": [
+          "eth_wallet_backend",
+          "signer_manager_module"
         ]
       },
       "locked": {
-        "lastModified": 1790268849,
-        "narHash": "sha256-xHMXRHhnv+3EkzWtkZL3do5FG7IDQtUtCgpe5e26SgE=",
+        "lastModified": 1792076085,
+        "narHash": "sha256-10xnUxGcgFO+GhZIWr87nsVClWBd9e3JcCRU5rG2jok=",
         "owner": "logos-co",
         "repo": "logos-evm-tx-sender-module",
-        "rev": "7cd2fead60a78ac9ac8a4337fd9f01e1ab5515e2",
+        "rev": "9ad3472e3d8b0d6811ee1f7c5b802ad6e559a76f",
         "type": "github"
       },
       "original": {

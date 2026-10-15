@@ -44,7 +44,8 @@
       inputs.logos-module-builder.follows = "logos-module-builder";
       inputs.eth_rpc_module.follows = "eth_rpc_module";
       inputs.fee_module.follows = "fee_module";
-      inputs.keystore_module.follows = "keystore_module";
+      # The sender asks the signer manager for approvals; one manager pin, the backend's.
+      inputs.signer_manager_module.follows = "eth_wallet_backend/signer_manager_module";
     };
   };
 
