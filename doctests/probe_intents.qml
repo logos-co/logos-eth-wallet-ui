@@ -409,23 +409,26 @@ Item {
         })
         check("it borrows the wallet's name and says where in it",
               view.item.displayName(probe.me), "Status Throwaway #0")
-        // The name never REPLACES the address ANYWHERE it has room for both — that is
-        // `namedAddr`, the rule the activity list and every detail row use. The closed
-        // account picker is the one exception, and a deliberate one: it is 220px with an
-        // elide of its own, so both in it means the address is what gets cut.
+        // The name never REPLACES the address — that is `namedAddr`, the rule the activity
+        // list and every detail row use.
         check("...and the general rule carries the address with it",
               view.item.namedAddr(probe.me), "Status Throwaway #0 (0x8626…1199)")
-        check("...while the closed picker shows the name alone, beside the address",
-              view.item.accountDisplay(probe.me), "Status Throwaway #0")
+        // Since #33 the picker reads device — wallet — account; the wallet has its own
+        // line, so only the account's own name sits beside the address.
+        check("...while the picker leads with the source and ends with the address",
+              view.item.accountDisplay(probe.me), "Device unknown — Wallet unknown — 0x8626…1199")
 
         console.log("")
         console.log("...but its OWN name always wins, and an account in an unnamed wallet")
         console.log("falls back to the address rather than inventing anything")
         fake.accountLabelsJson = JSON.stringify({ "8626f6940e2eb28930efb4cef49b2d1f2c9c1199": "Payroll" })
         check("its own name wins", view.item.displayName(probe.me), "Payroll")
+        check("...and the picker puts it beside the address",
+              view.item.accountDisplay(probe.me).split(" — ").slice(-2).join(" — "), "Payroll — 0x8626…1199")
         fake.accountLabelsJson = "{}"
         fake.accountWalletsJson = "{}"
-        check("and with neither, the address", view.item.accountDisplay(probe.me).indexOf("0x"), 0)
+        check("and with neither, the address",
+              view.item.accountDisplay(probe.me).split(" — ").pop(), "0x8626…1199")
     }
 
     function assertNoHandleAsksNothing() {
