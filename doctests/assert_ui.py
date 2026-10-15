@@ -431,16 +431,17 @@ print("   quote lane's take(kCallBudgetMs) against Timeout(kCallBudgetMs) was ze
 check("both budgets come from the one formula",
       [l.strip() for l in guard.splitlines() if "= guardBudgetMs(" in l],
       ["constexpr int kOneCallBudgetMs = guardBudgetMs(1);",
-       "constexpr int kTwoCallBudgetMs = guardBudgetMs(2);"])
+       "constexpr int kTwoCallBudgetMs = guardBudgetMs(2);",
+       "constexpr int kOneSendCallBudgetMs = guardBudgetMs(1, kSendCallBudgetMs);"])
 check("no claim is taken for a bare call budget",
-      [l.strip() for l in code.splitlines() if ".take(kCallBudgetMs" in l], [])
-print("   ...and a lane's budget is a NAMED one of the two: it is assigned rather than passed,")
+      [l.strip() for l in code.splitlines() if re.search(r"\.take\(k(Send)?CallBudgetMs", l)], [])
+print("   ...and a lane's budget is a NAMED one of the three: it is assigned rather than passed,")
 print("   so the check above cannot see it — measured, by setting it to kCallBudgetMs")
 # A SET, not a list: the claim is that no lane invents a budget of its own, and a fourth
 # lane reusing one of the two is not a regression the fixed list could tell apart.
-check("each lane's budget is one of the two",
+check("each lane's budget is one of the three",
       sorted({b for b in re.findall(r"budgetMs = (k\w+);", code)}
-             - {"kOneCallBudgetMs", "kTwoCallBudgetMs"}), [])
+             - {"kOneCallBudgetMs", "kTwoCallBudgetMs", "kOneSendCallBudgetMs"}), [])
 
 print("   each applier snapshots, calls ONE transition, and publishes — it decides nothing")
 for fn, transition in [("fetchTxDetails", "applyTxDetails("),
@@ -490,7 +491,7 @@ check("the same answer publishes in-scope rows and scope",
 check("...without publishing the out-of-scope registry into this UI contract",
       "setConfiguredNetworksJson" in net, False)
 check("submitSend: witness, send, decide",
-      in_order(fn_body("submitSend"), "gen = m_dataGen", ".send(requestJson)",
+      in_order(fn_body("submitSend"), "gen = m_dataGen", ".send(requestJson, nullptr, Timeout(kSendCallBudgetMs))",
                "applySend(after, reply, selectionHeld(gen))"), True)
 
 print("0g) an unknown value matches NOTHING, and a claim outlives no figure it is about")
@@ -657,7 +658,7 @@ check("fetchTxDetails: claim, call, own the reply, apply, publish",
                "get_tx_detailsAsyncResult", "isCurrent(slot)", "applyTxDetails(",
                "publishScope("), True)
 check("...and the claim arms the lapse that lowers its spinner, on the claim's own budget",
-      in_order(fn_body("beginClaim"), "guardBudgetMs(legs)", "take(budgetMs", "setLoading(true)",
+      in_order(fn_body("beginClaim"), "guardBudgetMs(legs, callMs)", "take(budgetMs", "setLoading(true)",
                "singleShot(budgetMs", "setLoading(false)"), True)
 print("   control: the button is its own control, NOT the header refresh — that one re-reads")
 print("   the receipt, which is a different question with a different answer")
@@ -786,7 +787,7 @@ check("the five spinner-bearing claims",
        "m_resendInFlight", "m_txStatusInFlight"])
 print("   the resend holds one claim across its three legs: the receipt, the fees, the send")
 check("resendBlockedNonce: one claim for three legs, the receipt re-read first",
-      in_order(fn_body("resendBlockedNonce"), "beginClaim(m_resendInFlight", ", 3)",
+      in_order(fn_body("resendBlockedNonce"), "beginClaim(m_resendInFlight", ", 3, kSendCallBudgetMs)",
                "refresh_tx_statusAsyncResult", "priceResend("), True)
 check("...then the fees, priced past the floor, then a quote for the human to review",
       in_order(fn_body("priceResend"), "suggest_feesAsyncResult", "replacementFees(",
