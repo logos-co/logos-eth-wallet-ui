@@ -21,24 +21,24 @@ sections:
       `token_list_module`, `evm_assets_module` and `tx_sender_module` are dependencies of *it*, and
       only one level is bundled — so the rest are staged here rather than assumed.
 
-      `capability_module` is not bundled with the standalone host either. Without
-      it every token handshake times out and every call is refused, and the view
-      comes up empty with nothing on screen saying why.
+      The host is Basecamp in standalone mode: `--module` opens the wallet UI and
+      `--modules-dir` holds the modules it depends on. Basecamp bundles
+      `capability_module` itself, so it is not staged here.
     steps:
       - title: "The host and the test driver"
         run: |
           set -euo pipefail
-          nix build 'github:logos-co/logos-standalone-app' --no-write-lock-file -o result-app
+          nix build 'github:logos-co/logos-basecamp#app-standalone' --no-write-lock-file -o result-basecamp
           nix build 'github:logos-co/logos-qt-mcp' --no-write-lock-file -o result-mcp
         code_block: |
-          nix build 'github:logos-co/logos-standalone-app' --no-write-lock-file -o result-app
+          nix build 'github:logos-co/logos-basecamp#app-standalone' --no-write-lock-file -o result-basecamp
           nix build 'github:logos-co/logos-qt-mcp' --no-write-lock-file -o result-mcp
 
       # Its own step ON PURPOSE: the harness dispatches
       #   if file / elif run / elif ui_test / elif check_file
       # so a check_file sharing a step with run: is never evaluated.
       - title: "The runtime and driver really landed"
-        check_file: "result-app"
+        check_file: "result-basecamp"
 
       # One build per step. A single step running several builds reports only the
       # LAST one's exit code, so the earlier ones can fail while the step is green.
@@ -99,17 +99,10 @@ sections:
       - title: "The assets module really produced modules"
         check_file: "result-assets/modules"
 
-      - title: "Build capability_module"
-        run: "nix build 'github:logos-co/logos-capability-module#install' --no-write-lock-file -o result-capability"
-        code_block: "nix build 'github:logos-co/logos-capability-module#install' --no-write-lock-file -o result-capability"
-
-      - title: "capability_module really produced modules"
-        check_file: "result-capability/modules"
-
       - title: "Lay them out for the host"
         run: |
           set -euo pipefail
-          mkdir -p tree/modules tree/plugins
+          mkdir -p tree/modules
           cp -r result-backend/modules/*    tree/modules/
           cp -r result-keystore/modules/*   tree/modules/
           cp -r result-rpc/modules/*        tree/modules/
@@ -118,13 +111,11 @@ sections:
           cp -r result-assets/modules/*     tree/modules/
           cp -r result-sender/modules/*     tree/modules/
           cp -r result-signer/modules/*     tree/modules/
-          cp -r result-capability/modules/* tree/modules/
-          cp -r result-ui/plugins/*         tree/plugins/
           # Store paths are 0555; a later copy into them fails without this.
           chmod -R u+w tree
-          ls tree/modules tree/plugins
+          ls tree/modules
         code_block: |
-          mkdir -p tree/modules tree/plugins
+          mkdir -p tree/modules
           cp -r result-backend/modules/*  tree/modules/
           cp -r result-keystore/modules/* tree/modules/
           cp -r result-rpc/modules/*      tree/modules/
@@ -133,7 +124,6 @@ sections:
           cp -r result-assets/modules/*   tree/modules/
           cp -r result-sender/modules/*   tree/modules/
           cp -r result-signer/modules/*   tree/modules/
-          cp -r result-ui/plugins/*       tree/plugins/
         expect_contains:
           - "eth_wallet_backend"
           - "keystore_module"
@@ -141,7 +131,6 @@ sections:
           - "tx_sender_module"
           - "signer_manager_module"
           - "evm_assets_module"
-          - "eth_wallet_ui"
 
   - title: "The five sections, over a real backend"
     step: true
@@ -161,7 +150,7 @@ sections:
     steps:
       - title: "It comes up, and the backend is behind it"
         ui_test:
-          launch: "env QT_FORCE_STDERR_LOGGING=1 QML_INSPECTOR_PORT=3768 ./result-app/bin/logos-standalone-app -p ./tree/plugins/eth_wallet_ui -m ./tree/modules -u ./userdir"
+          launch: "env QT_FORCE_STDERR_LOGGING=1 QML_INSPECTOR_PORT=3768 LOGOS_NO_SCHEME_REGISTER=1 ./result-basecamp/bin/LogosBasecamp --module ./result-ui --modules-dir ./tree/modules --user-dir ./userdir"
           qt_mcp: "result-mcp"
           launch_timeout: 600
           tests:
