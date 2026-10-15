@@ -192,6 +192,7 @@
         "logos-module-builder": [
           "logos-module-builder"
         ],
+        "signer_manager_module": "signer_manager_module",
         "token_list_module": [
           "token_list_module"
         ],
@@ -200,11 +201,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1790271291,
-        "narHash": "sha256-aC86dPYAelzPMOSBFAiZZbcxHXV6u3NjBhe/BJChWNk=",
+        "lastModified": 1792066893,
+        "narHash": "sha256-j4H9iXlHnWgLrqel20tGGWhw0e+WifeHQdLUpLfHZp0=",
         "owner": "logos-co",
         "repo": "logos-eth-wallet-backend",
-        "rev": "ad556e57094f6a5c78f06bba3532b01c8f545d2e",
+        "rev": "ab52d31a5984a0148f1382ba8c9e9e15d1e6e84d",
         "type": "github"
       },
       "original": {
@@ -10970,6 +10971,23 @@
         "type": "github"
       }
     },
+    "logos-signer-interface": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1791601039,
+        "narHash": "sha256-VQjc0vyzqs11hVEObM3mtNrydDYP8zDke0+PFtL6AT0=",
+        "owner": "logos-co",
+        "repo": "logos-signer-interface",
+        "rev": "d2f95e01b8c2aa1c1e1ed2c7cf18e7963a685d02",
+        "type": "github"
+      },
+      "original": {
+        "owner": "logos-co",
+        "repo": "logos-signer-interface",
+        "rev": "d2f95e01b8c2aa1c1e1ed2c7cf18e7963a685d02",
+        "type": "github"
+      }
+    },
     "logos-standalone-app": {
       "inputs": {
         "logos-cpp-sdk": "logos-cpp-sdk_2",
@@ -18216,6 +18234,32 @@
       "original": {
         "owner": "oxalica",
         "repo": "rust-overlay",
+        "type": "github"
+      }
+    },
+    "signer_manager_module": {
+      "inputs": {
+        "keystore_module": [
+          "eth_wallet_backend",
+          "keystore_module"
+        ],
+        "logos-module-builder": [
+          "eth_wallet_backend",
+          "logos-module-builder"
+        ],
+        "logos-signer-interface": "logos-signer-interface"
+      },
+      "locked": {
+        "lastModified": 1792020945,
+        "narHash": "sha256-n8qS+bnq+LVncUmnGATCL8rNtbN0NDVbNW2oetKTaq4=",
+        "owner": "logos-co",
+        "repo": "logos-signer-manager-module",
+        "rev": "3ef020c16f8c6a3e1f5bd56c63d3b12b5cd55f6c",
+        "type": "github"
+      },
+      "original": {
+        "owner": "logos-co",
+        "repo": "logos-signer-manager-module",
         "type": "github"
       }
     },
