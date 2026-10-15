@@ -7,19 +7,24 @@
 /// How long a call may be outstanding before its callback is treated as LOST rather than
 /// late. It matches the deadline handed to the transport, so there is one number, not two.
 constexpr int kCallBudgetMs = 20000;
+/// The send path's calls: a quote, a send and the fee tiers. The backend and the sender size
+/// their own work from the chain's RPC timeout and answer inside 120 s, so this is a ceiling
+/// over them, never the bound that cuts them off.
+constexpr int kSendCallBudgetMs = 130000;
 /// STRICTLY greater than the calls it covers: a guard lapsing at the instant its own calls
 /// time out is not guarding them, and the reply landing on that boundary is the one that
 /// applies forty-second-old rows.
 constexpr int kGuardSlackMs = 1000;
 
 /// The budget a claim covering `legs` chained calls must hold, plus the dispatch between them.
-/// One number for both lanes, so a lane cannot be written with no margin at all.
-constexpr int guardBudgetMs(int legs) { return legs * kCallBudgetMs + kGuardSlackMs; }
+/// One number for every lane, so a lane cannot be written with no margin at all.
+constexpr int guardBudgetMs(int legs, int callMs = kCallBudgetMs) { return legs * callMs + kGuardSlackMs; }
 
-/// Every claim in this view is one of these two. Nothing is ever taken for kCallBudgetMs
-/// itself: balances then history is two chained calls, a quote or a probe is one.
+/// Every claim in this view is one of these three. Nothing is ever taken for a call budget
+/// itself: balances then history is two chained calls, a probe is one, a quote one send call.
 constexpr int kOneCallBudgetMs = guardBudgetMs(1);
 constexpr int kTwoCallBudgetMs = guardBudgetMs(2);
+constexpr int kOneSendCallBudgetMs = guardBudgetMs(1, kSendCallBudgetMs);
 
 /// An in-flight claim that EXPIRES. An async callback can simply never fire, so a guard
 /// derived from one is a deadline, never a latch.
