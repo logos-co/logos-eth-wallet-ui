@@ -405,18 +405,19 @@ Item {
         console.log("a position renumbers when an account is added or removed, and the label")
         console.log("would then quietly come to mean a different account")
         fake.accountWalletsJson = JSON.stringify({
-            "0x8626f6940E2eb28930eFb4CeF49B2d1F2C9C1199": { wallet: "Status Throwaway", index: 0 }
+            "0x8626f6940E2eb28930eFb4CeF49B2d1F2C9C1199": { wallet: "Status Throwaway", index: 0,
+                origin: { devices: [{ kind: "keystore" }], phrase: { id: "seed:abcd1234", name: "Status Throwaway" } } }
         })
         check("it borrows the wallet's name and says where in it",
               view.item.displayName(probe.me), "Status Throwaway #0")
-        // The name never REPLACES the address ANYWHERE it has room for both — that is
-        // `namedAddr`, the rule the activity list and every detail row use. The closed
-        // account picker is the one exception, and a deliberate one: it is 220px with an
-        // elide of its own, so both in it means the address is what gets cut.
+        // The name never REPLACES the address — that is `namedAddr`, the rule the activity
+        // list and every detail row use.
         check("...and the general rule carries the address with it",
               view.item.namedAddr(probe.me), "Status Throwaway #0 (0x8626…1199)")
-        check("...while the closed picker shows the name alone, beside the address",
-              view.item.accountDisplay(probe.me), "Status Throwaway #0")
+        // The picker reads source, then wallet, then the address (AccountOrigin.summary).
+        check("...while the picker names its source and wallet before the address",
+              view.item.accountDisplay(probe.me),
+              "This device (Keystore) — Wallet “Status Throwaway” · abcd1234 — 0x8626…1199")
 
         console.log("")
         console.log("...but its OWN name always wins, and an account in an unnamed wallet")
@@ -425,7 +426,8 @@ Item {
         check("its own name wins", view.item.displayName(probe.me), "Payroll")
         fake.accountLabelsJson = "{}"
         fake.accountWalletsJson = "{}"
-        check("and with neither, the address", view.item.accountDisplay(probe.me).indexOf("0x"), 0)
+        check("and with neither, the address",
+              view.item.accountDisplay(probe.me).endsWith(" — " + view.item.shortAddr(probe.me)), true)
     }
 
     function assertNoHandleAsksNothing() {
