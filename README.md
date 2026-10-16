@@ -148,9 +148,14 @@ link (or the legacy derivation group), with a saved group name when available. T
 are public identifiers, never the recovery words. Imported keys/files explicitly say
 that no phrase is recorded. Missing metadata is shown as unknown.
 
-The selected value and dropdown entries use Device, Wallet and Account lines at a
-fixed height. Devices with one known wallet omit the middle line; the remaining lines
-are centered in the same space. The address remains separately visible and copyable. The model and selection remain addresses;
-renaming a device or source cannot change the account selected for signing.
+The account picker is [logos-account-kit](https://github.com/logos-co/logos-account-kit)'s,
+vendored in `src/qml/accountkit`, over the signer manager's roster (`account_roster`). It lists
+each account once and never once per signer. A row has three lines:
+- the account's name and address;
+- the wallet it comes from, by name and master fingerprint;
+- every signer that holds it, the keystore first, then connected devices, QR wallets, and
+  unplugged devices.
 
-Run `node doctests/account_origins.mjs` for the formatting cases.
+The address stays copyable, and the selection stays an address. An account the roster hasn't
+listed yet shows by what this wallet knows of it. Renaming a device or a wallet can't change the
+account selected for signing.

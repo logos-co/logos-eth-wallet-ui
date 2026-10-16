@@ -56,6 +56,11 @@ class EthWalletUi
     // them, and it is the derivation index rather than a position, so it never renumbers.
     PROP(QString accountWalletsJson="{}" READONLY)
 
+    // The signer manager's roster, EVM entries only and as they are: each account once, with the
+    // wallet it comes from and every signer holding it. What the account picker shows; the
+    // addresses above stay the list this wallet reads.
+    PROP(QString accountRosterJson="[]" READONLY)
+
     // The address book: `[{ address, name }]`, already ordered by the backend so a picker
     // shows it as it comes. COUNTERPARTIES, not accounts this wallet holds keys for.
     PROP(QString contactsJson="[]" READONLY)

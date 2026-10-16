@@ -1,5 +1,6 @@
 import QtQuick 2.15
-import "AccountOrigin.js" as AccountOrigin
+import "accountkit" as Accounts
+import "accountkit/roster.js" as Roster
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
 import Logos.Controls
@@ -274,6 +275,10 @@ Item {
     // { "<lowercase hex, no 0x>": "<name>" }, relayed from the keystore.
     readonly property var accountLabels: ready ? j(backend.accountLabelsJson, "{}") : ({})
     readonly property var accountWallets: ready ? j(backend.accountWalletsJson, "{}") : ({})
+    // The signer manager's roster: each account once, with its wallet and every signer holding it.
+    readonly property var accountRoster: ready ? j(backend.accountRosterJson, "[]") : []
+    // The picker's rows: this wallet's accounts, in its order, each as the roster has it.
+    readonly property var accountEntries: accounts.map(function (a) { return root.accountEntry(a) })
     readonly property var fees: ready ? j(backend.feeTiersJson, "{}") : ({})
     readonly property bool feeTiersLoading: ready && backend.feeTiersLoading
     // Same rule as the balances: unknown AND being read spins, unknown and idle does not.
@@ -853,6 +858,20 @@ Item {
         return null
     }
 
+    // An account as the picker shows it: the roster's entry, else what this wallet knows of it
+    // while the roster hasn't answered.
+    function accountEntry(a) {
+        var e = Roster.find(accountRoster, a)
+        if (e) return e
+        var w = accountWallet(a) || {}, origin = w.origin || {}, phrase = origin.phrase || {}
+        var entry = { key: String(a).toLowerCase(), family: "evm", address: a, label: accountLabel(a), holders: [] }
+        // A wallet it is known to come from, none for an imported key, and otherwise unknown.
+        if (phrase.id || w.wallet) entry.wallet = { name: phrase.name || w.wallet || "" }
+        else if (String(origin.kind || "").indexOf("imported") === 0) entry.wallet = null
+        if (w.index !== undefined) entry.path = "m/44'/60'/0'/0/" + w.index
+        return entry
+    }
+
     // Every name this wallet knows for an address, in the order they answer for it: the
     // account's own, then the WALLET it was derived under, then the address book. Empty when
     // it knows none.
@@ -879,11 +898,10 @@ Item {
         return n.length ? n + " (" + shortAddr(a) + ")" : shortAddr(a)
     }
 
-    // The same source order in the closed selector, popup and selected-account detail.
-    function accountSource(a) { return AccountOrigin.source(accountWallet(a)) }
+    // The account, its wallet and its signers in one line, as the picker reads it.
     function accountDisplay(a) {
         if (!a) return "Select an account"
-        return AccountOrigin.summary(accountWallet(a), a, accountLabel(a), shortAddr(a))
+        return Roster.summary(accountEntry(a))
     }
 
     // Both are still `pending` on disk. Blocked means the chain was never asked at all —
@@ -1197,126 +1215,6 @@ Item {
         }
     }
 
-    // Every selection and popup entry reserves the same three-line height. A
-    // device with one known wallet needs only its device and account lines.
-    component AccountIdentity: Item {
-        id: identity
-        property string address: ""
-        property string namePrefix: ""
-        readonly property var wallet: root.accountWallet(address)
-        readonly property bool showWallet: AccountOrigin.showWallet(wallet,
-            root.accounts.map(function(a) { return root.accountWallet(a) }))
-        implicitHeight: 76
-        implicitWidth: 320
-        ColumnLayout {
-            anchors.left: parent.left
-            anchors.right: parent.right
-            anchors.verticalCenter: parent.verticalCenter
-            spacing: 3
-            LogosText {
-                objectName: identity.namePrefix + "Device"
-                Layout.fillWidth: true
-                text: identity.address ? AccountOrigin.device(identity.wallet) : "Select an account"
-                textFormat: Text.PlainText
-                elide: Text.ElideRight
-            }
-            LogosText {
-                objectName: identity.namePrefix + "Wallet"
-                Layout.fillWidth: true
-                visible: identity.address.length > 0 && identity.showWallet
-                text: AccountOrigin.wallet(identity.wallet)
-                textFormat: Text.PlainText
-                color: Theme.palette.textSecondary
-                font.pixelSize: Theme.typography.secondaryText
-                elide: Text.ElideRight
-            }
-            RowLayout {
-                visible: identity.address.length > 0
-                Layout.fillWidth: true
-                spacing: 6
-                LogosText {
-                    objectName: identity.namePrefix + "Name"
-                    visible: text.length > 0
-                    Layout.maximumWidth: Math.max(0, identity.width - accountAddress.implicitWidth - accountCopy.width - 18)
-                    text: root.accountLabel(identity.address)
-                    textFormat: Text.PlainText
-                    font.pixelSize: Theme.typography.secondaryText
-                    elide: Text.ElideRight
-                }
-                LogosText {
-                    id: accountAddress
-                    objectName: identity.namePrefix + "Address"
-                    Layout.minimumWidth: implicitWidth
-                    text: root.shortAddr(identity.address)
-                    textFormat: Text.PlainText
-                    color: Theme.palette.textSecondary
-                    font.family: Theme.typography.mono
-                    font.pixelSize: Theme.typography.secondaryText
-                    elide: Text.ElideNone
-                }
-                LogosCopyButton {
-                    id: accountCopy
-                    objectName: identity.namePrefix + "Copy"
-                    value: identity.address
-                    ToolTip.text: "Copy address"
-                    ToolTip.visible: hovered
-                    ToolTip.delay: 400
-                    onCopied: function(v) { root.lastCopiedValue = v }
-                }
-                Item { Layout.fillWidth: true }
-            }
-        }
-    }
-
-    component AccountPicker: LogosComboBox {
-        id: picker
-        Connections {
-            target: picker.popup
-            function onOpened() {
-                if (root.ready) root.backend.refreshAccounts()
-            }
-        }
-        property var addresses: []
-        readonly property string currentAddress:
-            currentIndex >= 0 && currentIndex < addresses.length ? addresses[currentIndex] : ""
-        implicitHeight: 88
-        leftPadding: 12
-        rightPadding: 36
-        topPadding: 6
-        bottomPadding: 6
-        ToolTip.visible: hovered
-        ToolTip.text: root.accountDisplay(currentAddress) + "\n" + currentAddress
-        Accessible.name: root.accountDisplay(currentAddress)
-        model: addresses
-        displayText: root.accountDisplay(currentAddress)
-        contentItem: AccountIdentity {
-            address: picker.currentAddress
-            namePrefix: picker.objectName + "Selected"
-        }
-        delegate: ItemDelegate {
-            id: accountItem
-            width: picker.popupListView ? picker.popupListView.width : picker.width
-            height: 88
-            leftPadding: 12
-            rightPadding: 12
-            topPadding: 6
-            bottomPadding: 6
-            objectName: "accountRow_" + index
-            highlighted: picker.highlightedIndex === index
-            Accessible.name: root.accountDisplay(modelData)
-            ToolTip.visible: hovered
-            ToolTip.text: root.accountDisplay(modelData) + "\n" + modelData
-            background: Rectangle {
-                color: accountItem.highlighted ? Theme.palette.surface : "transparent"
-            }
-            HoverHandler { cursorShape: accountItem.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor }
-            contentItem: AccountIdentity {
-                address: modelData
-                namePrefix: "accountRow_" + index
-            }
-        }
-    }
-
     component PickableAddress: ItemDelegate {
         id: pick
         property string address: ""
@@ -1547,20 +1445,22 @@ Item {
             Layout.fillWidth: true
             spacing: Theme.spacing.small
 
-            AccountPicker {
+            // One row per account, never one per signer: the kit's picker, over the roster. It
+            // re-asserts the backend's selection after a click, so the two never disagree.
+            Accounts.AccountPicker {
                 id: accountPicker
                 objectName: "accountPicker"
                 Layout.preferredWidth: Math.min(440, root.width * 0.75)
-                addresses: root.accounts
+                entries: root.accountEntries
+                currentKey: root.selected
+                copyable: true
                 enabled: root.ready && root.accounts.length > 0
-                onActivated: if (root.ready) root.backend.selectAccount(root.accounts[currentIndex])
-
-                // Re-asserted, not bound: ComboBox writes currentIndex imperatively on a click,
-                // which breaks a declarative binding for good — and the picker naming a
-                // different account from the address beside it is two answers to one question.
-                function syncIndex() { currentIndex = root.accountIndex(root.selected) }
-                Component.onCompleted: syncIndex()
-                onAddressesChanged: syncIndex()
+                onPicked: function (entry) { if (root.ready) root.backend.selectAccount(entry.address) }
+                onCopied: function (v) { root.lastCopiedValue = v }
+                Connections {
+                    target: accountPicker.popup
+                    function onOpened() { if (root.ready) root.backend.refreshAccounts() }
+                }
             }
 
             // This picker only ever READS the account set — creating, importing and deleting
@@ -1572,7 +1472,7 @@ Item {
             // address it names, where a word of chrome pushes the two apart. LogosIconButton
             // carries no text of its own, so the tooltip is the only thing naming it and is
             // not decoration.
-            LogosInfoButton { objectName: "accountOriginInfo"; title: "Where accounts come from"; Accessible.name: "Help: Where accounts come from"; text: "The selector shows the device or Keystore, the wallet or recovery group when available, and the account name and address. Accounts are supplied by their source app. Manage file-backed accounts in Keystore and card-backed accounts in Keycard. Selecting an account does not move funds or copy its private key." }
+            LogosInfoButton { objectName: "accountOriginInfo"; title: "Where accounts come from"; Accessible.name: "Help: Where accounts come from"; text: "The selector shows each account once, by its name and address, with the wallet it comes from and every signer that holds it: this device's Keystore, a Keycard, a Keycard Shell or a QR wallet. Accounts are supplied by their source app. Manage file-backed accounts in Keystore and card-backed accounts in Keycard. Selecting an account does not move funds or copy its private key." }
             HoverIcon {
                 objectName: "manageAccountsButton"
                 size: 32

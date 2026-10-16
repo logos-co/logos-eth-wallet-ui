@@ -1,0 +1,4 @@
+module com.logos.module.eth_wallet_ui.accountkit
+AccountIdentity 1.0 AccountIdentity.qml
+AccountPicker 1.0 AccountPicker.qml
+SignerChips 1.0 SignerChips.qml

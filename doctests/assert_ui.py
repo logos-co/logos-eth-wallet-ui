@@ -1177,12 +1177,12 @@ print("one rule for showing an address, and the name never replaces it: a name i
 print("wallet's own word for who that is and cannot be checked against what was signed.")
 check("namedAddr always carries the short address",
       qml_fn_body(qml_body, "namedAddr").count("shortAddr(a)"), 2)
-check("the closed picker includes source, account name and address",
-      "AccountOrigin.summary" in qml_fn_body(qml_body, "accountDisplay"), True)
-check("the selected value uses stacked source lines",
-      "contentItem: AccountIdentity" in qml_body, True)
-check("the rows resolve sources without replacing address identity",
-      "model: addresses" in qml_body and "AccountOrigin.device(identity.wallet)" in qml_body, True)
+check("the closed picker reads account, wallet and signers, as the account kit does",
+      "Roster.summary" in qml_fn_body(qml_body, "accountDisplay"), True)
+check("the picker is the account kit's, one row per account over the roster",
+      "Accounts.AccountPicker" in qml_body and "entries: root.accountEntries" in qml_body, True)
+check("...and selecting keeps the address as the account's identity",
+      "root.backend.selectAccount(entry.address)" in qml_body, True)
 print()
 print("the account chrome and the tab strip STAY over a pushed screen. A detail screen")
 print("replaces only the pane UNDER the strip, so it is a place inside the tab it opened")
@@ -1575,13 +1575,13 @@ call("evaluate",{"expression":'logos.module("eth_wallet_ui").refresh()'}); time.
 if '"ok":true' in str(named):
     check("the keystore's name reaches the view", ev("accountLabel('%s')" % me), "Treasury")
     check("the picker shows the name", ev("accountDisplay('%s')" % me), "Treasury", "contains")
-    check("the picker model retains addresses", props("accountPicker").get("model"), me, "contains")
+    check("the picker's rows retain addresses", str(ev("JSON.stringify(accountEntries)")), me, "contains")
 else:
     print("  SKIP  the keystore refused the label: %s" % str(named)[:120])
 print("   the address and copy control live inside the selector")
 check("selector contains an address control", props("accountPickerSelectedAddress").get("text"), "…", "contains")
-check("...and the picker is not showing a raw address when a name exists",
-      props("accountPicker").get("model") is not None, True)
+check("...and the picker has its rows",
+      (ev("accountEntries.length") or 0) > 0, True)
 print("   control: an unnamed account falls back to its address, never to 'Account 2' —")
 print("   a positional name RENUMBERS when an account is added or removed")
 unnamed=[a for a in (ev("accounts") or []) if not str(ev("accountLabel('%s')" % a) or "")]

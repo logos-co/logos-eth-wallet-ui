@@ -149,3 +149,15 @@ jobs:
           git clone -q https://github.com/logos-co/logos-evm-tx-kit "$RUNNER_TEMP/kit"
           git -C "$RUNNER_TEMP/kit" checkout -q "$(cat src/qml/kit/VERSION)"
           "$RUNNER_TEMP/kit/scripts/check.sh" .
+
+  accountkit:
+    name: src/qml/accountkit is logos-account-kit as pinned
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: scripts/check.sh at the pinned commit
+        run: |
+          set -euo pipefail
+          git clone -q https://github.com/logos-co/logos-account-kit "$RUNNER_TEMP/accountkit"
+          git -C "$RUNNER_TEMP/accountkit" checkout -q "$(cat src/qml/accountkit/VERSION)"
+          "$RUNNER_TEMP/accountkit/scripts/check.sh" .
