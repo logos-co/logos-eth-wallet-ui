@@ -413,10 +413,10 @@ Item {
         // list and every detail row use.
         check("...and the general rule carries the address with it",
               view.item.namedAddr(probe.me), "Status Throwaway #0 (0x8626…1199)")
-        // Since #33 the picker reads device — wallet — account; the wallet has its own
-        // line, so only the account's own name sits beside the address.
-        check("...while the picker leads with the source and ends with the address",
-              view.item.accountDisplay(probe.me), "Device unknown — Wallet unknown — 0x8626…1199")
+        // The picker reads account — wallet — signers: the wallet has its own line, so only
+        // the account's own name sits beside the address.
+        check("...while the picker leads with the address and then names the wallet",
+              view.item.accountDisplay(probe.me), "0x8626…1199 — Wallet “Status Throwaway” · account 0")
 
         console.log("")
         console.log("...but its OWN name always wins, and an account in an unnamed wallet")
@@ -424,11 +424,11 @@ Item {
         fake.accountLabelsJson = JSON.stringify({ "8626f6940e2eb28930efb4cef49b2d1f2c9c1199": "Payroll" })
         check("its own name wins", view.item.displayName(probe.me), "Payroll")
         check("...and the picker puts it beside the address",
-              view.item.accountDisplay(probe.me).split(" — ").slice(-2).join(" — "), "Payroll — 0x8626…1199")
+              view.item.accountDisplay(probe.me).split(" — ")[0], "Payroll 0x8626…1199")
         fake.accountLabelsJson = "{}"
         fake.accountWalletsJson = "{}"
-        check("and with neither, the address",
-              view.item.accountDisplay(probe.me).split(" — ").pop(), "0x8626…1199")
+        check("and with neither, the address, and a wallet it doesn't claim to know",
+              view.item.accountDisplay(probe.me), "0x8626…1199 — Wallet unknown")
     }
 
     function assertNoHandleAsksNothing() {

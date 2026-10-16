@@ -684,6 +684,8 @@ STILL_SYNC = {
     "get_account_wallets": "refresh(), beside the labels: an account nobody named borrows "
                            "its wallet's, and the two have to land in the same turn or the "
                            "picker renames itself between them",
+    "account_roster": "refresh(), beside the labels and wallets: the picker's rows, which "
+                      "land in the same turn for the same reason",
     "list_contacts": "refresh(), and after either write below — the backend orders the book, "
                      "so the view re-reads rather than editing its published copy",
     "save_contact": "the address book, which reaches no chain and writes one small file",
@@ -1177,12 +1179,12 @@ print("one rule for showing an address, and the name never replaces it: a name i
 print("wallet's own word for who that is and cannot be checked against what was signed.")
 check("namedAddr always carries the short address",
       qml_fn_body(qml_body, "namedAddr").count("shortAddr(a)"), 2)
-check("the closed picker includes source, account name and address",
-      "AccountOrigin.summary" in qml_fn_body(qml_body, "accountDisplay"), True)
-check("the selected value uses stacked source lines",
-      "contentItem: AccountIdentity" in qml_body, True)
-check("the rows resolve sources without replacing address identity",
-      "model: addresses" in qml_body and "AccountOrigin.device(identity.wallet)" in qml_body, True)
+check("the closed picker reads account, wallet and signers, as the account kit does",
+      "Roster.summary" in qml_fn_body(qml_body, "accountDisplay"), True)
+check("the picker is the account kit's, one row per account over the roster",
+      "Accounts.AccountPicker" in qml_body and "entries: root.accountEntries" in qml_body, True)
+check("...and selecting keeps the address as the account's identity",
+      "root.backend.selectAccount(entry.address)" in qml_body, True)
 print()
 print("the account chrome and the tab strip STAY over a pushed screen. A detail screen")
 print("replaces only the pane UNDER the strip, so it is a place inside the tab it opened")
@@ -1212,14 +1214,15 @@ check("...each Wallet-owned destination is reached by one named function",
 print()
 print("overriding a design-system delegate replaces its background too, so a row that looks")
 print("inert is the default rather than the accident. Both custom rows draw their own.")
-picker_body = qml_body[qml_body.index("component AccountPicker"):
-                       qml_body.index("component PickableAddress")]
+# The account picker is the account kit's, vendored beside this view.
+KIT = Path(__file__).resolve().parent.parent / "src" / "qml" / "accountkit"
+picker_body = (KIT / "AccountPicker.qml").read_text()
 pick_body = qml_body[qml_body.index("component PickableAddress"):
                      qml_body.index("component DetailRow")]
 check("the account rows highlight with the combo's own highlighted index",
       "highlighted: picker.highlightedIndex === index" in picker_body, True)
 check("...and draw a background for it",
-      "accountItem.highlighted ? Theme.palette.surface" in picker_body, True)
+      "row.highlighted || row.hovered ? Theme.palette.surface" in picker_body, True)
 check("the recipient rows highlight on hover, having no highlighted index to follow",
       "pick.hovered ? Theme.palette.surface" in pick_body, True)
 check("...and both say they are clickable",
@@ -1231,8 +1234,10 @@ print("no address is elided TWICE. A mid-ellided address has already lost 30 cha
 print("a container that trims it again leaves a prefix matching thousands of addresses. So")
 print("wherever a name and an address share a row they are on separate lines: the name may")
 print("elide, the address may not.")
-for comp, addr_line in [("AccountIdentity", "Address"),
-                        ("PickableAddress", "Address")]:
+identity = (KIT / "AccountIdentity.qml").read_text()
+check("  the account kit's address line is never elided",
+      "elide: Text.ElideNone" in identity[identity.index('"Address"'):], True)
+for comp, addr_line in [("PickableAddress", "Address")]:
     body = qml_body[qml_body.index("component %s" % comp):]
     body = body[:body.index("\n    component ")] if "\n    component " in body else body
     check(f"  {comp}'s address line is never elided", "elide: Text.ElideNone" in body or "wrapMode: Text.Wrap" in body, True)
@@ -1575,13 +1580,13 @@ call("evaluate",{"expression":'logos.module("eth_wallet_ui").refresh()'}); time.
 if '"ok":true' in str(named):
     check("the keystore's name reaches the view", ev("accountLabel('%s')" % me), "Treasury")
     check("the picker shows the name", ev("accountDisplay('%s')" % me), "Treasury", "contains")
-    check("the picker model retains addresses", props("accountPicker").get("model"), me, "contains")
+    check("the picker's rows retain addresses", str(ev("JSON.stringify(accountEntries)")), me, "contains")
 else:
     print("  SKIP  the keystore refused the label: %s" % str(named)[:120])
 print("   the address and copy control live inside the selector")
 check("selector contains an address control", props("accountPickerSelectedAddress").get("text"), "…", "contains")
-check("...and the picker is not showing a raw address when a name exists",
-      props("accountPicker").get("model") is not None, True)
+check("...and the picker has its rows",
+      (ev("accountEntries.length") or 0) > 0, True)
 print("   control: an unnamed account falls back to its address, never to 'Account 2' —")
 print("   a positional name RENUMBERS when an account is added or removed")
 unnamed=[a for a in (ev("accounts") or []) if not str(ev("accountLabel('%s')" % a) or "")]

@@ -127,7 +127,9 @@ named = custodian("name_account", [addr, NAME, PW])
 check("the custodian's rename succeeded", named.get("ok"), True)
 shown, secs = until(lambda: NAME if NAME in str(ev("accountDisplay('%s')" % addr)) else None)
 check("the picker's name for that account changed on its own in %.1fs" % secs, shown, NAME)
-check("...and the picker's own model carries it", props("accountPicker").get("model"), NAME, "contains")
+# The picker's rows are the account kit's roster entries, objects the inspector can't serialise:
+# read them through `ev`, which JSON-encodes.
+check("...and the picker's own rows carry it", json.dumps(ev("accountEntries"), ensure_ascii=False), NAME, "contains")
 
 print("3) the picker and the address beside it do not disagree")
 sel = ev("selected") or ""

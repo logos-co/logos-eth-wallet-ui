@@ -340,6 +340,7 @@ void EthWalletUiBackend::loadAccounts()
     const QString reply = modules().eth_wallet_backend.list_accounts();
     const QString labels = modules().eth_wallet_backend.get_account_labels();
     const QString wallets = modules().eth_wallet_backend.get_account_wallets();
+    const QString roster = modules().eth_wallet_backend.account_roster();
     if (failed(reply, QStringLiteral("accounts")))
         return;
     setAccountsJson(member(reply, "accounts"));
@@ -352,6 +353,9 @@ void EthWalletUiBackend::loadAccounts()
     // drops back to bare addresses for one refresh is a picker whose rows change identity.
     if (replyOk(wallets))
         setAccountWalletsJson(member(wallets, "wallets"));
+    // Same again: the picker keeps the signers it showed rather than drop to bare addresses.
+    if (replyOk(roster))
+        setAccountRosterJson(member(roster, "accounts"));
     // The address book is neither scoped to an account nor to a chain, so it is read here
     // with the roster rather than in loadBalancesAndHistory: it does not change when either
     // moves, and re-reading it there would cost a call per selection.
