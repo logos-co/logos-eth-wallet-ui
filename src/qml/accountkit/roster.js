@@ -119,6 +119,8 @@ function find(entries, keyOrId) {
     for (var i = 0; i < list.length; i++) {
         var e = list[i]
         if (e.key === keyOrId) return e
+        // An EVM key is the lowercase address, and apps hold it checksummed.
+        if (!isBitcoin(e) && (sameId(e, e.key, keyOrId) || sameId(e, e.address, keyOrId))) return e
         var hs = e.holders || []
         for (var j = 0; j < hs.length; j++)
             if (sameId(e, hs[j].accountId, keyOrId)) return e
@@ -129,6 +131,15 @@ function find(entries, keyOrId) {
 function indexOf(entries, keyOrId) {
     var e = find(entries, keyOrId)
     return e ? (entries || []).indexOf(e) : -1
+}
+
+// Whether some signer holding it signs several transactions as one request, as a swap with an
+// approval needs. Only a signer that takes bare hashes does: a device that shows what it signs
+// takes one transaction at a time. Unknown signers are not held against it.
+function signsBundles(e) {
+    var hs = (e && e.holders) || []
+    if (!hs.length) return true
+    return hs.some(function (h) { return !h.requestKinds || h.requestKinds.indexOf("hash") >= 0 })
 }
 
 // The id a Bitcoin account opens under: a holder's that already has a wallet here, else the

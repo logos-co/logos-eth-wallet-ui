@@ -15,6 +15,9 @@ LogosComboBox {
     // Whether a row may be picked, for an app with its own reasons; every row by default.
     property var canPick: function (entry) { return true }
     property bool copyable: false
+    // How much of the selected account the closed control shows, for a picker in a tight
+    // header: 1 is the account alone. The rows always show all three lines.
+    property int selectedLines: 3
     signal picked(var entry)
     signal copied(string value)
 
@@ -31,7 +34,7 @@ LogosComboBox {
     }
 
     model: entries
-    implicitHeight: 96
+    implicitHeight: selectedLines >= 3 ? 96 : selectedLines === 2 ? 64 : 44
     leftPadding: 12
     rightPadding: 36
     topPadding: 6
@@ -46,6 +49,7 @@ LogosComboBox {
         namePrefix: picker.objectName + "Selected"
         placeholder: picker.placeholder
         copyable: picker.copyable
+        lines: picker.selectedLines
         onCopied: function (v) { picker.copied(v) }
     }
 

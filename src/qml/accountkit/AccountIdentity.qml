@@ -14,6 +14,8 @@ Item {
     property string placeholder: "Select an account"
     // An EVM address with a copy button beside it.
     property bool copyable: false
+    // 1: the account alone; 2: and its wallet; 3: and its signers.
+    property int lines: 3
     signal copied(string value)
 
     readonly property bool bitcoin: Roster.isBitcoin(entry)
@@ -81,7 +83,7 @@ Item {
 
         LogosText {
             objectName: identity.namePrefix + "Wallet"
-            visible: identity.entry !== null
+            visible: identity.entry !== null && identity.lines >= 2
             Layout.fillWidth: true
             text: Roster.walletLine(identity.entry)
             textFormat: Text.PlainText
@@ -92,7 +94,7 @@ Item {
 
         SignerChips {
             objectName: identity.namePrefix + "Signers"
-            visible: identity.entry !== null && holders.length > 0
+            visible: identity.entry !== null && holders.length > 0 && identity.lines >= 3
             Layout.fillWidth: true
             namePrefix: identity.namePrefix
             holders: identity.entry && identity.entry.holders ? identity.entry.holders : []
