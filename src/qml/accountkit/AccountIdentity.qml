@@ -53,6 +53,8 @@ Item {
                     color: Theme.palette.textSecondary
                     font.family: Theme.typography.mono
                     font.pixelSize: Theme.typography.secondaryText
+                    // Already shortened in the middle: trimming it again would match thousands.
+                    elide: Text.ElideNone
                 }
                 LogosCopyButton {
                     objectName: identity.namePrefix + "Copy"

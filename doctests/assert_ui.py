@@ -684,6 +684,8 @@ STILL_SYNC = {
     "get_account_wallets": "refresh(), beside the labels: an account nobody named borrows "
                            "its wallet's, and the two have to land in the same turn or the "
                            "picker renames itself between them",
+    "account_roster": "refresh(), beside the labels and wallets: the picker's rows, which "
+                      "land in the same turn for the same reason",
     "list_contacts": "refresh(), and after either write below — the backend orders the book, "
                      "so the view re-reads rather than editing its published copy",
     "save_contact": "the address book, which reaches no chain and writes one small file",
@@ -1212,14 +1214,15 @@ check("...each Wallet-owned destination is reached by one named function",
 print()
 print("overriding a design-system delegate replaces its background too, so a row that looks")
 print("inert is the default rather than the accident. Both custom rows draw their own.")
-picker_body = qml_body[qml_body.index("component AccountPicker"):
-                       qml_body.index("component PickableAddress")]
+# The account picker is the account kit's, vendored beside this view.
+KIT = Path(__file__).resolve().parent.parent / "src" / "qml" / "accountkit"
+picker_body = (KIT / "AccountPicker.qml").read_text()
 pick_body = qml_body[qml_body.index("component PickableAddress"):
                      qml_body.index("component DetailRow")]
 check("the account rows highlight with the combo's own highlighted index",
       "highlighted: picker.highlightedIndex === index" in picker_body, True)
 check("...and draw a background for it",
-      "accountItem.highlighted ? Theme.palette.surface" in picker_body, True)
+      "row.highlighted || row.hovered ? Theme.palette.surface" in picker_body, True)
 check("the recipient rows highlight on hover, having no highlighted index to follow",
       "pick.hovered ? Theme.palette.surface" in pick_body, True)
 check("...and both say they are clickable",
@@ -1231,8 +1234,10 @@ print("no address is elided TWICE. A mid-ellided address has already lost 30 cha
 print("a container that trims it again leaves a prefix matching thousands of addresses. So")
 print("wherever a name and an address share a row they are on separate lines: the name may")
 print("elide, the address may not.")
-for comp, addr_line in [("AccountIdentity", "Address"),
-                        ("PickableAddress", "Address")]:
+identity = (KIT / "AccountIdentity.qml").read_text()
+check("  the account kit's address line is never elided",
+      "elide: Text.ElideNone" in identity[identity.index('"Address"'):], True)
+for comp, addr_line in [("PickableAddress", "Address")]:
     body = qml_body[qml_body.index("component %s" % comp):]
     body = body[:body.index("\n    component ")] if "\n    component " in body else body
     check(f"  {comp}'s address line is never elided", "elide: Text.ElideNone" in body or "wrapMode: Text.Wrap" in body, True)
