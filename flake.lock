@@ -201,11 +201,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1792163544,
-        "narHash": "sha256-RD+lnKMz9EDBkPdj3JBzZzSrGd3lWdDyw+prX77/AGQ=",
+        "lastModified": 1792173598,
+        "narHash": "sha256-hllXTwzIf2QYN6Nur+Vr65DmqulT3r/6GJhWFNgSjdM=",
         "owner": "logos-co",
         "repo": "logos-eth-wallet-backend",
-        "rev": "9aee52e13c8d87274c1b209f15166775da49dcb8",
+        "rev": "56678cd349a3da2265bd1f9086f6d1c0cd800185",
         "type": "github"
       },
       "original": {
@@ -18296,11 +18296,11 @@
         "logos-signer-interface": "logos-signer-interface"
       },
       "locked": {
-        "lastModified": 1792161367,
-        "narHash": "sha256-tl0uv3dfVMsNCAS27mVZjW56h6Grevc8pkDSDQkH9Uw=",
+        "lastModified": 1792171691,
+        "narHash": "sha256-1Q57r0vEo7nh5/mhERmebUK+z2DqA14PuiXQKBepWxM=",
         "owner": "logos-co",
         "repo": "logos-signer-manager-module",
-        "rev": "7d7951d96af8611fd63f655d7717a849330df91b",
+        "rev": "cd661b5a5fc119c01154982bc3c84f023dbcc4a2",
         "type": "github"
       },
       "original": {
