@@ -151,3 +151,16 @@ function homeId(e, opened) {
         if (known.indexOf(hs[i].accountId) >= 0) return hs[i].accountId
     return hs.length ? hs[0].accountId : ""
 }
+
+// The wallets of the signer manager's `wallets()` still locked, in its order. Their accounts
+// aren't offered until the person unlocks them in the Signer app.
+function lockedWallets(ws) {
+    return (ws || []).filter(function (w) { return !!w && w.locked === true })
+}
+
+// "Wallet “Main phrase” is locked", or "3 wallets are locked".
+function lockedTitle(locked) {
+    var n = (locked || []).length
+    if (n === 0) return ""
+    return n === 1 ? "Wallet “" + (text(locked[0].name) || "Unnamed") + "” is locked" : n + " wallets are locked"
+}

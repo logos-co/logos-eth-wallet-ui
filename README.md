@@ -159,3 +159,8 @@ each account once and never once per signer. A row has three lines:
 The address stays copyable, and the selection stays an address. An account the roster hasn't
 listed yet shows by what this wallet knows of it. Renaming a device or a wallet can't change the
 account selected for signing.
+
+A wallet still locked in the Signer app offers none of its accounts. The kit's `LockedBanner`, over
+the backend's `signer_wallets()`, says which and raises `logos.unlock` with their seeds. The address
+book is sealed too: while every wallet is locked it shows empty with a note, and keeps nothing it
+read before.
