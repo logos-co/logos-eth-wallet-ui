@@ -139,7 +139,7 @@ Item {
     // The wallets still locked: their accounts show once the person unlocks them.
     readonly property var signerWallets: ready ? j(backend.signerWalletsJson, "[]") : []
     function unlockWallets(seeds) {
-        logos.request("logos.unlock", ({ seeds: seeds }), function (res) {
+        logos.request("wallets.unlock", ({ seeds: seeds }), function (res) {
             if (res.ok) root.backend.refreshAccounts()
         })
     }

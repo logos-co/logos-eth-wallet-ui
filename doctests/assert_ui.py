@@ -1104,7 +1104,7 @@ check("every intent asked for is declared", [i for i in requested if i not in de
 check("...and every intent declared is asked for", [i for i in declared if i not in requested], [])
 check("the six hops are the whole list", declared,
       ["evm.accounts.manage", "evm.rpc.configure", "evm.signing.approve",
-       "evm.token_lists.configure", "evm.verified_routing.operate", "logos.unlock"])
+       "evm.token_lists.configure", "evm.verified_routing.operate", "wallets.unlock"])
 
 print()
 print("`uses` entries are OBJECTS. A bare string array parses, declares nothing, and every")

@@ -3,7 +3,7 @@ import Logos.Controls
 import "roster.js" as Roster
 
 // The wallets still locked in the Signer app, whose accounts the app can't show yet. Unlock asks
-// for them: the app raises `logos.unlock` with `{ seeds }`.
+// for them: the app raises `wallets.unlock` with `{ seeds }`.
 LogosNotice {
     id: banner
     // The signer manager's `wallets()`: [{ seed, name, locked, kinds, privateName? }].

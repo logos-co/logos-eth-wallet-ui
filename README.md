@@ -161,6 +161,6 @@ listed yet shows by what this wallet knows of it. Renaming a device or a wallet 
 account selected for signing.
 
 A wallet still locked in the Signer app offers none of its accounts. The kit's `LockedBanner`, over
-the backend's `signer_wallets()`, says which and raises `logos.unlock` with their seeds. The address
+the backend's `signer_wallets()`, says which and raises `wallets.unlock` with their seeds. The address
 book is sealed too: while every wallet is locked it shows empty with a note, and keeps nothing it
 read before.
