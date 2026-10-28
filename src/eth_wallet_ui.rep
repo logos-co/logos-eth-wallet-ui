@@ -60,6 +60,9 @@ class EthWalletUi
     // wallet it comes from and every signer holding it. What the account picker shows; the
     // addresses above stay the list this wallet reads.
     PROP(QString accountRosterJson="[]" READONLY)
+    // The signer manager's wallets, by public name: `[{ seed, name, locked, kinds }]`. A locked
+    // one's accounts aren't in the roster until the person unlocks it in the Signer app.
+    PROP(QString signerWalletsJson="[]" READONLY)
 
     // The address book: `[{ address, name }]`, already ordered by the backend so a picker
     // shows it as it comes. COUNTERPARTIES, not accounts this wallet holds keys for.
@@ -67,6 +70,8 @@ class EthWalletUi
     // A refusal from the last save or forget, on its own line rather than the wallet's:
     // a rejected nickname must not blank the error explaining a send that did not go out.
     PROP(QString contactsError="" READONLY)
+    // The address book is sealed under a key the Signer app releases once a wallet is unlocked.
+    PROP(bool contactsLocked=false READONLY)
 
     // Balances for the selected account across every enabled in-scope chain. EMPTY means
     // "not read yet"; rows carry chainId and a blocked chain carries its own refusal.

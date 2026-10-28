@@ -136,6 +136,14 @@ Item {
         })
     }
 
+    // The wallets still locked: their accounts show once the person unlocks them.
+    readonly property var signerWallets: ready ? j(backend.signerWalletsJson, "[]") : []
+    function unlockWallets(seeds) {
+        logos.request("wallets.unlock", ({ seeds: seeds }), function (res) {
+            if (res.ok) root.backend.refreshAccounts()
+        })
+    }
+
     // Point a signer at the send now waiting on a human.
     //
     // The result is ADVISORY. `send_status` is what settles a send, and it has to be: the
@@ -1435,6 +1443,14 @@ Item {
         anchors.fill: parent
         anchors.margins: Theme.spacing.medium
         spacing: Theme.spacing.small
+
+        Accounts.LockedBanner {
+            namePrefix: "accounts"
+            Layout.fillWidth: true
+            visible: root.ready && shown
+            wallets: root.signerWallets
+            onUnlock: function (seeds) { root.unlockWallets(seeds) }
+        }
 
         // ── header: the account these figures are about, and the chain they came from ──
         //
@@ -3759,7 +3775,9 @@ Item {
                     visible: root.contacts.length === 0
                     textFormat: Text.PlainText
                     color: Theme.palette.textSecondary
-                    text: "No saved addresses yet."
+                    text: root.ready && root.backend.contactsLocked
+                          ? "Saved addresses are locked. Unlock a wallet in the Signer app to see them."
+                          : "No saved addresses yet."
                 }
 
                 LogosListView {

@@ -341,6 +341,7 @@ void EthWalletUiBackend::loadAccounts()
     const QString labels = modules().eth_wallet_backend.get_account_labels();
     const QString wallets = modules().eth_wallet_backend.get_account_wallets();
     const QString roster = modules().eth_wallet_backend.account_roster();
+    const QString signerWallets = modules().eth_wallet_backend.signer_wallets();
     if (failed(reply, QStringLiteral("accounts")))
         return;
     setAccountsJson(member(reply, "accounts"));
@@ -356,6 +357,8 @@ void EthWalletUiBackend::loadAccounts()
     // Same again: the picker keeps the signers it showed rather than drop to bare addresses.
     if (replyOk(roster))
         setAccountRosterJson(member(roster, "accounts"));
+    if (replyOk(signerWallets))
+        setSignerWalletsJson(member(signerWallets, "wallets"));
     // The address book is neither scoped to an account nor to a chain, so it is read here
     // with the roster rather than in loadBalancesAndHistory: it does not change when either
     // moves, and re-reading it there would cost a call per selection.
@@ -931,7 +934,12 @@ void EthWalletUiBackend::loadContacts()
     const QString reply = modules().eth_wallet_backend.list_contacts();
     // A failed read KEEPS the book that is on screen, exactly as the account names do: an
     // empty picker tab is indistinguishable from "you have no contacts", and it is not that.
-    if (replyOk(reply))
+    // Locked is the exception: what was read under the key goes with it.
+    const bool locked = parseObject(reply).value(QStringLiteral("code")).toString() == QLatin1String("locked");
+    setContactsLocked(locked);
+    if (locked)
+        setContactsJson(QStringLiteral("[]"));
+    else if (replyOk(reply))
         setContactsJson(member(reply, "contacts"));
 }
 

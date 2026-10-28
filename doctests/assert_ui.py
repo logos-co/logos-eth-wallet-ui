@@ -686,6 +686,8 @@ STILL_SYNC = {
                            "picker renames itself between them",
     "account_roster": "refresh(), beside the labels and wallets: the picker's rows, which "
                       "land in the same turn for the same reason",
+    "signer_wallets": "refresh(), beside the roster: which wallets are still locked, so the "
+                      "banner and the picker agree on what is missing",
     "list_contacts": "refresh(), and after either write below — the backend orders the book, "
                      "so the view re-reads rather than editing its published copy",
     "save_contact": "the address book, which reaches no chain and writes one small file",
@@ -1100,9 +1102,9 @@ requested = sorted(set(re.findall(r'(?:logos\.request|askFor)\(\s*"([^"]+)"',
                                   VIEW.read_text())))
 check("every intent asked for is declared", [i for i in requested if i not in declared], [])
 check("...and every intent declared is asked for", [i for i in declared if i not in requested], [])
-check("the five hops are the whole list", declared,
+check("the six hops are the whole list", declared,
       ["evm.accounts.manage", "evm.rpc.configure", "evm.signing.approve",
-       "evm.token_lists.configure", "evm.verified_routing.operate"])
+       "evm.token_lists.configure", "evm.verified_routing.operate", "wallets.unlock"])
 
 print()
 print("`uses` entries are OBJECTS. A bare string array parses, declares nothing, and every")

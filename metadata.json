@@ -26,6 +26,10 @@
       "cardinality": "single"
     },
     {
+      "intent": "wallets.unlock",
+      "cardinality": "single"
+    },
+    {
       "intent": "evm.accounts.manage",
       "cardinality": "single"
     },
