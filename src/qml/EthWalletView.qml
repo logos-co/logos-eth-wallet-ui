@@ -2265,15 +2265,27 @@ Item {
                                             }
 
                                             // ── who you already are ──
+                                            //
+                                            // As the account selector shows them, through the kit's own component,
+                                            // minus the signers: which device holds a key is not a recipient's concern.
                                             LogosListView {
                                                 objectName: "toMineList"
                                                 clip: true
-                                                model: root.accounts
-                                                delegate: PickableAddress {
+                                                model: root.accountEntries
+                                                delegate: ItemDelegate {
+                                                    id: mine
                                                     objectName: "toAccount_" + index
                                                     width: ListView.view.width
-                                                    address: modelData
-                                                    onClicked: { toField.text = modelData; toAccountsMenu.close() }
+                                                    background: Rectangle {
+                                                        color: mine.hovered ? Theme.palette.surface : "transparent"
+                                                    }
+                                                    HoverHandler { cursorShape: Qt.PointingHandCursor }
+                                                    contentItem: Accounts.AccountIdentity {
+                                                        entry: modelData
+                                                        namePrefix: mine.objectName
+                                                        lines: 2
+                                                    }
+                                                    onClicked: { toField.text = modelData.address; toAccountsMenu.close() }
                                                 }
                                             }
                                         }

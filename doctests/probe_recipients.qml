@@ -9,12 +9,8 @@
 // The fake backend is a QtObject: a write to a JS object's field notifies nothing, and this
 // file moves the published history and book and watches the lists follow.
 //
-// TWO THINGS THIS HARNESS CANNOT REACH, asserted in assert_ui.py instead rather than faked
-// into passing here. There is no window and no overlay, so a Popup never truly opens: its
-// `onOpened` never fires, and a ListView inside a closed one has instantiated no delegates.
-// So the form's clearing is driven through `clearForm()` directly — that it is CALLED on
-// open is a source assertion — and the picker is measured on the lists it is bound to rather
-// than on rows that do not exist yet.
+// A popup opens here only once the window is up, so the picker's rows are read last, from a
+// timer; until then the picker is measured on the lists it is bound to.
 import QtQuick
 
 Item {
@@ -92,6 +88,7 @@ Item {
         property string selectedAccount: probe.me
         property string accountLabelsJson: "{}"
         property string accountWalletsJson: "{}"
+        property string accountRosterJson: "[]"
         property string balancesJson: JSON.stringify([{ symbol: "ETH", display: "1.5",
                                                         exact: "1.5", native: true }])
         property string balancesRoute: "direct"
@@ -348,6 +345,77 @@ Item {
         check("...and clears with it", root_backend().contactsError, "")
     }
 
+    // ── who you already are ──────────────────────────────────────────────────
+
+    // The signer manager's roster, as the account selector reads it: an unnamed account in a
+    // named wallet, and a named one on a card a Shell also holds.
+    readonly property string rosterRows: JSON.stringify([
+        { key: probe.me.toLowerCase(), family: "evm", address: probe.me, path: "m/44'/60'/0'/0/0",
+          label: null, wallet: { name: "asd" },
+          holders: [{ signer: "keystore_module", transport: "keystore", presence: "local" }] },
+        { key: probe.other.toLowerCase(), family: "evm", address: probe.other,
+          path: "m/44'/60'/0'/0/1", label: "Savings",
+          wallet: { fingerprint: "b90ea222", name: "White Card" },
+          holders: [{ signer: "keycard_module", transport: "reader", presence: "absent" },
+                    { signer: "keycard_shell_module", kind: "keycard_shell", transport: "usb",
+                      presence: "connected" }] }
+    ])
+
+    function openMyAddresses() {
+        // What this wallet knows of the account itself, which the rows once made "asd #0" of.
+        var known = {}
+        known[probe.me] = { wallet: "asd", index: 0 }
+        fake.accountWalletsJson = JSON.stringify(known)
+        fake.accountRosterJson = probe.rosterRows
+        probe.openSend()
+        find(view.item, "toAccountsButton").clicked()
+        menuNode("toTabs").currentIndex = 2
+        mineSettled.start()
+    }
+
+    function assertMyAddressesReadAsTheSelector() {
+        console.log("")
+        console.log("My addresses names each account as the selector does — its address, then the")
+        console.log("wallet and account it comes from — and leaves out the signers: which device")
+        console.log("holds a key is no question a recipient asks")
+        var list = menuNode("toMineList")
+        function row(i, part) {
+            var r = list.itemAtIndex ? list.itemAtIndex(i) : null
+            return (r && find(r, "toAccount_" + i + part)) || ({ text: "<missing>", visible: "<missing>" })
+        }
+        check("the menu opened", find(view.item, "toAccountsMenu").opened, true)
+        check("one row per account", list.count, 2)
+        check("an unnamed account is its address", row(0, "Address").text, "0x8626…1199")
+        check("...with no name made up for it", row(0, "Name").visible, false)
+        check("...over its wallet and account", row(0, "Wallet").text, "Wallet “asd” · account 0")
+        check("...the selector's own line for it", row(0, "Wallet").text,
+              find(view.item, "accountPickerSelectedWallet").text)
+        check("a named account keeps its name", row(1, "Name").text, "Savings")
+        check("...over its wallet, fingerprint and account", row(1, "Wallet").text,
+              "Wallet “White Card” · b90ea222 · account 1")
+        check("...and no chips for the card and the Shell holding it", row(1, "Signers").visible,
+              false)
+
+        list.itemAtIndex(1).clicked()
+        check("picking one writes its whole address into the field", inSend("toField").text,
+              probe.other)
+        check("...and closes the menu", find(view.item, "toAccountsMenu").visible, false)
+    }
+
+    // A popup opened from the Loader's status handler crashes the runtime: the window is not
+    // up yet. Then it opens over the next frames, and its list lays the rows out after that.
+    Timer { id: mineOpen; interval: 300; onTriggered: probe.openMyAddresses() }
+    Timer {
+        id: mineSettled
+        interval: 300
+        onTriggered: {
+            probe.assertMyAddressesReadAsTheSelector()
+            console.log("")
+            console.log(probe.failures ? "RESULT: FAILURES" : "RESULT: ALL PASS")
+            Qt.exit(probe.failures ? 1 : 0)
+        }
+    }
+
     Loader {
         id: view
         anchors.fill: parent
@@ -367,10 +435,7 @@ Item {
             probe.assertCancellingAnEditWritesNothing()
             probe.assertConfirmingWritesOnceAndOnlyOnAChange()
             probe.assertTheAddFormRefusesAnEmptyAddress()
-
-            console.log("")
-            console.log(probe.failures ? "RESULT: FAILURES" : "RESULT: ALL PASS")
-            Qt.exit(probe.failures ? 1 : 0)
+            mineOpen.start()
         }
     }
 
