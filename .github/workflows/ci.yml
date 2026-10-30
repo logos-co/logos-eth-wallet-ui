@@ -18,9 +18,9 @@ name: CI
 # The two halves below use different Qt builds on purpose. The tables COMPILE, so
 # they take the distro's Qt and the distro's g++: linking a nix-built libQt6Core
 # into a binary the system toolchain produced puts two libstdc++ SONAMEs and two
-# glibcs in one process. The probes only RUN a prebuilt binary, so they take
-# nixpkgs' Qt, which is the newer one and the one the design system is developed
-# against. Every Qt symbol the tables touch (QString, QJson*, QRegularExpression,
+# glibcs in one process. The probes only RUN a prebuilt binary, so they take the
+# Qt that the builder's logos-nix pins, the one the module is built and shipped
+# with. Every Qt symbol the tables touch (QString, QJson*, QRegularExpression,
 # QDeadlineTimer) predates Qt 6.0, so the older Qt costs no coverage.
 
 on:
@@ -55,7 +55,8 @@ jobs:
       # Not a flake input: the design system is static-linked into the host
       # binary, so this plugin declares nothing. Its SOURCE is still what the
       # probes need to resolve Logos.* — checked out here rather than added to
-      # the lock for a test's sake.
+      # the lock for a test's sake. It floats on purpose: the builder's locked rev
+      # (4632460) predates LogosInfoButton, which EthWalletView.qml uses.
       - uses: actions/checkout@v4
         with:
           repository: logos-co/logos-design-system
@@ -99,6 +100,16 @@ jobs:
             extra-substituters = https://logos-co.cachix.org
             extra-trusted-public-keys = logos-co.cachix.org-1:12K8609ho1pCt0erUQrOrs/KmOuhWq/EhVwhzQRb35E=
 
+      - name: Find the logos-nix revision the builder pins
+        # Qt comes from the logos-nix the builder pins, as in the build; never the runner's nixpkgs.
+        shell: bash
+        run: |
+          set -euo pipefail
+          nix=$(jq -r '.nodes as $n | ($n[.root].inputs["logos-module-builder"]) as $b
+                       | $n[$n[$b].inputs["logos-nix"]].locked.rev' flake.lock)
+          [[ "$nix" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::no logos-nix pin in flake.lock ($nix)"; exit 1; }
+          echo "QT=github:logos-co/logos-nix/$nix" >> "$GITHUB_ENV"
+
       - name: doctests/run_tables.sh
         shell: bash
         env:
@@ -118,7 +129,7 @@ jobs:
           # when it finds no Qt Quick runtime, which is the right default for a
           # developer and the wrong one here. Both paths are handed over
           # explicitly, and the log is checked for having taken them.
-          nix shell nixpkgs#qt6.qtdeclarative nixpkgs#zbar -c bash -c '
+          nix shell "$QT#qt6.qtdeclarative" nixpkgs#zbar -c bash -c '
             d=$(dirname $(dirname $(readlink -f $(command -v qml))))
             QML_BIN="$d/bin/qml" QT_QML_DIR="$d/lib/qt-6/qml" \
               ./doctests/run_tables.sh' 2>&1 | tee /tmp/tables.log
