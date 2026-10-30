@@ -1187,6 +1187,10 @@ check("the picker is the account kit's, one row per account over the roster",
       "Accounts.AccountPicker" in qml_body and "entries: root.accountEntries" in qml_body, True)
 check("...and selecting keeps the address as the account's identity",
       "root.backend.selectAccount(entry.address)" in qml_body, True)
+mine = picker[picker.index('objectName: "toMineList"'):]
+check("Send's My addresses reads each account through the same kit component, over the same entries",
+      "model: root.accountEntries" in mine and "Accounts.AccountIdentity" in mine, True)
+check("...without the signers holding it", "lines: 2" in mine, True)
 print()
 print("the account chrome and the tab strip STAY over a pushed screen. A detail screen")
 print("replaces only the pane UNDER the strip, so it is a place inside the tab it opened")
@@ -1350,7 +1354,7 @@ call("evaluate",{"expression":'logos.callModule("keystore_module","import_privat
 call("evaluate",{"expression":'logos.module("eth_wallet_ui").refresh()'}); time.sleep(2.5)
 open_send()
 check("picker on screen once a second account exists", props("toAccountsButton").get("visible"), True)
-check("the entry names the account and its address", props("toAccount_0").get("text"), "0x7099", "contains")
+check("the entry names the account by its address", props("toAccount_0Address").get("text"), "0x7099", "contains")
 print("   the regression: the handler said popupUnder(toAccountsButton) with only an")
 print("   objectName declared. objectName is not in the QML scope chain, so that was a")
 print("   ReferenceError and the handler aborted BEFORE the menu was ever asked to open.")
