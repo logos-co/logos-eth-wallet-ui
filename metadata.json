@@ -1,7 +1,7 @@
 {
   "name": "eth_wallet_ui",
   "display_name": "Ethereum Wallet",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "ui_qml",
   "interface": "universal",
   "category": "wallet",
@@ -13,11 +13,11 @@
   "dependencies": [
     {
       "name": "eth_wallet_backend",
-      "version": "~0.1.0"
+      "version": "~0.2.0"
     },
     {
       "name": "tx_sender_module",
-      "version": "~0.1.0"
+      "version": "~0.2.0"
     }
   ],
   "uses": [
