@@ -2518,6 +2518,20 @@ Item {
                                 }
                             }
 
+                            // The Shell derives the address itself, so this checks it against the seed.
+                            LogosText {
+                                objectName: "receiveVerifyOnShell"
+                                Layout.fillWidth: true
+                                visible: !!receivePage.qr && (root.accountEntry(root.selected).holders || [])
+                                    .some(function (h) { return h.kind === "keycard_shell" })
+                                horizontalAlignment: Text.AlignHCenter
+                                textFormat: Text.PlainText
+                                wrapMode: Text.WordWrap
+                                color: Theme.palette.textSecondary
+                                text: "Before sharing it, check it on your Keycard Shell: "
+                                      + "Addresses → Verify address, then scan this code."
+                            }
+
                             LogosText {
                                 objectName: "receiveUnavailable"
                                 Layout.alignment: Qt.AlignHCenter
