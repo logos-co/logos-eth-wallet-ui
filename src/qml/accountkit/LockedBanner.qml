@@ -20,6 +20,7 @@ LogosNotice {
     actions: [
         LogosButton {
             objectName: banner.namePrefix + "UnlockButton"
+            variant: LogosButton.Variant.Primary
             text: "Unlock"
             onClicked: banner.unlock(banner.locked.map(function (w) { return w.seed }))
         }
