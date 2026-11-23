@@ -276,7 +276,14 @@ inline bool applyTxDetails(ScopedState &s, const QString &reply, const QString &
         : detailsUnavailable(forHash);
     if (!sameHexValue(parseObject(r).value(QStringLiteral("hash")).toString(), forHash))
         return false;
-    if (!answersFor(r, s.at))
+    // The account must match, but NOT the chain: a transaction's details are read on that row's
+    // own chain, which is often not the network the wallet is showing (a Sepolia send viewed
+    // while Hoodi is selected). Checking the chain here dropped every such reply silently.
+    Selection onItsChain = s.at;
+    const QJsonValue chain = parseObject(r).value(QStringLiteral("chainId"));
+    if (chain.isDouble())
+        onItsChain.chainId = chain.toInt();
+    if (!answersFor(r, onItsChain))
         return false;
     s.txDetails = r;
     return true;

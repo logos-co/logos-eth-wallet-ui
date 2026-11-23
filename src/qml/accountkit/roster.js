@@ -35,8 +35,10 @@ function accountNumber(e) {
 // unnamed Bitcoin account is "Bitcoin #<account>".
 function name(e) {
     var l = text(e && e.label)
-    if (l || !isBitcoin(e)) return l
+    if (l) return l
+    // Unnamed: what it is plus its number, as the Keycard app shows it ("Ethereum 0").
     var n = accountNumber(e)
+    if (!isBitcoin(e)) return n >= 0 ? "Ethereum " + n : ""
     return n >= 0 ? "Bitcoin #" + n : "Bitcoin"
 }
 
@@ -78,6 +80,16 @@ function holderName(h) {
     if (h.transport === "reader") return "Keycard · reader"
     if (h.transport === "usb") return (named[h.kind] || text(h.model) || h.signer) + " · USB"
     if (h.transport === "qr") return text(h.model) && h.model !== "QR wallet" ? "QR · " + h.model : "QR wallet"
+    return text(h.model) || text(h.signer)
+}
+
+// The short tag form: "Keystore", "Keycard", "Keycard Shell", "QR wallet".
+function shortHolderName(h) {
+    if (!h) return ""
+    if (h.transport === "keystore") return "Keystore"
+    if (h.transport === "reader") return "Keycard"
+    if (h.kind === "keycard_shell") return "Keycard Shell"
+    if (h.transport === "qr") return "QR wallet"
     return text(h.model) || text(h.signer)
 }
 
@@ -163,4 +175,35 @@ function lockedTitle(locked) {
     var n = (locked || []).length
     if (n === 0) return ""
     return n === 1 ? "Wallet “" + (text(locked[0].name) || "Unnamed") + "” is locked" : n + " wallets are locked"
+}
+
+// The device app that unlocks a wallet, from its signer `kinds` (signer_manager exposes them while
+// locked). keycard_shell is a transport of a Keycard, so it folds into "Keycard"; both unlock in the
+// Keycard app, not an abstract "Signer".
+function deviceLabel(w) {
+    var k = (w && w.kinds) || []
+    var has = function (x) { return k.indexOf(x) >= 0 }
+    if (has("keycard") || has("keycard_shell")) return "Keycard"
+    if (has("keystore")) return "Keystore"
+    if (has("ledger")) return "Ledger"
+    if (has("trezor")) return "Trezor"
+    if (has("qr")) return "QR wallet"
+    return "Signer"   // unknown kinds: fall back to the generic Signer app
+}
+function deviceHint(device) {
+    if (device === "QR wallet") return "Unlock them with your QR wallet to use their accounts."
+    if (device === "Signer") return "Unlock them in the Signer app to use their accounts."
+    return "Unlock them in the " + device + " app to use their accounts."
+}
+// Locked wallets grouped by the device app that unlocks them, in first-seen order:
+// [{ device, hint, seeds: [...], count }]. Drives a per-device block so the person is sent to the
+// Keycard / Keystore app rather than a single "Signer" bucket.
+function lockedByDevice(locked) {
+    var order = [], g = {}
+    ;(locked || []).forEach(function (w) {
+        var d = deviceLabel(w)
+        if (!g[d]) { g[d] = { device: d, hint: deviceHint(d), seeds: [], count: 0 }; order.push(d) }
+        g[d].seeds.push(w.seed); g[d].count++
+    })
+    return order.map(function (d) { return g[d] })
 }
