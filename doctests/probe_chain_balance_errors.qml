@@ -1,7 +1,7 @@
 // One failed chain remains one failed chain: successful balances stay visible, while every
 // token on the failed chain gets an error symbol whose hover text says what happened. The
-// same state is preserved on token detail, and verification is reported per chain only on
-// Settings > Networks — never as an aggregate claim in the header.
+// same state is preserved on token detail, and verification is reported per chain only in
+// the Networks modal (opened from the scope badge) — never as an aggregate claim in the header.
 import QtQuick
 
 Item {
@@ -73,6 +73,7 @@ Item {
         property string accountWalletsJson: "{}"
         property string contactsJson: "[]"
         property string contactsError: ""
+        property bool contactsLocked: false
         property string balancesJson: probe.balances
         property string balancesRoute: "verified"
         property string tokensJson: probe.tokens
@@ -149,21 +150,27 @@ Item {
                 view.item.openNetworks()
             } else {
                 console.log("")
-                console.log("verification is reported per in-scope network")
-                check("Ethereum is listed", find(view.item, "walletNetworkRow_1") !== null, true)
+                console.log("verification is reported per in-scope network, in the Networks")
+                console.log("modal the scope badge opens")
+                // A LogosDialog is a Popup: its content is reached through the dialog, not the tree.
+                var modal = find(view.item, "networkModal")
+                var inModal = function (n) { return modal && modal.contentItem ? find(modal.contentItem, n) : null }
+                check("the scope badge's modal is titled by the scope", modal ? modal.title : null,
+                      "MAINNETS + TESTNETS")
+                check("Ethereum is listed", inModal("walletNetworkRow_1") !== null, true)
                 check("Ethereum's state is local to its row",
-                      find(view.item, "walletNetworkVerification_1").text,
+                      inModal("walletNetworkVerification_1").text,
                       "Verification on · ready")
-                check("Sepolia is listed", find(view.item, "walletNetworkRow_11155111") !== null, true)
+                check("Sepolia is listed", inModal("walletNetworkRow_11155111") !== null, true)
                 check("Sepolia's state is local to its row",
-                      find(view.item, "walletNetworkVerification_11155111").text,
+                      inModal("walletNetworkVerification_11155111").text,
                       "Verification off")
                 check("there is no wallet-owned scope selector",
-                      find(view.item, "walletNetworkScopePicker"), null)
+                      inModal("walletNetworkScopePicker"), null)
                 check("there is no wallet-owned enable switch",
-                      find(view.item, "walletChainEnabled_1"), null)
+                      inModal("walletChainEnabled_1"), null)
                 check("the Ethereum RPC handoff remains",
-                      find(view.item, "openRpcSettingsButton").text, "Change network settings")
+                      inModal("openRpcSettingsButton").text, "Change network settings")
 
                 console.log("")
                 console.log("RESULT: " + (probe.failures ? probe.failures + " FAILED" : "ALL PASS"))

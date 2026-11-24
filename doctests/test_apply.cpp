@@ -341,10 +341,23 @@ int main()
                    applyTxDetails(s, shouty, q(A)));
         }
         {
+            // A transaction's details are read on that row's OWN chain, which is often not the
+            // network the wallet shows: a Sepolia send opened while Hoodi is selected. The hash
+            // identifies the transaction, so the chain the reply names is not held against it.
             ScopedState s = screen();
             const QString elsewhere = q(R"({"ok":true,"hash":"0xaaa1000000000000000000000000000000000000000000000000000000000001","chainId":1,"block":{"timestamp":1}})");
-            expect("a reply for another chain", "is refused like every other scoped reply",
-                   !applyTxDetails(s, elsewhere, q(A)) && s.txDetails.isEmpty());
+            std::printf("   THE REPORTED DEFECT: a send on another chain than the one shown\n");
+            std::printf("   never got its details, every reply dropped as out of scope\n");
+            expect("a reply for the asked transaction on another chain", "is published: the hash names it",
+                   applyTxDetails(s, elsewhere, q(A)) && s.txDetails == elsewhere);
+        }
+        {
+            // The chain is waived, the account is not: a reply naming another account is still
+            // about something other than this screen.
+            ScopedState s = screen();
+            const QString theirs = q(R"({"ok":true,"hash":"0xaaa1000000000000000000000000000000000000000000000000000000000001","chainId":11155111,"address":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","block":{"timestamp":1}})");
+            expect("a reply for the asked transaction naming another account", "is refused",
+                   !applyTxDetails(s, theirs, q(A)) && s.txDetails.isEmpty());
         }
         {
             // Partial failure is NORMAL: the two legs are independent, so one landing alone is

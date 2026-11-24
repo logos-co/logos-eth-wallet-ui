@@ -81,6 +81,7 @@ Item {
         property string lastSendOutcomeJson: ""
         property string contactsJson: "[]"
         property string contactsError: ""
+        property bool contactsLocked: false
         property bool balancesLoading: false
         property bool feeTiersLoading: false
         property string networkScope: "testnets"

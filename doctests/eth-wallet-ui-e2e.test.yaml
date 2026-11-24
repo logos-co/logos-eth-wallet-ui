@@ -6,11 +6,12 @@ description: |
   host, finds the real `eth_wallet_backend`, and comes up at all.
 
   That is the whole of what this proves, and it is deliberately hermetic — no
-  chain, no funded key, no network. The keystore is empty, so the figures are
-  em-dashes and Receive says it has nothing to receive to. Those are the honest
-  answers for an empty wallet, and they are answers only a wired-up backend can
-  give: an unwired view renders nothing at all (one bad property binding takes
-  the whole view down, and the only trace is a qWarning in the host log).
+  chain, no funded key, no network. The keystore is empty, so the view says there
+  are no Ethereum accounts yet and offers no sections, Receive has nothing to
+  receive to, and the scope badge still answers. Those are the honest answers for
+  an empty wallet, and they are answers only a wired-up backend can give: an
+  unwired view renders nothing at all (one bad property binding takes the whole
+  view down, and the only trace is a qWarning in the host log).
 
 sections:
   - title: "Build the pieces"
@@ -147,6 +148,10 @@ sections:
       click a `LogosTabButton`, and the view carries that function for this
       reason. `pages.currentIndex` is then read back, so a `selectTab` that
       silently did nothing is not mistaken for a section that rendered.
+
+      With no account the tab strip and the pages are hidden (nothing behind
+      them can work without one), so the walk below proves the sections are
+      built and wired, not that they are on screen.
     steps:
       - title: "It comes up, and the backend is behind it"
         ui_test:
@@ -155,11 +160,11 @@ sections:
           launch_timeout: 600
           tests:
             - name: "The view rendered"
-              # A tab label, and the one that is unambiguous: "Tokens" is also a
-              # Settings section header, and findByProperty matches text EXACTLY
-              # over the whole tree.
+              # The empty-keystore state's own heading, and unambiguous:
+              # findByProperty matches text EXACTLY over the whole tree, and
+              # "Ethereum Wallet" may also be the shell's name for the app.
               action: wait_for
-              texts: ["Receive"]
+              texts: ["No Ethereum accounts yet"]
               timeout: 60000
 
             - name: "...and it is the wallet's own view, not the shell's chrome"
@@ -173,6 +178,18 @@ sections:
               find_value: "chainChip"
               property: "text"
               value: "MAINNETS"
+
+            - name: "With no account, no section is offered"
+              action: expect_property
+              find_value: "tabs"
+              property: "visible"
+              value: false
+            - name: "...and the view says where accounts come from instead"
+              action: expect_property
+              find_value: "noWalletsState"
+              property: "visible"
+              value: true
+              screenshot: "eth-wallet-ui-no-accounts.png"
 
             - name: "Tokens is section 0"
               action: call_method
@@ -195,11 +212,11 @@ sections:
               find_value: "pages"
               property: "currentIndex"
               value: 1
-            - name: "...carrying the submit button"
+            - name: "...carrying the submit button, hidden with the rest: no account to send from"
               action: expect_property
               find_value: "sendSubmitButton"
               property: "visible"
-              value: true
+              value: false
 
             - name: "Receive is section 2"
               action: call_method
@@ -236,7 +253,7 @@ sections:
               property: "currentIndex"
               value: 3
 
-            - name: "Settings is section 4"
+            - name: "Address book is section 4"
               action: call_method
               find_value: "ethWalletRoot"
               method: "selectTab"
@@ -246,20 +263,30 @@ sections:
               find_value: "pages"
               property: "currentIndex"
               value: 4
-            - name: "...and nothing is pushed over it yet"
+            - name: "...as a tab, with nothing pushed over it"
               action: expect_property
               find_value: "nav"
               property: "depth"
               value: 1
-            - name: "...and its three destinations are named"
-              action: wait_for
-              texts: ["Address book", "Networks", "Token lists"]
-              timeout: 10000
-              screenshot: "eth-wallet-ui-settings.png"
 
-            - name: "Token lists is a handoff, not a Wallet-owned editor"
+            - name: "Networks is the modal the scope badge opens"
+              action: call_method
+              find_value: "ethWalletRoot"
+              method: "openNetworks"
+              args: []
+            - name: "...titled by the scope"
               action: expect_property
-              find_value: "tokenListsEntry"
-              property: "visible"
-              value: true
-              screenshot: "eth-wallet-ui-token-lists-handoff.png"
+              find_value: "networkModal"
+              property: "title"
+              value: "MAINNETS"
+            - name: "...naming the app that changes it"
+              action: wait_for
+              texts: ["Change network settings"]
+              timeout: 10000
+              screenshot: "eth-wallet-ui-networks.png"
+
+            - name: "Token lists is a handoff from the Tokens strip, not a Wallet-owned editor"
+              action: expect_property
+              find_value: "tokenListsLink"
+              property: "text"
+              value: "Token lists"

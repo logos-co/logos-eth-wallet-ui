@@ -768,7 +768,8 @@ print("   system's own copy button was the only one that did, and it looked like
 print("   out in a row of three. It was the one that was right.")
 check("no icon button is a bare LogosIconButton",
       re.findall(r"^\s*LogosIconButton \{", qml, re.M), [])
-check("...they all come from the one hover-aware rule", len(icon_buttons), 13)
+# 11: Networks became a modal and the address book a tab, so neither has a back arrow now.
+check("...they all come from the one hover-aware rule", len(icon_buttons), 11)
 check("...which is stated once", qml.count("component HoverIcon:"), 1)
 check("...and the tint follows the cursor",
       qml_binding("HoverIcon", "iconColor") or
@@ -783,7 +784,8 @@ print("   any other")
 backs = [b for b in icon_buttons if "iconArrowLeft" in b]
 check("every back arrow is one size",
       sorted({re.search(r"iconSize: (\d+)", b).group(1) for b in backs}), ["20"])
-check("...on every screen there is to leave", len(backs), 4)
+# Token detail and transaction detail. Networks is a modal, the address book a tab.
+check("...on every screen there is to leave", len(backs), 2)
 
 check("the five spinner-bearing claims",
       sorted(set(re.findall(r"beginClaim\((m_\w+)", code))),
@@ -963,8 +965,13 @@ check("...and the strip names it without the menu being open",
       qml_binding("tokenSortLabel", "text"), "text: root.tokenSortLabel(root.tokenSort)")
 check("...and the button is what opens that menu",
       "tokenSortMenu.popupUnder(tokenSortButton)" in " ".join(qml_item("tokenSortButton")), True)
-check("the strip is gone when there is nothing to order",
-      qml_binding("tokenSortStrip", "visible"), "visible: root.tokens.length > 0")
+# The strip itself stays: it carries the Token lists hand-off, which an empty list needs most.
+# What can only be a no-op with nothing to order is its sort and refresh controls.
+check("the sort controls are gone when there is nothing to order",
+      [qml_binding(n, "visible") for n in ("tokenSortLabel", "tokenSortButton", "balancesRefreshButton")],
+      ["visible: root.tokens.length > 0"] * 3)
+check("...while the strip that holds the Token lists hand-off stays",
+      qml_binding("tokenSortStrip", "visible"), "")
 balance_refresh = " ".join(qml_item("balancesRefreshButton"))
 check("the Tokens toolbar can refresh balances on demand",
       "onClicked: root.backend.refresh()" in balance_refresh, True)
@@ -997,18 +1004,22 @@ check("...and the rule that drops one older than it is a pure function, run by a
       "adoptedTokenSort(reply, issuedAt, m_sortChoiceGen)" in fn_body("adoptTokenSort"), True)
 
 print("0o) token membership belongs to Token Lists, not to a second editor in Wallet")
-settings = qml[qml.index('objectName: "settingsPage"'):qml.index("// ── token detail")]
-check("the Settings tab pushes only the two screens Wallet owns",
-      sorted(re.findall(r"onClicked: root\.(open\w+)\(\)", settings)),
-      ["openAddressBook", "openNetworks"])
-check("...and those are the only settings components it pushes",
-      sorted({m for m in re.findall(r"nav\.pushItem\((\w+Component)\)", qml)
-              if m in ("addressBookComponent", "networksComponent")}),
-      ["addressBookComponent", "networksComponent"])
-token_lists_entry = " ".join(qml_item("tokenListsEntry"))
-check("Token lists is a direct Settings handoff",
-      'root.askFor("evm.token_lists.configure"' in token_lists_entry, True)
-check("...and it names the destination users see", qml_binding("tokenListsEntry", "text"),
+print("   there is no Settings tab: the two places Wallet owns are the Address book tab and")
+print("   the Networks modal the scope badge opens, and Token lists is a link in the Tokens strip")
+check("the tabs are the four account sections and the Address book",
+      re.findall(r'LogosTabButton \{ text: "([^"]+)"', qml),
+      ["Tokens", "Send", "Receive", "Activity", "Address book"])
+check("...with no Settings tab and no settings page", ('text: "Settings"' in qml, "settingsPage" in qml),
+      (False, False))
+check("Networks opens the modal", qml_fn_body(qml, "openNetworks").strip(), "networkModal.open()")
+check("...which is the scope badge's tap", "onTapped: networkModal.open()" in " ".join(qml_item("chainChip")), True)
+check("the address book is the fifth tab", qml_fn_body(qml, "openAddressBook").strip(), "root.selectTab(4)")
+check("...and neither is pushed as a settings screen",
+      re.findall(r"nav\.pushItem\((addressBookComponent|networksComponent)\)", qml), [])
+token_lists_link = " ".join(qml_item("tokenListsLink"))
+check("Token lists is a direct handoff from the Tokens strip",
+      'root.askFor("evm.token_lists.configure"' in token_lists_link, True)
+check("...and it names the destination users see", qml_binding("tokenListsLink", "text"),
       'text: "Token lists"')
 print("   the old catalogue is absent all the way through the view contract and adapter:")
 print("   hiding its page while retaining its callable toggle would leave two owners.")
@@ -1030,7 +1041,7 @@ check("Wallet exposes no network-registry writer or out-of-scope listing",
 check("the read-only groups are derived from the in-scope network answer",
       "networks.filter" in qml_decl("mainnetChains")
       and "networks.filter" in qml_decl("testnetChains"), True)
-networks_page = qml[qml.index('objectName: "networksPage"'):
+networks_page = qml[qml.index('objectName: "networkModal"'):
                     qml.index("// The address book")]
 check("each row carries its own verification indication",
       'objectName: "walletNetworkVerification_"' in networks_page
@@ -1173,8 +1184,13 @@ check("...and it offers all three sources",
       all(t in picker for t in ["toTabRecent", "toTabBook", "toTabMine"]), True)
 check("the address book screen is where both writes live",
       "saveContact(" in book and "forgetContact(" in book, True)
+# Adding is in a sheet the book opens: bookAddDialog, declared at the view's root beside the
+# Networks modal rather than inside the book's component.
+add_sheet = qml_body[qml_body.index("id: bookAddDialog"):qml_body.index("// ── networks")]
+check("the book opens the add sheet, from its button and from its empty state",
+      book.count("onClicked: bookAddDialog.open()"), 2)
 check("...and renaming goes through the same upsert an add does, not a second path",
-      book.count("root.backend.saveContact("), 2)
+      (add_sheet + book).count("root.backend.saveContact("), 2)
 
 print()
 print("one rule for showing an address, and the name never replaces it: a name is this")
@@ -1184,7 +1200,7 @@ check("namedAddr always carries the short address",
 check("the closed picker reads account, wallet and signers, as the account kit does",
       "Roster.summary" in qml_fn_body(qml_body, "accountDisplay"), True)
 check("the picker is the account kit's, one row per account over the roster",
-      "Accounts.AccountPicker" in qml_body and "entries: root.accountEntries" in qml_body, True)
+      "Accounts.CompactAccountPicker" in qml_body and "entries: root.accountEntries" in qml_body, True)
 check("...and selecting keeps the address as the account's identity",
       "root.backend.selectAccount(entry.address)" in qml_body, True)
 mine = picker[picker.index('objectName: "toMineList"'):]
@@ -1607,9 +1623,8 @@ print("24) the eth_rpc controls are GONE from Settings, replaced by a read-only 
 for n in ["rpcUrlField","saveRpcButton","verifiedProxySwitch","verifiedModeUnknown",
           "verifiedTestnetWarning","tokenListUrlField","saveTokenListButton","tokenListStatus"]:
     check(f"{n} removed", oid(n), None)
-# A SCREEN now, not a dialog: Settings held nothing but links to other places, so the
-# places are the screens and the popup is gone.
-call("callMethod",{"objectId":oid("networksButton"),"method":"clicked","args":[]}); time.sleep(1)
+# The Networks modal, opened from the scope badge (openNetworks is that tap, by name).
+call("callMethod",{"objectId":oid("ethWalletRoot"),"method":"openNetworks","args":[]}); time.sleep(1)
 check("the note names the endpoint", props("rpcSettingsNote").get("text"), "Endpoint:", "contains")
 check("and says who owns it", props("rpcSettingsNote").get("text"), "Ethereum RPC app", "contains")
 print("   control: the network selector STAYS — that is wallet state, not eth_rpc config")
@@ -1623,7 +1638,7 @@ check("network selector still here", oid("network_sepolia") is not None, True)
 # ─────────────────────────────────────────────────────────────────────────────
 
 print("25) an ACCOUNT switch never leaves the previous account's figures on screen")
-call("callMethod",{"objectId":oid("networksBack"),"method":"clicked","args":[]}); time.sleep(0.6)
+call("callMethod",{"objectId":oid("networkModal"),"method":"close","args":[]}); time.sleep(0.6)
 settle()
 accts = ev("accounts") or []
 if len(accts) < 2:

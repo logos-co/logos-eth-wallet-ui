@@ -92,6 +92,10 @@ Item {
         property string verifiedProxyJson: JSON.stringify({ ok: true, chainId: 11155111,
                                                             mode: "off" })
         property string accountsJson: JSON.stringify([probe.me])
+        // The address book is a tab, always built, so its three properties are read here too.
+        property string contactsJson: "[]"
+        property string contactsError: ""
+        property bool contactsLocked: false
         property string selectedAccount: probe.me
         property string accountLabelsJson: "{}"
         property string balancesJson: ""
