@@ -5,8 +5,8 @@ import Logos.Theme
 import "roster.js" as Roster
 
 // Every signer holding an account, as short tags in the Activity / Keycard style: bold coloured
-// text, no border, no dot. Green = can sign now, grey = not connected. A Keycard Shell that isn't
-// plugged in is left out (it adds nothing to read); an absent card reads as a grey "Keycard".
+// text, no border, no dot. Green = can sign now, grey = not connected. A device that isn't connected
+// is left out while another signer can sign the account; with none live, every holder shows.
 Flow {
     id: chips
     property var holders: []
@@ -17,7 +17,9 @@ Flow {
     readonly property bool anyLive: (holders || []).some(function (h) { return h && h.presence !== "absent" })
     readonly property var shown: (holders || []).filter(function (h) {
         if (!h || h.presence !== "absent") return true
-        return !chips.anyLive && h.kind !== "keycard_shell"
+        // A device that isn't connected adds nothing while another signer can sign. With none live,
+        // every holder shows, a Shell too: the row must say which device to connect.
+        return !chips.anyLive
     })
 
     Repeater {

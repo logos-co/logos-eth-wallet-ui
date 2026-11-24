@@ -907,15 +907,16 @@ void EthWalletUiBackend::chooseTokenSort(QString order)
 
 // Both writers re-read the book rather than editing the published copy: the backend orders
 // it, and a view that inserted a row itself would show an order the next read undoes.
-void EthWalletUiBackend::saveContact(QString address, QString name)
+bool EthWalletUiBackend::saveContact(QString address, QString name)
 {
     const QString reply = modules().eth_wallet_backend.save_contact(address, name);
     if (!replyOk(reply)) {
         setContactsError(replyError(reply));
-        return;
+        return false;
     }
     setContactsError(QString());
     loadContacts();
+    return true;
 }
 
 void EthWalletUiBackend::forgetContact(QString address)

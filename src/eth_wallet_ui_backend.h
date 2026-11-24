@@ -29,7 +29,7 @@ public:
 
     void refresh() override;
     void refreshAccounts() override;
-    void saveContact(QString address, QString name) override;
+    bool saveContact(QString address, QString name) override;
     void forgetContact(QString address) override;
     void selectAccount(QString address) override;
     void selectChain(int chainId) override;

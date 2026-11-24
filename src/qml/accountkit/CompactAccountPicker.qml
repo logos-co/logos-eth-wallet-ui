@@ -5,10 +5,10 @@ import Logos.Controls
 import Logos.Theme
 import "roster.js" as Roster
 
-// A fork of AccountPicker for the Ethereum wallet: a compact one-line selector, plus a trailing
-// "locked wallets" block inside the dropdown so the locked wallets are reachable from the same
-// control (instead of a separate top banner) whenever at least one account is already unlocked.
-// The shared AccountPicker is left untouched.
+// The account selector for an app's top bar: one line for the account picked (its name and
+// address, or its script type), the account rows as in AccountPicker, and below them the wallets
+// still locked, grouped by the app that unlocks them, each with its own Unlock. Nothing locked,
+// no block. AccountPicker stays the full three-line selector.
 LogosComboBox {
     id: picker
     property var entries: []

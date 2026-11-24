@@ -31,15 +31,15 @@ function accountNumber(e) {
     return isNaN(n) ? -1 : n
 }
 
-// The name the person gave it. An unnamed EVM account is its address, so it has none; an
-// unnamed Bitcoin account is "Bitcoin #<account>".
+// The name the person gave it; unnamed, what it is plus its number, as the Keycard app shows it:
+// "Ethereum 0", "Bitcoin 0".
 function name(e) {
     var l = text(e && e.label)
     if (l) return l
     // Unnamed: what it is plus its number, as the Keycard app shows it ("Ethereum 0").
     var n = accountNumber(e)
     if (!isBitcoin(e)) return n >= 0 ? "Ethereum " + n : ""
-    return n >= 0 ? "Bitcoin #" + n : "Bitcoin"
+    return n >= 0 ? "Bitcoin " + n : "Bitcoin"
 }
 
 // The account number beside a named Bitcoin account; an unnamed one carries it in its name.
@@ -175,6 +175,76 @@ function lockedTitle(locked) {
     var n = (locked || []).length
     if (n === 0) return ""
     return n === 1 ? "Wallet “" + (text(locked[0].name) || "Unnamed") + "” is locked" : n + " wallets are locked"
+}
+
+// A wallet card's rows. An entry may carry `firstAddress`, a Bitcoin account's first receiving
+// address (0/0), and `addressNote`, said in its place when there is none.
+
+function familyWord(e) {
+    return isBitcoin(e) ? "Bitcoin" : "Ethereum"
+}
+
+// The name the person gave it, else what it is.
+function rowTitle(e) {
+    return name(e) || familyWord(e)
+}
+
+// "account 0": a Bitcoin account's number, or an EVM address's index.
+function rowId(e) {
+    var n = accountNumber(e)
+    return n >= 0 ? "account " + n : ""
+}
+
+function badges(e) {
+    if (!isBitcoin(e)) return []
+    return [scriptType(e)].concat(e.chain === "test" ? ["Test networks"] : [])
+}
+
+function addressLabel(e) {
+    if (!isBitcoin(e)) return "Address"
+    return "First address"
+}
+
+// An EVM account's own address, or a Bitcoin account's first receiving one.
+function rowAddress(e) {
+    return text(isBitcoin(e) ? e && e.firstAddress : e && e.address)
+}
+
+function rowAddressText(e) {
+    var a = rowAddress(e)
+    return a ? shortAddress(a) : text(e && e.addressNote) || "Unavailable"
+}
+
+// Ethereum, then Bitcoin, then Bitcoin's test networks; SegWit before Taproot; then by number.
+function sortAccounts(entries) {
+    function group(e) { return !isBitcoin(e) ? 0 : e.chain === "test" ? 2 : 1 }
+    function script(e) { return e.family === "bitcoin_taproot" ? 1 : 0 }
+    var list = (entries || []).map(function (e, i) { return { e: e, i: i } })
+    list.sort(function (a, b) {
+        return group(a.e) - group(b.e) || script(a.e) - script(b.e)
+            || accountNumber(a.e) - accountNumber(b.e) || a.i - b.i
+    })
+    return list.map(function (x) { return x.e })
+}
+
+// An action as an app passes it: a label, or { id, label, enabled, tip, icon, primary }.
+function action(a) {
+    if (typeof a === "string") return { id: a, label: a, enabled: true, tip: "", icon: "", primary: false }
+    var label = text(a && a.label)
+    // `icon`: a secondary action drawn as an icon, its label the tooltip. `primary`: the card's main action.
+    return { id: text(a && a.id) || label, label: label, enabled: !a || a.enabled !== false, tip: text(a && a.tip),
+             icon: text(a && a.icon), primary: !!(a && a.primary) }
+}
+
+// A list of them, or a function of the entry that returns one.
+function actions(list, entry) {
+    var l = typeof list === "function" ? list(entry) : list
+    return (l || []).map(action).filter(function (a) { return a.label.length > 0 })
+}
+
+// The object-name suffix of an action: its id, letters, digits and underscores only.
+function actionName(a) {
+    return text(a && a.id).replace(/[^A-Za-z0-9_]/g, "")
 }
 
 // The device app that unlocks a wallet, from its signer `kinds` (signer_manager exposes them while
