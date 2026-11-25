@@ -8,6 +8,7 @@ import Logos.Icons
 import Logos.Theme
 import "kit" as Kit
 import "qrcodegen.js" as QrGen
+import "errors.js" as Errors
 
 // The Ethereum wallet.
 //
@@ -72,6 +73,23 @@ Item {
     // and it happens with the dialog still up and nothing moving, so a user cannot tell a
     // slow send from a click that missed. Cleared by both outcomes below.
     property bool sendSubmitting: false
+    // Which review's Confirm is in flight, "send" or "resend": its refusal is shown there.
+    property string sendSubmittedFrom: ""
+
+    // ── one error, one place ───────────────────────────────────────────────────────
+    // sendError and contactsError each stay set until the next success. A review or the add
+    // sheet reads its own refusal as its call answers and shows it itself, so the page lines
+    // below show only what the page did: never while that dialog is up, and never an error
+    // already on screen when it opened or closed.
+    readonly property bool sendReviewUp: sendReview.visible || resendReviewDialog.visible
+    property string sendErrorSeen: ""
+    onSendReviewUpChanged: root.sendErrorSeen = root.ready ? root.backend.sendError : ""
+    readonly property string sendTabError:
+        !ready || sendReviewUp || root.backend.sendError === sendErrorSeen ? "" : Errors.human(root.backend.sendError)
+    property string contactsErrorSeen: ""
+    readonly property string bookPageError:
+        !ready || bookAddDialog.visible || root.backend.contactsError === contactsErrorSeen
+            ? "" : Errors.human(root.backend.contactsError)
 
     property string approvalNote: ""
     property string intentNote: ""
@@ -216,10 +234,19 @@ Item {
         }
         function onSendErrorChanged() {
             if (root.backend.sendError.length > 0) {
+                // A refusal of a review's own Confirm: that review says why, as it was given
+                // then. The Send tab's line never repeats it (sendErrorSeen).
+                if (root.sendSubmitting) {
+                    var d = root.sendSubmittedFrom === "resend" ? resendReviewDialog : sendReview
+                    d.shownError = Errors.human(root.backend.sendError)
+                }
                 root.sendSubmitting = false
                 root.resendSubmitted = false
+            } else {
+                root.sendErrorSeen = ""
             }
         }
+        function onContactsErrorChanged() { if (root.backend.contactsError === "") root.contactsErrorSeen = "" }
 
         // The handle arrives with the request id, and asking is the whole point of having it.
         function onPendingApprovalHandleChanged() {
@@ -2498,13 +2525,13 @@ Item {
                                 // down to Advanced would report itself off-screen.
                                 LogosText {
                                     objectName: "sendErrorLabel"
-                                    visible: root.ready && root.backend.sendError.length > 0
+                                    visible: root.sendTabError.length > 0
                                     Layout.fillWidth: true
                                     // Backend-authored.
                                     textFormat: Text.PlainText
                                     wrapMode: Text.WordWrap
                                     color: Theme.palette.error
-                                    text: root.ready ? root.backend.sendError : ""
+                                    text: root.sendTabError
                                 }
 
                                 RowLayout {
@@ -3652,14 +3679,24 @@ Item {
         anchors.centerIn: parent
         width: Math.min((parent ? parent.width : 600) - 40, 460)
         property bool awaiting: false
-        onOpened: { awaiting = false; bookNewName.text = ""; bookNewAddress.text = "" }
+        // This sheet's own refusal, read when its save answers; never the live contactsError.
+        property string error: ""
+        onOpened: { awaiting = false; error = ""; bookNewName.text = ""; bookNewAddress.text = "" }
+        onClosed: { awaiting = false; error = "" }
+        onVisibleChanged: root.contactsErrorSeen = root.ready ? root.backend.contactsError : ""
         function submit() {
             if (bookNewAddress.text.trim().length === 0) return
             awaiting = true
+            error = ""
             logos.watch(root.backend.saveContact(bookNewAddress.text.trim(), bookNewName.text.trim()),
                         function (saved) {
                             bookAddDialog.awaiting = false
                             if (saved) bookAddDialog.close()
+                            else bookAddDialog.error = Errors.human(root.backend.contactsError) || "The address was not saved."
+                        },
+                        function () {
+                            bookAddDialog.awaiting = false
+                            bookAddDialog.error = "The wallet did not answer. Try again."
                         })
         }
         contentItem: ColumnLayout {
@@ -3685,11 +3722,20 @@ Item {
             LogosText {
                 objectName: "bookAddError"
                 Layout.fillWidth: true
-                visible: root.ready && root.backend.contactsError.length > 0
+                visible: text.length > 0
                 wrapMode: Text.WordWrap
                 textFormat: Text.PlainText
                 color: Theme.palette.error
-                text: root.ready ? root.backend.contactsError : ""
+                text: bookAddDialog.error
+            }
+            // Why Add address is off, once something is typed: it is armed by an address alone.
+            LogosText {
+                objectName: "bookAddHint"
+                Layout.fillWidth: true
+                visible: bookNewName.text.trim().length > 0 && bookNewAddress.text.trim().length === 0
+                wrapMode: Text.WordWrap
+                color: Theme.palette.textSecondary
+                text: "Type the address too."
             }
             RowLayout {
                 Layout.fillWidth: true
@@ -3834,11 +3880,11 @@ Item {
                 LogosText {
                     objectName: "bookError"
                     Layout.fillWidth: true
-                    visible: root.ready && root.backend.contactsError.length > 0 && !bookAddDialog.visible
+                    visible: root.bookPageError.length > 0
                     textFormat: Text.PlainText
                     wrapMode: Text.WordWrap
                     color: Theme.palette.error
-                    text: root.ready ? root.backend.contactsError : ""
+                    text: root.bookPageError
                 }
 
                 // Empty: the Keycard-style centred block, with its own small Add button. While the
@@ -4012,7 +4058,8 @@ Item {
                                     ToolTip.text: "Forget"
                                     ToolTip.visible: hovered
                                     ToolTip.delay: 400
-                                    onClicked: root.backend.forgetContact(bookRow.contact.address)
+                                    // An action on the page: its answer shows on the page's line.
+                                    onClicked: { root.contactsErrorSeen = ""; root.backend.forgetContact(bookRow.contact.address) }
                                 }
                             }
 
@@ -4102,11 +4149,17 @@ Item {
         rows: root.transferRows(sq, "sendReview", root.networkLabel())
         callList: root.transferCalls(sq)
         nameOf: root.namedAddr
-        error: root.ready ? root.backend.sendError : ""
+        // Its own refusal, read as it answers (onSendErrorChanged); never the live sendError.
+        property string shownError: ""
+        error: shownError
+        onOpened: shownError = ""
+        onClosed: shownError = ""
         confirmText: "Confirm send"
         busy: root.sendSubmitting
         confirmEnabled: root.ready && !root.sendPending && sendForm.q.ok === true
         onConfirmed: {
+            shownError = ""
+            root.sendSubmittedFrom = "send"
             root.sendSubmitting = true
             root.backend.submitSend(sendForm.formRequest)
         }
@@ -4118,6 +4171,7 @@ Item {
     // The same transfer, pinned to the nonce holding the queue up, at fees a node takes as its
     // replacement. Confirm goes out through submitSend, like any send.
     Kit.TxReviewDialog {
+        id: resendReviewDialog
         objectName: "resendReviewDialog"
         title: "Resend with current fees"
         prefix: "resendReview"
@@ -4129,11 +4183,16 @@ Item {
         rows: root.transferRows(rq, "resendReview", root.networkNameFor(rq.chainId))
         callList: root.transferCalls(rq)
         nameOf: root.namedAddr
-        error: root.ready ? root.backend.sendError : ""
+        property string shownError: ""
+        error: shownError
+        onOpened: shownError = ""
+        onClosed: shownError = ""
         confirmText: "Resend"
         busy: root.sendSubmitting
         confirmEnabled: root.ready && !root.sendPending
         onConfirmed: {
+            shownError = ""
+            root.sendSubmittedFrom = "resend"
             root.sendSubmitting = true
             root.resendSubmitted = true
             root.backend.submitSend(JSON.stringify(root.resendReview.request))
