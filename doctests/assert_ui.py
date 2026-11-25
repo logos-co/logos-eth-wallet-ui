@@ -1275,6 +1275,27 @@ check("...and it resolves accounts, wallets AND the address book",
       all(f in qml_fn_body(qml_body, "displayName")
           for f in ["accountLabel(a)", "accountWallet(a)", "contactName(a)"]), True)
 
+print()
+print("0q) one backend error, one place: a dialog shows its own refusal, a page line only the page's")
+# sendError and contactsError each stay set until the next success, so a binding to either in a
+# dialog shows another call's refusal, or a stale one, and a page line bound to it repeats the
+# dialog's refusal behind it and after it closes. probe_dialog_errors.qml drives the behaviour.
+check("no review binds the live sendError",
+      re.search(r"error:\s*root\.ready \? root\.backend\.sendError", qml_body) is None, True)
+check("...each reads its own, as its Confirm is answered",
+      qml_body.count("error: shownError") == 2 and "d.shownError = Errors.human(root.backend.sendError)" in qml_body, True)
+check("the Send tab's line shows only the tab's own",
+      "text: root.sendTabError" in qml_body
+      and "!ready || sendReviewUp || root.backend.sendError === sendErrorSeen" in qml_body, True)
+check("the add sheet never binds the live contactsError, and the book's line shows only its own",
+      "text: bookAddDialog.error" in qml_body and "text: root.bookPageError" in qml_body
+      and re.search(r"text:\s*root\.ready \? root\.backend\.contactsError", qml_body) is None, True)
+check("every logos.watch has an error callback, so a lost call frees its busy flag",
+      all(c.count("function") >= 2 for c in re.findall(r"logos\.watch\((?:[^()]|\([^()]*(?:\([^()]*\)[^()]*)*\))*\)", qml_body)),
+      True)
+check("...in words: a leading machine code is dropped",
+      "/^[A-Z][A-Za-z]+:\\s*/" in (VIEW.parent / "errors.js").read_text(), True)
+
 if "--grep-only" in sys.argv:
     print()
     print("RESULT:", "ALL PASS" if not FAIL else f"{len(FAIL)} FAILED -> {FAIL}")
