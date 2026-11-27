@@ -65,6 +65,12 @@ Item {
         property string accountsJson: JSON.stringify([probe.me, probe.other])
         property string selectedAccount: probe.me
         property string accountLabelsJson: "{}"
+        // `other` is held by a Keycard Shell, `me` by the keystore.
+        property string accountRosterJson: JSON.stringify([
+            { key: probe.other.toLowerCase(), family: "evm", address: probe.other,
+              holders: [{ signer: "keycard_shell_module", accountId: probe.other, kind: "keycard_shell" }] },
+            { key: probe.me.toLowerCase(), family: "evm", address: probe.me,
+              holders: [{ signer: "evm_keystore_module", accountId: probe.me, kind: "keystore" }] }])
         property string accountWalletsJson: "{}"
         property string balancesJson: JSON.stringify([{ symbol: "ETH", display: "1.5",
                                                         exact: "1.5", native: true }])
@@ -155,6 +161,16 @@ Item {
         var moved = onScreen("receiveQrBox").qr.bits
         fake.selectedAccount = probe.me
         check("...and the matrix with it", onScreen("receiveQrBox").qr.bits === moved, false)
+    }
+
+    function assertAShellAccountIsCheckedOnTheShell() {
+        console.log("")
+        console.log("a Keycard Shell account says to check the code on the Shell, which derives")
+        console.log("the address from its own seed; a keystore account has nothing to check it on")
+        check("not for the keystore's account", find(view.item, "receiveVerifyOnShell").visible, false)
+        fake.selectedAccount = probe.other
+        check("for the Shell's", find(view.item, "receiveVerifyOnShell").visible, true)
+        fake.selectedAccount = probe.me
     }
 
     // Rectangles that actually reached the scene under the box, as opposed to runs in an array.
@@ -384,6 +400,7 @@ Item {
             probe.assertTheGeometryLandsOnWholePixels()
             probe.assertTheAddressIsWholeAndSeparatelyCopyable()
             probe.assertAnEmptySelectionHidesTheCodeRatherThanThrowing()
+            probe.assertAShellAccountIsCheckedOnTheShell()
             probe.assertTheCodeIsUpWhileTheSectionShows()
             offSection.start()
         }
