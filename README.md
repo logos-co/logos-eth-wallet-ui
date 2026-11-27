@@ -4,20 +4,26 @@ The Ethereum wallet is a portfolio over a device-wide chain scope, backed by the
 `eth_wallet_backend` composer. Tokens and Activity span every enabled chain in that scope;
 Send uses an explicit UI-local chain picker. The composer itself has no active-chain setting.
 
-Five sections keep daily work separate: Tokens, Send, Receive, Activity and Settings.
-The header always shows the selected account and portfolio scope. Send always names the
-network that will receive the transaction, and every multi-chain token, balance and activity
-row carries its own network label.
+Five sections keep daily work separate: Tokens, Send, Receive, Activity and Address book.
+There is no Settings section: Networks is a modal opened from the scope badge, and Token
+lists is a link in the Tokens toolbar. The content sits in a 560 px centred column, as in the
+Keycard and Signer apps. The header always shows the selected account and portfolio scope. Send
+always names the network that will receive the transaction, and every multi-chain token,
+balance and activity row carries its own network label, as bold coloured text rather than a
+bordered badge (the bordered badge is kept for the scope).
 
 ## Scope and refresh model
 
-The Networks settings screen controls two registry facts through the composer:
+The scope badge in the header (MAINNETS, TESTNETS or MAINNETS + TESTNETS) opens the Networks
+modal, titled by that scope. It lists the in-scope networks, each with its own verification
+state, and hands off to Ethereum RPC ("Change network settings", the `evm.rpc.configure`
+intent), which owns two registry facts:
 
 - device scope: `mainnets`, `testnets`, or `both`;
 - the enabled switch for each configured chain.
 
-Changing either refreshes the portfolio and chooses a valid local cursor if the old one left
-scope. It does not write a global active chain. A registry generation witness prevents a
+Changing either there refreshes the portfolio and chooses a valid local cursor if the old one
+left scope. It does not write a global active chain. A registry generation witness prevents a
 re-entrant, stale `list_networks` reply from overwriting a newer choice.
 
 Balances arrive as per-chain results. A healthy chain remains visible when another is blocked
@@ -44,9 +50,12 @@ come from the asset/composer layer. JavaScript numbers are never used for 256-bi
 Sorting by balance means each asset's own exact token amount; it is not fiat-value sorting and
 the UI does not contact a price service.
 
-Token membership is device-wide and belongs to the Token Lists UI. Wallet Settings hands off
-through the `evm.token_lists.configure` intent; this UI does not search the catalogue or enable
-and disable tokens itself. Changes announced by the composer refresh the portfolio.
+Token membership is device-wide and belongs to the Token Lists UI. The Token lists link in the
+Tokens toolbar hands off through the `evm.token_lists.configure` intent, and says so under the
+link when nothing on the device provides it; this UI does not search the catalogue or enable
+and disable tokens itself. The toolbar stays with an empty list, for that link; its sort and
+refresh controls show only with tokens to order. Changes announced by the composer refresh the
+portfolio.
 
 ## Sending
 
@@ -68,9 +77,15 @@ poll says.
 Send opens a review before the signer is asked: what leaves, to whom, on which network, the
 most it can cost, the fee ceiling and the nonce, and the one transaction. Only its Confirm
 submits, and a refusal stays on it beside its reason. Another app's request is reviewed in the
-same dialog. The fee tiers, the fee summary, the Advanced fields and the review come from
+same dialog. The fee summary, the Advanced fields and the review come from
 [logos-evm-tx-kit](https://github.com/logos-co/logos-evm-tx-kit), vendored in `src/qml/kit`;
-CI checks the copy against the commit in `src/qml/kit/VERSION`.
+CI checks the copy against the commit in `src/qml/kit/VERSION`. The fee tier picker on the Send
+form is the app's own `src/qml/EthFeeTierPicker.qml`: Low / Market / Fast as a radio group (the
+label selects too) rather than the kit's three buttons, until the kit takes that form.
+
+A transaction's details ("Fetch block details") are matched to the row by its hash and, when the
+reply names one, its account, but not by the network on screen: they are read on the row's own
+chain, so a Sepolia send opened while another network is selected still gets them.
 
 A nonce that holds up later sends is named above the tabs, one line per chain: the lowest
 nonce still waiting, once it has waited three minutes with a later send queued behind it, or
@@ -148,19 +163,35 @@ link (or the legacy derivation group), with a saved group name when available. T
 are public identifiers, never the recovery words. Imported keys/files explicitly say
 that no phrase is recorded. Missing metadata is shown as unknown.
 
-The account picker is [logos-account-kit](https://github.com/logos-co/logos-account-kit)'s,
-vendored in `src/qml/accountkit`, over the signer manager's roster (`account_roster`). It lists
-each account once and never once per signer. A row has three lines:
-- the account's name and address;
+The account picker is [logos-account-kit](https://github.com/logos-co/logos-account-kit)'s
+`CompactAccountPicker`, vendored in `src/qml/accountkit`, over the signer manager's roster
+(`account_roster`). Closed, it is one line: the account's name and short address. It lists each
+account once and never once per signer. A row has three lines:
+- the account's name and address; an unnamed account is "Ethereum N", as the Keycard app names it;
 - the wallet it comes from, by name and master fingerprint;
-- every signer that holds it, the keystore first, then connected devices, QR wallets, and
-  unplugged devices.
+- every signer that holds it, as short tags: "Keystore", "Keycard", "Keycard Shell",
+  "QR wallet". Green can sign now, grey is not connected. A device that isn't connected is left
+  out while another signer can sign the account; with none connected, every holder shows, so
+  the row still says which device to connect.
 
 The address stays copyable, and the selection stays an address. An account the roster hasn't
 listed yet shows by what this wallet knows of it. Renaming a device or a wallet can't change the
 account selected for signing.
 
-A wallet still locked in the Signer app offers none of its accounts. The kit's `LockedBanner`, over
-the backend's `signer_wallets()`, says which and raises `wallets.unlock` with their seeds. The address
-book is sealed too: while every wallet is locked it shows empty with a note, and keeps nothing it
-read before.
+A locked wallet offers none of its accounts. Locked wallets are grouped by the device app that
+unlocks them, from the signer manager's `kinds` in the backend's `signer_wallets()` (a Keycard
+Shell folds into Keycard: both unlock in the Keycard app). Each group says how many of its
+wallets are locked, names its app, and has its own Unlock, which raises `wallets.unlock` with
+that group's seeds.
+
+- While at least one account is usable, the groups sit at the foot of the picker's dropdown.
+- While none is, there is nothing an account section could show, and the address book is sealed
+  under a key the signer manager hands out only while a wallet is unlocked (it keeps nothing it
+  read before). So the tabs are hidden, and the view is the header and one notice per device
+  app with its Unlock. With no wallet at all, it says where accounts come from instead.
+- Once a wallet unlocks, the sections come back on Tokens.
+
+The address book adds in a sheet, from a full-width "Add address" button over the list or from
+the empty state's own button. The sheet closes on the save's own reply: re-saving an address
+under its existing name succeeds without changing the list. A refusal keeps it open, showing the
+backend's reason.

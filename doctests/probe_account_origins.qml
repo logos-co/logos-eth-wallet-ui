@@ -7,7 +7,9 @@ import QtTest
 Item {
  id: probe
  width: 1040; height: 740
- property var logos: ({ module: function(n) { return fake }, isViewModuleReady: function(n) { return true } })
+ property var requests: []
+ property var logos: ({ module: function(n) { return fake }, isViewModuleReady: function(n) { return true },
+                        request: function(intent, params, done) { probe.requests.push({ intent: intent, params: params }) } })
  readonly property string software: "0x1111111111111111111111111111111111111111"
  readonly property string card: "0x2222222222222222222222222222222222222222"
  readonly property string other: "0x3333333333333333333333333333333333333333"
@@ -41,6 +43,8 @@ property string accountWalletsJson: "{}"
 property string accountRosterJson: "[]"
 property string contactsJson: "[]"
 property string contactsError: ""
+property string signerWalletsJson: "[]"
+property bool contactsLocked: false
 property string balancesJson: ""
 property string balancesRoute: ""
 property string tokensJson: ""
@@ -93,14 +97,20 @@ function pollSend(a) {}
   check("one row per account, never one per signer",picker.model.length===3)
   check("selected: the account's address",text("accountPickerSelectedAddress")==="0x1111…1111")
   check("...its wallet, by name and fingerprint",text("accountPickerSelectedWallet")==="Wallet “Family” · 73c5da0a · account 0")
-  check("...the keystore first",text("accountPickerSelectedChip_0")==="● This device (Keystore)")
-  check("...then the Shell holding it too",text("accountPickerSelectedChip_1")==="● Keycard Shell · USB")
-  check("the summary names the account before its signers",view.item.accountDisplay(software).indexOf("0x1111…1111 — Wallet “Family”")===0)
+  // Signers are short tags now ("Keystore", "Keycard", "Keycard Shell", "QR wallet"); the long
+  // form with its transport stays in each tag's accessible name and in the summary.
+  check("...the keystore first",text("accountPickerSelectedChip_0")==="Keystore")
+  check("...then the Shell holding it too",text("accountPickerSelectedChip_1")==="Keycard Shell")
+  check("...each tag's accessible name keeps the transport",find(view.item,"accountPickerSelectedChip_1").Accessible.name==="Keycard Shell · USB, connected")
+  var summary=view.item.accountDisplay(software)
+  check("the summary names the account before its signers",summary.indexOf("Ethereum 0 0x1111…1111 — Wallet “Family”")===0 && summary.indexOf("This device (Keystore), Keycard Shell · USB")>summary.indexOf("Wallet"))
   check("an account the roster hasn't listed yet keeps its wallet name",view.item.accountDisplay(other).indexOf("Wallet “Work”")>0)
   picker.currentIndex=1;picker.activated(1)
   check("selection uses address",fake.selectedAccount===card)
   check("the card's account by name",text("accountPickerSelectedName")==="Savings")
-  check("...on a card whose reader is empty",text("accountPickerSelectedChip_0")==="○ Keycard · reader")
+  // Its only holder is not connected, and it still shows: the row must say which device to connect.
+  check("...on a card whose reader is empty",text("accountPickerSelectedChip_0")==="Keycard")
+  check("...said in grey, not as a signer that can sign now",find(view.item,"accountPickerSelectedChip_0").Accessible.name==="Keycard · reader, not connected")
   fake.accountRosterJson=roster("Travel")
   check("a rename shows",text("accountPickerSelectedName")==="Travel")
   check("rename keeps selected account",fake.selectedAccount===card && picker.currentIndex===1)
@@ -119,7 +129,37 @@ function pollSend(a) {}
   input.mouseClick(copy.mouseAreaItem)
   check("dropdown copy preserves selected account and popup",view.item.lastCopiedValue===software && fake.selectedAccount===card && picker.popup.visible)
   picker.popup.contentItem.grabToImage(function(image){image.saveToFile("/tmp/account-origins-build/EthWalletView-popup.png")})
-  probe.grabToImage(function(image){image.saveToFile("/tmp/account-origins-build/EthWalletView.png");Qt.exit(probe.failures ? 1 : 0)})
+  probe.grabToImage(function(image){image.saveToFile("/tmp/account-origins-build/EthWalletView.png");locked.start()})
+ } }
+ // Every wallet locked: no account is usable, so the picker and the tabs are gone and the view
+ // must say WHICH device to unlock. One notice per device app, as the picker's footer groups
+ // them (a Shell folds into Keycard: both unlock in the Keycard app), each with its own Unlock.
+ Timer { id:locked;interval:300;onTriggered:{
+  var picker=find(view.item,"accountPicker"); picker.popup.close()
+  console.log("every wallet locked")
+  fake.signerWalletsJson=JSON.stringify([{seed:"s-card",name:"Family",locked:true,kinds:["keycard"]},
+                                         {seed:"s-file",name:"Work",locked:true,kinds:["keystore"]},
+                                         {seed:"s-shell",name:"Travel",locked:true,kinds:["keycard_shell"]},
+                                         {seed:"s-open",name:"Open",locked:false,kinds:["keystore"]}])
+  check("mixed state: no locked notice while an account is usable (the picker's footer has them)",!find(view.item,"accountsLocked_Keycard"))
+  fake.accountsJson="[]"
+  check("the picker is hidden",!picker.visible)
+  check("...and the tabs",!find(view.item,"tabs").visible)
+  var card=find(view.item,"accountsLocked_Keycard"), file=find(view.item,"accountsLocked_Keystore")
+  check("a notice for the Keycard wallets, the Shell's among them",card!==null && card.title==="2 Keycard wallets are locked")
+  check("...naming the app that unlocks them",card!==null && card.message==="Unlock them in the Keycard app to use their accounts.")
+  check("a notice for the Keystore wallet",file!==null && file.title==="1 Keystore wallet is locked")
+  check("...naming its app",file!==null && file.message==="Unlock them in the Keystore app to use their accounts.")
+  check("no notice for a wallet that is open",!find(view.item,"accountsLocked_Signer"))
+  check("no generic Signer-app banner",!find(view.item,"accountsLockedBanner"))
+  var unlock=card ? (find(card,"accountsUnlock_Keycard") || card.actions[0]) : null
+  check("each notice has its own Unlock",unlock!==null && unlock.objectName==="accountsUnlock_Keycard" && unlock.text==="Unlock")
+  if (unlock) unlock.clicked()
+  var last=probe.requests[probe.requests.length-1]
+  check("...which asks for that device's wallets only",last!==undefined && last.intent==="wallets.unlock" && JSON.stringify(last.params.seeds)==='["s-card","s-shell"]')
+  fake.signerWalletsJson="[]"
+  check("no wallet at all: where accounts come from instead",find(view.item,"noWalletsState").visible && !find(view.item,"accountsLocked_Keycard"))
+  Qt.exit(probe.failures ? 1 : 0)
  } }
  Component.onCompleted: {
   fake.accountsJson=JSON.stringify([software,card,other]);fake.selectedAccount=software

@@ -171,6 +171,8 @@ Item {
         property string balancesJson: "[]"
         property string balancesRoute: "direct"
         property string tokensJson: "[]"
+        property string contactsError: ""
+        property bool contactsLocked: false
         // Empty until the send settles, exactly as the real one is: `pollSend` refreshes
         // history a beat AFTER publishing the outcome, which is the window the receipt's
         // "View transaction" button has to survive.
@@ -414,9 +416,10 @@ Item {
         check("...and the general rule carries the address with it",
               view.item.namedAddr(probe.me), "Status Throwaway #0 (0x8626…1199)")
         // The picker reads account — wallet — signers: the wallet has its own line, so only
-        // the account's own name sits beside the address.
-        check("...while the picker leads with the address and then names the wallet",
-              view.item.accountDisplay(probe.me), "0x8626…1199 — Wallet “Status Throwaway” · account 0")
+        // the account's own name sits beside the address. Unnamed, that name is what it is plus
+        // its number, as the Keycard app shows it.
+        check("...while the picker leads with the account and then names the wallet",
+              view.item.accountDisplay(probe.me), "Ethereum 0 0x8626…1199 — Wallet “Status Throwaway” · account 0")
 
         console.log("")
         console.log("...but its OWN name always wins, and an account in an unnamed wallet")
@@ -546,20 +549,21 @@ Item {
 
     function assertRpcSettingsHop() {
         console.log("")
-        console.log("the endpoint hop lives on the Networks screen. It used to be behind a")
-        console.log("Settings popup whose whole content was links to other places — a click")
-        console.log("in front of each of them, and gone now")
+        console.log("the endpoint hop lives in the Networks modal the scope badge opens. It used")
+        console.log("to be behind a Settings tab; there is no Settings tab now")
         view.item.openNetworks()
-        var nav = find(view.item, "nav")
-        var page = nav ? nav.currentItem : null
+        // A LogosDialog is a Popup: its content is reached through the dialog (see inDialog).
+        var modal = find(view.item, "networkModal")
+        var page = modal ? modal.contentItem : null
+        check("the modal is titled by the scope", modal ? modal.title : "<missing>", "TESTNETS")
         var btn = page ? find(page, "openRpcSettingsButton") : null
         if (!btn) {
             probe.failures++
-            console.log("  FAIL  openRpcSettingsButton is not on the Networks screen")
+            console.log("  FAIL  openRpcSettingsButton is not in the Networks modal")
             return
         }
-        // A pushed screen, not a popup: its children are really instantiated, so this is a
-        // press rather than an assertion about a binding.
+        // The dialog's content is really instantiated, so this is a press rather than an
+        // assertion about a binding.
         btn.clicked()
         check("rpc endpoints", probe.lastRequest().intent, "evm.rpc.configure")
         check("...with no payload", JSON.stringify(probe.lastRequest().params), "{}")
@@ -572,23 +576,31 @@ Item {
               find(page, "walletNetworkScopePicker"), null)
         check("...or its enable switch",
               find(page, "walletChainEnabled_11155111"), null)
+        modal.close()
     }
 
     function assertTokenListsHop() {
         console.log("")
-        console.log("token membership is not a Wallet screen. Its Settings row hands control")
-        console.log("to whichever app provides token-list configuration")
-        view.item.selectTab(4)
+        console.log("token membership is not a Wallet screen. The Token lists link in the Tokens")
+        console.log("toolbar hands control to whichever app provides token-list configuration")
+        view.item.selectTab(0)
         var nav = find(view.item, "nav")
         var depth = nav ? nav.depth : -1
-        probe.press("tokenListsEntry")
+        var link = find(view.item, "tokenListsLink")
+        if (!link) {
+            probe.failures++
+            console.log("  FAIL  tokenListsLink is not in the tree")
+        } else {
+            link.activate()
+        }
         check("token lists", probe.lastRequest().intent, "evm.token_lists.configure")
         check("...with no payload", JSON.stringify(probe.lastRequest().params), "{}")
         check("...without pushing a Wallet-owned screen", nav ? nav.depth : -1, depth)
         probe.answer({ ok: false, data: undefined, error: "unavailable" })
-        check("...and an unavailable provider is explained on Settings",
+        check("...and an unavailable provider is explained under the link",
               node("tokenListsIntentNote").text,
               "Nothing on this device manages token lists.")
+        check("...where it is shown", node("tokenListsIntentNote").visible, true)
     }
 
     // ── the other direction: this wallet PROVIDES evm.transactions.send ──────────

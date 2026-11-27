@@ -1,5 +1,9 @@
 module com.logos.module.eth_wallet_ui.accountkit
+AccountDetails 1.0 AccountDetails.qml
 AccountIdentity 1.0 AccountIdentity.qml
 AccountPicker 1.0 AccountPicker.qml
+CompactAccountPicker 1.0 CompactAccountPicker.qml
 LockedBanner 1.0 LockedBanner.qml
+PhraseGrid 1.0 PhraseGrid.qml
 SignerChips 1.0 SignerChips.qml
+WalletCard 1.0 WalletCard.qml

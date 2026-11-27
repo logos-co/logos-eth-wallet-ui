@@ -108,6 +108,7 @@ Item {
         property string accountWalletsJson: "{}"
         property string contactsJson: "[]"
         property string contactsError: ""
+        property bool contactsLocked: false
         property string balancesJson: "[]"
         property string balancesRoute: ""
         property string tokensJson: "[]"

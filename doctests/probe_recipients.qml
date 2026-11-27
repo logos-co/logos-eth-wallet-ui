@@ -58,7 +58,9 @@ Item {
         return hit || ({ text: "<missing>", enabled: "<missing>" })
     }
 
-    property var logos: ({ module: function (n) { return fake }, isViewModuleReady: function (n) { return true } })
+    // `watch` answers a backend call's reply at once, as the host does once the call returns.
+    property var logos: ({ module: function (n) { return fake }, isViewModuleReady: function (n) { return true },
+                           watch: function (reply, done) { done(reply) } })
 
     // An ERC-20 send: `to` is the RECIPIENT and `token` is the contract. A Recents list built
     // from the transaction's own `to` would offer the WETH contract as somewhere to send to.
@@ -112,15 +114,20 @@ Item {
 
         property string contactsJson: "[]"
         property string contactsError: ""
+        property bool contactsLocked: false
 
         // Every write the view asked for. The book itself is the backend's to order, so the
         // view must ask rather than edit its own copy — these record that it asked.
         property var saved: []
         property var forgotten: []
+        // Answers as the backend does: true once saved, false with contactsError set.
+        property string refuseWith: ""
         function saveContact(address, name) {
             var s = fake.saved
             s.push({ address: address, name: name })
             fake.saved = s
+            fake.contactsError = fake.refuseWith
+            return fake.refuseWith.length === 0
         }
         function forgetContact(address) {
             var f = fake.forgotten
@@ -157,8 +164,8 @@ Item {
 
     function root_backend() { return view.item.backend }
 
-    // A pushed screen, not a popup: its delegates really are instantiated, so the address
-    // book's rows can be driven rather than merely read off their bindings.
+    // The Address book is a tab, not a popup: its delegates really are instantiated, so its
+    // rows can be driven rather than merely read off their bindings.
     function screen() {
         var nav = find(view.item, "nav")
         return nav ? nav.currentItem : null
@@ -274,6 +281,7 @@ Item {
         console.log("checks a recipient against before paying them")
         fake.contactsJson = JSON.stringify([{ address: probe.friend, name: "Rorschach" }])
         view.item.openAddressBook()
+        check("the address book is the fifth tab", find(view.item, "pages").currentIndex, 4)
 
         check("the name is shown, not offered for editing", onScreen("bookName_0").visible, true)
         check("...and there is no field to type in", onScreen("bookNameField_0").visible, false)
@@ -345,6 +353,46 @@ Item {
         check("...and clears with it", root_backend().contactsError, "")
     }
 
+    // The add sheet answers to the save's own reply. Re-saving an address under the name it
+    // already has is a success that moves neither the list nor contactsError, so a sheet that
+    // waited for either stayed open, stuck awaiting, with nothing on screen saying why.
+    //
+    // What is NOT asserted: the sheet's `visible`. This probe has no window, so a popup never
+    // opens here and reads closed whatever the view decides (see probe_intents' inDialog). The
+    // reply path is asserted instead: the save is asked, `awaiting` is released by the reply
+    // itself, and a refusal is shown in the backend's words.
+    function assertTheAddSheetAnswersToTheReply() {
+        console.log("")
+        console.log("the add sheet is released by the save's reply, even one that changes")
+        console.log("nothing, and a refusal is shown in it")
+        var d = find(view.item, "bookAddDialog")
+        var inSheet = function (n) { return (d && d.contentItem && find(d.contentItem, n)) || ({ text: "<missing>" }) }
+        fake.contactsJson = JSON.stringify([{ address: probe.friend, name: "Rorschach" }])
+        fake.refuseWith = ""
+        inSheet("bookNewName").text = "Rorschach"
+        inSheet("bookNewAddress").text = "  " + probe.friend + "  "
+        var before = fake.saved.length
+        var listChanges = 0
+        var count = function () { listChanges++ }
+        view.item.contactsChanged.connect(count)
+        inSheet("bookAddSave").clicked()
+        check("one save, of the trimmed address", fake.saved.length - before === 1
+              && fake.saved[fake.saved.length - 1].address === probe.friend, true)
+        check("...which moved neither the book", listChanges, 0)
+        check("...nor the error", root_backend().contactsError, "")
+        check("...and still released the sheet", d.awaiting, false)
+        view.item.contactsChanged.disconnect(count)
+
+        fake.refuseWith = "'0xnope' is not an Ethereum address"
+        inSheet("bookNewAddress").text = "0xnope"
+        inSheet("bookAddSave").clicked()
+        check("a refusal releases it too", d.awaiting, false)
+        check("...and is shown in the sheet, in the backend's words", inSheet("bookAddError").text,
+              "'0xnope' is not an Ethereum address")
+        fake.refuseWith = ""
+        fake.contactsError = ""
+    }
+
     // ── who you already are ──────────────────────────────────────────────────
 
     // The signer manager's roster, as the account selector reads it: an unnamed account in a
@@ -375,9 +423,9 @@ Item {
 
     function assertMyAddressesReadAsTheSelector() {
         console.log("")
-        console.log("My addresses names each account as the selector does — its address, then the")
-        console.log("wallet and account it comes from — and leaves out the signers: which device")
-        console.log("holds a key is no question a recipient asks")
+        console.log("My addresses names each account as the selector does — its name and address,")
+        console.log("then the wallet and account it comes from — and leaves out the signers: which")
+        console.log("device holds a key is no question a recipient asks")
         var list = menuNode("toMineList")
         function row(i, part) {
             var r = list.itemAtIndex ? list.itemAtIndex(i) : null
@@ -386,7 +434,11 @@ Item {
         check("the menu opened", find(view.item, "toAccountsMenu").opened, true)
         check("one row per account", list.count, 2)
         check("an unnamed account is its address", row(0, "Address").text, "0x8626…1199")
-        check("...with no name made up for it", row(0, "Name").visible, false)
+        // Unnamed, it is what it is plus its number, as the Keycard app names it — the same
+        // words the selector shows, never a name built from the wallet ("asd #0").
+        check("...named as the Keycard app names it", row(0, "Name").text, "Ethereum 0")
+        check("...the selector's own name for it", row(0, "Name").text,
+              find(view.item, "accountPickerSelectedName").text)
         check("...over its wallet and account", row(0, "Wallet").text, "Wallet “asd” · account 0")
         check("...the selector's own line for it", row(0, "Wallet").text,
               find(view.item, "accountPickerSelectedWallet").text)
@@ -435,6 +487,7 @@ Item {
             probe.assertCancellingAnEditWritesNothing()
             probe.assertConfirmingWritesOnceAndOnlyOnAChange()
             probe.assertTheAddFormRefusesAnEmptyAddress()
+            probe.assertTheAddSheetAnswersToTheReply()
             mineOpen.start()
         }
     }

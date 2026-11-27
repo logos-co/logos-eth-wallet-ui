@@ -89,6 +89,7 @@ Item {
 
         property string contactsJson: "[]"
         property string contactsError: ""
+        property bool contactsLocked: false
 
         function saveContact(address, name) {}
         function forgetContact(address) {}

@@ -211,7 +211,8 @@ class EthWalletUi
     SLOT(void chooseTokenSort(QString order))
 
     // Add or rename. An empty name is allowed — saving an address before naming its owner is
-    // the common case from a send form.
-    SLOT(void saveContact(QString address, QString name))
+    // the common case from a send form. Answers whether it was saved, so an add sheet can close
+    // on the reply itself: re-saving an unchanged entry moves neither the list nor the error.
+    SLOT(bool saveContact(QString address, QString name))
     SLOT(void forgetContact(QString address))
 }

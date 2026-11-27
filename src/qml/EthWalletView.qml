@@ -8,6 +8,7 @@ import Logos.Icons
 import Logos.Theme
 import "kit" as Kit
 import "qrcodegen.js" as QrGen
+import "errors.js" as Errors
 
 // The Ethereum wallet.
 //
@@ -72,6 +73,23 @@ Item {
     // and it happens with the dialog still up and nothing moving, so a user cannot tell a
     // slow send from a click that missed. Cleared by both outcomes below.
     property bool sendSubmitting: false
+    // Which review's Confirm is in flight, "send" or "resend": its refusal is shown there.
+    property string sendSubmittedFrom: ""
+
+    // ── one error, one place ───────────────────────────────────────────────────────
+    // sendError and contactsError each stay set until the next success. A review or the add
+    // sheet reads its own refusal as its call answers and shows it itself, so the page lines
+    // below show only what the page did: never while that dialog is up, and never an error
+    // already on screen when it opened or closed.
+    readonly property bool sendReviewUp: sendReview.visible || resendReviewDialog.visible
+    property string sendErrorSeen: ""
+    onSendReviewUpChanged: root.sendErrorSeen = root.ready ? root.backend.sendError : ""
+    readonly property string sendTabError:
+        !ready || sendReviewUp || root.backend.sendError === sendErrorSeen ? "" : Errors.human(root.backend.sendError)
+    property string contactsErrorSeen: ""
+    readonly property string bookPageError:
+        !ready || bookAddDialog.visible || root.backend.contactsError === contactsErrorSeen
+            ? "" : Errors.human(root.backend.contactsError)
 
     property string approvalNote: ""
     property string intentNote: ""
@@ -216,10 +234,19 @@ Item {
         }
         function onSendErrorChanged() {
             if (root.backend.sendError.length > 0) {
+                // A refusal of a review's own Confirm: that review says why, as it was given
+                // then. The Send tab's line never repeats it (sendErrorSeen).
+                if (root.sendSubmitting) {
+                    var d = root.sendSubmittedFrom === "resend" ? resendReviewDialog : sendReview
+                    d.shownError = Errors.human(root.backend.sendError)
+                }
                 root.sendSubmitting = false
                 root.resendSubmitted = false
+            } else {
+                root.sendErrorSeen = ""
             }
         }
+        function onContactsErrorChanged() { if (root.backend.contactsError === "") root.contactsErrorSeen = "" }
 
         // The handle arrives with the request id, and asking is the whole point of having it.
         function onPendingApprovalHandleChanged() {
@@ -280,6 +307,17 @@ Item {
     readonly property var mainnetChains: networks.filter(function (n) { return n.testnet !== true })
     readonly property var testnetChains: networks.filter(function (n) { return n.testnet === true })
     readonly property var accounts: ready ? j(backend.accountsJson, "[]") : []
+    // No usable account (every wallet locked, or none added yet): nothing account-specific works,
+    // and the address book is sealed under a key the signer hands out only while a wallet is
+    // unlocked. So the tab strip and every page hide, and the view is the header plus one locked
+    // notice per device app (or, with no wallet at all, where accounts come from).
+    // Gated here so the normal view is untouched.
+    readonly property bool noAccounts: ready && accounts.length === 0
+    readonly property string scopeLabel: networkScope === "testnets" ? "TESTNETS"
+                                       : networkScope === "both" ? "MAINNETS + TESTNETS" : "MAINNETS"
+    // A wallet just unlocked: the pages come back, and they open on Tokens rather than on
+    // whatever tab was up before everything locked.
+    onNoAccountsChanged: if (!noAccounts) root.selectTab(0)
     // { "<lowercase hex, no 0x>": "<name>" }, relayed from the keystore.
     readonly property var accountLabels: ready ? j(backend.accountLabelsJson, "{}") : ({})
     readonly property var accountWallets: ready ? j(backend.accountWalletsJson, "{}") : ({})
@@ -554,16 +592,11 @@ Item {
         if (nav.depth > 1) nav.popToIndex(0, StackView.Immediate)
         nav.pushItem(txDetailComponent, { hash: hash })
     }
-    // Wallet-owned settings screens are sections of one tab. Kept as named functions: they
-    // are what the probes and the harness call, and one place to change if the tab moves.
-    // They are PUSHED, like a token or a transaction. selectTab first:
-    // it pops any screen already up and puts the strip on Settings, so the tab the user is
-    // left looking at is the one the pushed screen belongs to.
-    function openNetworks() { root.selectTab(4); nav.pushItem(networksComponent) }
-
-    function openAddressBook() { root.selectTab(4); nav.pushItem(addressBookComponent) }
-
-    // A name for the tab index, so the probe and any later caller do not carry the number.
+    // Named entry points for the places the harness and the probes open, so neither carries a
+    // tab number or a dialog id. Networks is a modal over the current tab, opened from the scope
+    // badge; the address book is the fifth tab.
+    function openNetworks() { networkModal.open() }
+    function openAddressBook() { root.selectTab(4) }
     function openReceive() { root.selectTab(2) }
 
     function back() { if (nav.depth > 1) nav.popCurrentItem() }
@@ -1374,16 +1407,25 @@ Item {
                             text: root.txTitle(modelData)
                         }
                         Item { Layout.fillWidth: true }
-                        LogosBadge {
+                        // Tags in the Keycard app's style (bold coloured text, no border): the
+                        // bordered badge is kept for the title's scope chip.
+                        LogosText {
                             objectName: "txChain_" + modelData.hash
                             text: root.networkNameFor(modelData.chainId)
+                            textFormat: Text.PlainText
+                            font.weight: Theme.typography.weightBold
+                            font.pixelSize: Theme.typography.secondaryText
                             color: root.networkById(modelData.chainId).testnet === true
                                    ? Theme.palette.accentOrange : Theme.palette.textSecondary
                         }
+                        LogosText { text: "·"; color: Theme.palette.textSecondary; font.pixelSize: Theme.typography.secondaryText }
                         // The badge the receipt sweep moves from pending to confirmed.
-                        LogosBadge {
+                        LogosText {
                             objectName: "txStatus_" + modelData.hash
                             text: root.statusText(modelData)
+                            textFormat: Text.PlainText
+                            font.weight: Theme.typography.weightBold
+                            font.pixelSize: Theme.typography.secondaryText
                             color: root.statusColor(modelData)
                         }
                     }
@@ -1444,88 +1486,126 @@ Item {
         anchors.margins: Theme.spacing.medium
         spacing: Theme.spacing.small
 
-        Accounts.LockedBanner {
-            namePrefix: "accounts"
-            Layout.fillWidth: true
-            visible: root.ready && shown
-            wallets: root.signerWallets
-            onUnlock: function (seeds) { root.unlockWallets(seeds) }
-        }
-
-        // ── header: the account these figures are about, and the chain they came from ──
-        //
-        // It stays over a pushed screen. A detail screen replaces only the pane under the tab
-        // strip, so it is a place INSIDE the tab it opened from — and which account and which
-        // chain its figures belong to is exactly what must not be left behind.
+        // Top bar: title + description (with the help (i) at the title level, Keycard-style) on
+        // the left; the apps selector, the account picker and the network-scope badge on the right.
         RowLayout {
             Layout.fillWidth: true
-            spacing: Theme.spacing.small
+            spacing: Theme.spacing.medium
 
-            // One row per account, never one per signer: the kit's picker, over the roster. It
-            // re-asserts the backend's selection after a click, so the two never disagree.
-            Accounts.AccountPicker {
+            ColumnLayout {
+                Layout.fillWidth: true
+                spacing: 2
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: Theme.spacing.small
+                    LogosText { text: "Ethereum Wallet"; color: Theme.palette.text; font.pixelSize: 28; font.weight: Theme.typography.weightBold }
+                    LogosInfoButton {
+                        objectName: "walletHelp"
+                        title: "Ethereum Wallet"
+                        Accessible.name: "Help: Ethereum Wallet"
+                        text: "Hold, send and receive Ethereum and ERC-20 tokens across the enabled networks. Accounts come from your signer apps (Keystore, Keycard, a Keycard Shell or a QR wallet); this app never holds their keys. While every wallet is locked nothing shows here, the address book included: the locked wallets are listed by the app that unlocks them (Keystore, Keycard), each with its own Unlock."
+                    }
+                    Item { Layout.fillWidth: true }
+                }
+                LogosText { text: "Your Ethereum accounts, tokens and activity."; color: Theme.palette.textSecondary; font.pixelSize: Theme.typography.secondaryText }
+            }
+
+            // Apps / accounts manager — kept in every state (including fully locked, to add accounts).
+            HoverIcon {
+                objectName: "manageAccountsButton"
+                Layout.alignment: Qt.AlignVCenter
+                size: 32; iconSize: 16
+                iconSource: LogosIcons.grid
+                ToolTip.text: "Accounts"; ToolTip.visible: hovered; ToolTip.delay: 400
+                onClicked: root.askFor("evm.accounts.manage", "No app on this device manages accounts.")
+            }
+
+            // Compact one-line account picker. Its dropdown carries a locked-wallets block, so in
+            // the mixed state no separate banner is shown. Hidden when nothing is unlocked.
+            Accounts.CompactAccountPicker {
                 id: accountPicker
                 objectName: "accountPicker"
-                Layout.preferredWidth: Math.min(440, root.width * 0.75)
+                visible: !root.noAccounts
+                Layout.alignment: Qt.AlignVCenter
+                Layout.preferredWidth: Math.min(320, root.width * 0.42)
                 entries: root.accountEntries
                 currentKey: root.selected
                 copyable: true
                 enabled: root.ready && root.accounts.length > 0
+                lockedWallets: Roster.lockedWallets(root.signerWallets)
                 onPicked: function (entry) { if (root.ready) root.backend.selectAccount(entry.address) }
                 onCopied: function (v) { root.lastCopiedValue = v }
+                onUnlock: function (seeds) { root.unlockWallets(seeds) }
                 Connections {
                     target: accountPicker.popup
                     function onOpened() { if (root.ready) root.backend.refreshAccounts() }
                 }
             }
 
-            // This picker only ever READS the account set — creating, importing and deleting
-            // belong to whoever holds the keystore's custodian role. Asking for the
-            // capability is how a wallet that holds no keys sends the user somewhere it
-            // cannot go itself.
-            //
-            // An icon, with the label moved to a tooltip: it sits between the picker and the
-            // address it names, where a word of chrome pushes the two apart. LogosIconButton
-            // carries no text of its own, so the tooltip is the only thing naming it and is
-            // not decoration.
-            LogosInfoButton { objectName: "accountOriginInfo"; title: "Where accounts come from"; Accessible.name: "Help: Where accounts come from"; text: "The selector shows each account once, by its name and address, with the wallet it comes from and every signer that holds it: this device's Keystore, a Keycard, a Keycard Shell or a QR wallet. Accounts are supplied by their source app. Manage file-backed accounts in Keystore and card-backed accounts in Keycard. Selecting an account does not move funds or copy its private key." }
-            HoverIcon {
-                objectName: "manageAccountsButton"
-                size: 32
-                iconSize: 16
-                iconSource: LogosIcons.grid
-                ToolTip.text: "Accounts"
-                ToolTip.visible: hovered
-                ToolTip.delay: 400
-                onClicked: root.askFor("evm.accounts.manage",
-                                       "No app on this device manages accounts.")
-            }
 
-            Item { Layout.fillWidth: true }
-        }
-
-        // The device-wide portfolio scope. Send has its own
-        // explicit chain picker below.
-
-        RowLayout {
-            Layout.fillWidth: true
-            spacing: Theme.spacing.small
-
-            Item { Layout.fillWidth: true }
-
-            LogosInfoButton { objectName: "networkScopeInfo"; title: "Which networks are shown"; Accessible.name: "Help: Which networks are shown"; text: "Tokens and activity use the enabled networks in the selected mainnet or testnet scope. The same address can have different balances on different networks. Sending uses the network chosen in the Send tab." }
-
-            // This is a portfolio scope, not an "active network": the read-only tabs now
-            // compose every enabled chain in the selected scope.
+            // The portfolio scope, as a button: opens the network modal, titled by the scope.
             LogosBadge {
+                id: chainChip
                 objectName: "chainChip"
-                text: root.networkScope === "testnets" ? "TESTNETS"
-                    : root.networkScope === "both" ? "MAINNETS + TESTNETS" : "MAINNETS"
-                color: root.networkScope === "testnets" || root.networkScope === "both"
-                       ? Theme.palette.accentOrange : Theme.palette.success
+                Layout.alignment: Qt.AlignVCenter
+                text: root.scopeLabel
+                color: root.networkScope === "testnets" || root.networkScope === "both" ? Theme.palette.accentOrange : Theme.palette.success
+                HoverHandler { cursorShape: Qt.PointingHandCursor }
+                TapHandler { onTapped: networkModal.open() }
             }
-
         }
+
+        // Fully locked only: one notice per device app, as the picker's footer groups them, so a
+        // Keycard wallet sends the user to the Keycard app and a Keystore wallet to Keystore, each
+        // with its own Unlock. In the mixed state the same blocks live in the picker's dropdown.
+        // The app's own, not the kit's LockedBanner: that one names only "the Signer app".
+        Repeater {
+            objectName: "accountsLockedByDevice"
+            model: root.ready && root.noAccounts
+                   ? Roster.lockedByDevice(Roster.lockedWallets(root.signerWallets)) : []
+            delegate: LogosNotice {
+                required property var modelData
+                readonly property string deviceKey: modelData.device.replace(/\s+/g, "")
+                objectName: "accountsLocked_" + deviceKey
+                Layout.fillWidth: true
+                title: modelData.count === 1 ? "1 " + modelData.device + " wallet is locked"
+                                             : modelData.count + " " + modelData.device + " wallets are locked"
+                message: modelData.hint
+                actions: [
+                    LogosButton {
+                        objectName: "accountsUnlock_" + deviceKey
+                        variant: LogosButton.Variant.Primary
+                        text: "Unlock"
+                        onClicked: root.unlockWallets(modelData.seeds)
+                    }
+                ]
+            }
+        }
+
+        // No wallet at all (nothing locked to unlock either): say where accounts come from.
+        ColumnLayout {
+            objectName: "noWalletsState"
+            visible: root.ready && root.noAccounts && Roster.lockedWallets(root.signerWallets).length === 0
+            Layout.fillWidth: true
+            Layout.topMargin: Theme.spacing.xxlarge
+            spacing: Theme.spacing.small
+            LogosText {
+                Layout.fillWidth: true
+                horizontalAlignment: Text.AlignHCenter
+                text: "No Ethereum accounts yet"
+                font.pixelSize: Theme.typography.subtitleText
+                font.weight: Theme.typography.weightBold
+            }
+            LogosText {
+                Layout.fillWidth: true
+                horizontalAlignment: Text.AlignHCenter
+                wrapMode: Text.WordWrap
+                color: Theme.palette.textSecondary
+                text: "Add accounts in the Keys, Keycard or QR Wallets app, and they show up here."
+            }
+        }
+        // With the tabs gone, keep the banner / empty state at the top.
+        Item { visible: root.noAccounts; Layout.fillHeight: true }
 
         // A badge cannot carry an instruction. When the wallet is showing nothing because the
         // proxy is unusable, this says so and what to do about it. Outside the stack, so a
@@ -1688,23 +1768,21 @@ Item {
         // no prices and will not fetch any — so the only honest candidate was one asset's
         // balance at 34px, which reads as a total and is not one.
 
-        // ── five sections ──
+        // Tabs. Tokens / Send / Receive / Activity need an unlocked account, so they hide while
+        // none is usable; Address book is wallet-wide and always shown — the only tab when locked.
         LogosTabBar {
             id: tabs
             objectName: "tabs"
             Layout.fillWidth: true
-            // Through selectTab, so a CLICK obeys the same rule the function does. It used to
-            // set the page index alone, which left a pushed screen sitting over the tab the
-            // user had just chosen: the strip said Send, the pane still showed Address book.
-            // Unreachable until the strip moved outside the StackView and stayed on screen.
-            // No loop — selectTab assigns the index it was given, and an unchanged value
-            // emits nothing.
+            // No usable account: nothing behind any tab can open (even the address book is sealed
+            // under a key the Signer gives only while a wallet is unlocked), so no tabs at all.
+            visible: !root.noAccounts
             onCurrentIndexChanged: root.selectTab(currentIndex)
-            LogosTabButton { text: "Tokens" }
-            LogosTabButton { text: "Send" }
-            LogosTabButton { text: "Receive" }
-            LogosTabButton { text: "Activity" }
-            LogosTabButton { text: "Settings" }
+            LogosTabButton { text: "Tokens"; visible: !root.noAccounts }
+            LogosTabButton { text: "Send"; visible: !root.noAccounts }
+            LogosTabButton { text: "Receive"; visible: !root.noAccounts }
+            LogosTabButton { text: "Activity"; visible: !root.noAccounts }
+            LogosTabButton { text: "Address book" }
         }
 
         LogosStackView {
@@ -1712,6 +1790,10 @@ Item {
             objectName: "nav"
             Layout.fillWidth: true
             Layout.fillHeight: true
+            // The content column, capped and centred at 560 like the Keycard and Signer apps.
+            Layout.maximumWidth: 560
+            Layout.alignment: Qt.AlignHCenter
+            visible: !root.noAccounts
 
             // ONLY the pane under the tab strip. A detail screen replaces this, so the
             // account, the network and the tabs stay put behind it — a token's screen is a
@@ -1734,12 +1816,13 @@ Item {
                     // ships no separator.
                     Item {
                         // The sort strip. The order itself is the BACKEND's — this says
-                        // which one is on and asks for the other. Hidden with nothing to
-                        // order: a control that can only be a no-op is noise.
+                        // which one is on and asks for the other. Its sort and refresh controls
+                        // hide with nothing to order (a control that can only be a no-op is
+                        // noise); the strip itself stays, because it carries the Token lists
+                        // hand-off, which an empty list needs most.
                         RowLayout {
                             id: tokenSortStrip
                             objectName: "tokenSortStrip"
-                            visible: root.tokens.length > 0
                             anchors {
                                 top: parent.top; left: parent.left; right: parent.right
                             }
@@ -1750,6 +1833,7 @@ Item {
                             // present for them. Keep an explicit way to ask every balance again.
                             HoverIcon {
                                 objectName: "balancesRefreshButton"
+                                visible: root.tokens.length > 0
                                 size: 32
                                 iconSize: 16
                                 iconSource: root.iconRefresh
@@ -1763,6 +1847,7 @@ Item {
                             // opening the menu that changes it.
                             LogosText {
                                 objectName: "tokenSortLabel"
+                                visible: root.tokens.length > 0
                                 textFormat: Text.PlainText
                                 text: root.tokenSortLabel(root.tokenSort)
                                 color: Theme.palette.textSecondary
@@ -1773,12 +1858,37 @@ Item {
                             HoverIcon {
                                 id: tokenSortButton
                                 objectName: "tokenSortButton"
+                                visible: root.tokens.length > 0
                                 size: 32
                                 iconSize: 16
                                 iconSource: root.iconList
                                 enabled: root.ready
                                 onClicked: tokenSortMenu.popupUnder(tokenSortButton)
                             }
+                            // Token membership belongs to the Token Lists app — a hand-off, here in
+                            // the Tokens toolbar now that there is no Settings tab.
+                            LogosLink {
+                                objectName: "tokenListsLink"
+                                Layout.alignment: Qt.AlignVCenter
+                                text: "Token lists"
+                                onActivated: root.askFor("evm.token_lists.configure",
+                                                         "Nothing on this device manages token lists.")
+                            }
+                        }
+                        // Why a hand-off went nowhere, under the link that asked for it.
+                        LogosText {
+                            id: tokenListsIntentNote
+                            objectName: "tokenListsIntentNote"
+                            visible: root.intentNote.length > 0
+                            anchors {
+                                top: tokenSortStrip.bottom; left: parent.left; right: parent.right
+                            }
+                            horizontalAlignment: Text.AlignRight
+                            textFormat: Text.PlainText
+                            wrapMode: Text.WordWrap
+                            color: Theme.palette.textSecondary
+                            font.pixelSize: Theme.typography.secondaryText
+                            text: root.intentNote
                         }
 
                         LogosListView {
@@ -1786,7 +1896,8 @@ Item {
                             // Under the strip, so a row never scrolls behind the control
                             // that orders it.
                             anchors {
-                                top: tokenSortStrip.visible ? tokenSortStrip.bottom : parent.top
+                                top: tokenListsIntentNote.visible ? tokenListsIntentNote.bottom
+                                                                  : tokenSortStrip.bottom
                                 left: parent.left; right: parent.right
                                 bottom: parent.bottom
                             }
@@ -1825,7 +1936,10 @@ Item {
                                                 text: modelData.symbol
                                                 font.weight: Theme.typography.weightMedium
                                             }
-                                            LogosBadge {
+                                            LogosText {
+                                                textFormat: Text.PlainText
+                                                font.weight: Theme.typography.weightBold
+                                                font.pixelSize: Theme.typography.secondaryText
                                                 objectName: "tokenChain_" + root.tokenKey(modelData)
                                                 text: modelData.network !== undefined
                                                       ? modelData.network : root.networkNameFor(modelData.chainId)
@@ -2318,7 +2432,7 @@ Item {
                                 }
 
                                 // Low / Market / Fast, the wire names fee_module's slow / normal / fast.
-                                Kit.FeeTierPicker { id: tierGroup }
+                                EthFeeTierPicker { id: tierGroup }
 
                                 // Where the numbers came from. A wallet quietly pricing off legacy gasPrice is how
                                 // an overpayment goes unnoticed, so the source is on screen rather than in a log.
@@ -2411,13 +2525,13 @@ Item {
                                 // down to Advanced would report itself off-screen.
                                 LogosText {
                                     objectName: "sendErrorLabel"
-                                    visible: root.ready && root.backend.sendError.length > 0
+                                    visible: root.sendTabError.length > 0
                                     Layout.fillWidth: true
                                     // Backend-authored.
                                     textFormat: Text.PlainText
                                     wrapMode: Text.WordWrap
                                     color: Theme.palette.error
-                                    text: root.ready ? root.backend.sendError : ""
+                                    text: root.sendTabError
                                 }
 
                                 RowLayout {
@@ -2473,18 +2587,6 @@ Item {
                             anchors.margins: Theme.spacing.medium
                             spacing: Theme.spacing.small
 
-                            // An EVM address is the same on every chain, so the network chip above does
-                            // not narrow what this code is for. A user who reads it as "Sepolia only"
-                            // would ask for a second address they do not have.
-                            LogosText {
-                                objectName: "receiveNote"
-                                Layout.fillWidth: true
-                                textFormat: Text.PlainText
-                                wrapMode: Text.WordWrap
-                                color: Theme.palette.textSecondary
-                                text: "One address, every EVM chain. What arrives depends on the network "
-                                      + "the sender is on, not the one selected here."
-                            }
 
                             Item { Layout.fillHeight: true }
 
@@ -2546,6 +2648,12 @@ Item {
                                 text: receivePage.payload
                             }
 
+                            // Copy, and the "one address, every chain" note as an (i) right after it, instead
+                            // of a paragraph above the code.
+                            RowLayout {
+                                Layout.alignment: Qt.AlignHCenter
+                                visible: receivePage.payload.length > 0
+                                spacing: Theme.spacing.tiny
                             LogosCopyButton {
                                 // Its own name. Reusing `addressCopyButton` from the header would give
                                 // two controls one name, and a harness that finds by objectName and
@@ -2558,6 +2666,13 @@ Item {
                                 visible: receivePage.payload.length > 0
                                 value: receivePage.payload
                                 onCopied: function (v) { root.lastCopiedValue = v }
+                            }
+                            LogosInfoButton {
+                                objectName: "receiveInfo"
+                                title: "One address, every EVM chain"
+                                Accessible.name: "Help: One address, every EVM chain"
+                                text: "What arrives depends on the network the sender is on, not the one selected here."
+                            }
                             }
 
                             Item { Layout.fillHeight: true }
@@ -2638,48 +2753,13 @@ Item {
                         }
                     }
 
-                    // Wallet-owned settings are pushed onto `nav`. Token membership belongs to
-                    // Token Lists, so that row hands off through its declared capability.
-                    Item {
-                        id: settingsPage
-                        objectName: "settingsPage"
-
-                        ColumnLayout {
-                            anchors.fill: parent
-                            anchors.margins: Theme.spacing.medium
-                            spacing: Theme.spacing.tiny
-
-                            SettingsEntry {
-                                objectName: "addressBookEntry"
-                                text: "Address book"
-                                chevron: root.iconTriangleDown
-                                onClicked: root.openAddressBook()
-                            }
-                            SettingsEntry {
-                                objectName: "networksEntry"
-                                text: "Networks"
-                                chevron: root.iconTriangleDown
-                                onClicked: root.openNetworks()
-                            }
-                            SettingsEntry {
-                                objectName: "tokenListsEntry"
-                                text: "Token lists"
-                                chevron: root.iconTriangleDown
-                                onClicked: root.askFor("evm.token_lists.configure",
-                                                       "Nothing on this device manages token lists.")
-                            }
-                            LogosText {
-                                objectName: "tokenListsIntentNote"
-                                Layout.fillWidth: true
-                                visible: root.intentNote.length > 0
-                                textFormat: Text.PlainText
-                                wrapMode: Text.WordWrap
-                                color: Theme.palette.textSecondary
-                                text: root.intentNote
-                            }
-
-                            Item { Layout.fillHeight: true }
-                        }
+                    // Address book — a permanent tab (index 4). It reuses the same component the
+                    // detail push uses; that component hides its own back/title at the base
+                    // (nav.depth === 1), so the tab label is the header.
+                    Loader {
+                        objectName: "addressBookTab"
+                        active: true
+                        sourceComponent: addressBookComponent
                     }
                 }
             }
@@ -2799,6 +2879,7 @@ Item {
                 LogosButton {
                     objectName: "tokenDetailSendButton"
                     Layout.alignment: Qt.AlignHCenter
+                    variant: LogosButton.Variant.Primary
                     text: "Send " + tokenPage.symbol
                     enabled: root.ready && !root.sendPending
                     onClicked: {
@@ -3586,35 +3667,104 @@ Item {
         }
     }
 
-    // ── networks ──────────────────────────────────────────────────────────────────
-    // Which networks this portfolio includes, and whether each is routed through verification.
-    //
-    // This was a popup with three links in it. A dialog whose whole content is links to
-    // other places is a click in front of each of them, so the places are the screens now
-    // and the popup is gone.
-    Component {
-        id: networksComponent
-
-        Item {
-            objectName: "networksPage"
-
-            ColumnLayout {
-                anchors.fill: parent
-                anchors.margins: Theme.spacing.medium
-                spacing: Theme.spacing.small
-
-                RowLayout {
-                    Layout.fillWidth: true
-                    HoverIcon {
-                        objectName: "networksBack"
-                        size: 32
-                        iconSize: 20
-                        iconSource: root.iconArrowLeft
-                        onClicked: root.back()
-                    }
-                    LogosText { text: "Networks"; font.pixelSize: 20 }
-                    Item { Layout.fillWidth: true }
+    // ── adding an address ─────────────────────────────────────────────────────────
+    // In a sheet. saveContact answers true once the address is saved, and the sheet closes on
+    // that reply: re-saving an address under the name it already has is a success that changes
+    // neither the list nor contactsError, so neither of those can be what closes it. A refusal
+    // answers false and leaves the sheet open, showing the backend's contactsError.
+    LogosDialog {
+        id: bookAddDialog
+        objectName: "bookAddDialog"
+        title: "Add address"
+        anchors.centerIn: parent
+        width: Math.min((parent ? parent.width : 600) - 40, 460)
+        property bool awaiting: false
+        // This sheet's own refusal, read when its save answers; never the live contactsError.
+        property string error: ""
+        onOpened: { awaiting = false; error = ""; bookNewName.text = ""; bookNewAddress.text = "" }
+        onClosed: { awaiting = false; error = "" }
+        onVisibleChanged: root.contactsErrorSeen = root.ready ? root.backend.contactsError : ""
+        function submit() {
+            if (bookNewAddress.text.trim().length === 0) return
+            awaiting = true
+            error = ""
+            logos.watch(root.backend.saveContact(bookNewAddress.text.trim(), bookNewName.text.trim()),
+                        function (saved) {
+                            bookAddDialog.awaiting = false
+                            if (saved) bookAddDialog.close()
+                            else bookAddDialog.error = Errors.human(root.backend.contactsError) || "The address was not saved."
+                        },
+                        function () {
+                            bookAddDialog.awaiting = false
+                            bookAddDialog.error = "The wallet did not answer. Try again."
+                        })
+        }
+        contentItem: ColumnLayout {
+            spacing: Theme.spacing.small
+            LogosText {
+                Layout.fillWidth: true
+                wrapMode: Text.WordWrap
+                color: Theme.palette.textSecondary
+                text: "A name for an address you send to. Your own accounts come from your signer apps and are always offered."
+            }
+            LogosTextField {
+                id: bookNewName
+                objectName: "bookNewName"
+                Layout.fillWidth: true
+                placeholderText: "Name (optional)"
+            }
+            LogosTextField {
+                id: bookNewAddress
+                objectName: "bookNewAddress"
+                Layout.fillWidth: true
+                placeholderText: "Address (0x…)"
+            }
+            LogosText {
+                objectName: "bookAddError"
+                Layout.fillWidth: true
+                visible: text.length > 0
+                wrapMode: Text.WordWrap
+                textFormat: Text.PlainText
+                color: Theme.palette.error
+                text: bookAddDialog.error
+            }
+            // Why Add address is off, once something is typed: it is armed by an address alone.
+            LogosText {
+                objectName: "bookAddHint"
+                Layout.fillWidth: true
+                visible: bookNewName.text.trim().length > 0 && bookNewAddress.text.trim().length === 0
+                wrapMode: Text.WordWrap
+                color: Theme.palette.textSecondary
+                text: "Type the address too."
+            }
+            RowLayout {
+                Layout.fillWidth: true
+                LogosButton { objectName: "bookAddCancel"; text: "Cancel"; onClicked: bookAddDialog.close() }
+                Item { Layout.fillWidth: true }
+                LogosButton {
+                    objectName: "bookAddSave"
+                    variant: LogosButton.Variant.Primary
+                    text: "Add address"
+                    enabled: root.ready && bookNewAddress.text.trim().length > 0
+                    onClicked: bookAddDialog.submit()
                 }
+            }
+        }
+    }
+
+    // ── networks ──────────────────────────────────────────────────────────────────
+    // Which networks this portfolio includes, and whether each is routed through verification:
+    // a modal opened from the scope badge, titled by the current scope. Enablement, scope and
+    // endpoints are managed in Ethereum RPC, so the one button here is a hand-off.
+    LogosDialog {
+        id: networkModal
+        objectName: "networkModal"
+        title: root.scopeLabel
+        anchors.centerIn: parent
+        width: Math.min((parent ? parent.width : 600) - 40, 460)
+
+        contentItem: ColumnLayout {
+                spacing: Theme.spacing.small
 
                 LogosText {
                     objectName: "rpcSettingsNote"
@@ -3695,12 +3845,11 @@ Item {
                     text: "No networks are currently in scope."
                     color: Theme.palette.textSecondary
                 }
-                Item { Layout.fillHeight: true }
-            }
         }
     }
 
-    // The address book, and the ONE place it is edited. The Send picker offers these rows
+    // The address book, and the ONE place it is edited: the fifth tab, so the tab names it and
+    // there is no screen to leave. The Send picker offers these rows
     // and can do nothing else to them: a control that both selects a recipient and deletes
     // one is a control where a mis-tap during a transaction costs a saved address.
     Component {
@@ -3714,59 +3863,16 @@ Item {
                 anchors.margins: Theme.spacing.medium
                 spacing: Theme.spacing.small
 
-                RowLayout {
+                // Adding happens in a sheet (as passwords do in the Signer). The full-width button
+                // sits on top once there are addresses; the empty state below has its own.
+                LogosButton {
+                    objectName: "bookAdd"
+                    visible: root.contacts.length > 0 && !(root.ready && root.backend.contactsLocked)
                     Layout.fillWidth: true
-                    HoverIcon {
-                        objectName: "addressBookBack"
-                        size: 32
-                        iconSize: 20
-                        iconSource: root.iconArrowLeft
-                        onClicked: root.back()
-                    }
-                    LogosText { text: "Address book"; font.pixelSize: 20 }
-                    Item { Layout.fillWidth: true }
-                }
-
-                // These are COUNTERPARTIES. Saying so is worth a line: a user who reads this
-                // as "my accounts" would look here for one and conclude it had been lost.
-                LogosText {
-                    objectName: "addressBookNote"
-                    Layout.fillWidth: true
-                    textFormat: Text.PlainText
-                    wrapMode: Text.WordWrap
-                    color: Theme.palette.textSecondary
-                    text: "Names for addresses you send to. Your own accounts are managed in "
-                          + "the Keystore app and are always offered alongside these."
-                }
-
-                RowLayout {
-                    Layout.fillWidth: true
-                    spacing: Theme.spacing.tiny
-                    LogosTextField {
-                        id: bookNewName
-                        objectName: "bookNewName"
-                        Layout.preferredWidth: 160
-                        placeholderText: "Name (optional)"
-                    }
-                    LogosTextField {
-                        id: bookNewAddress
-                        objectName: "bookNewAddress"
-                        Layout.fillWidth: true
-                        placeholderText: "Address (0x…)"
-                    }
-                    // Armed by an address alone: a name is optional, because an address worth
-                    // remembering is worth remembering before its owner has one.
-                    LogosButton {
-                        objectName: "bookAdd"
-                        text: "Add"
-                        enabled: root.ready && bookNewAddress.text.trim().length > 0
-                        onClicked: {
-                            root.backend.saveContact(bookNewAddress.text.trim(),
-                                                     bookNewName.text.trim())
-                            bookNewAddress.text = ""
-                            bookNewName.text = ""
-                        }
-                    }
+                    variant: LogosButton.Variant.Primary
+                    text: "Add address"
+                    enabled: root.ready
+                    onClicked: bookAddDialog.open()
                 }
 
                 // The backend's own words. This view does not parse an address, so a refusal
@@ -3774,17 +3880,51 @@ Item {
                 LogosText {
                     objectName: "bookError"
                     Layout.fillWidth: true
-                    visible: root.ready && root.backend.contactsError.length > 0
+                    visible: root.bookPageError.length > 0
                     textFormat: Text.PlainText
                     wrapMode: Text.WordWrap
                     color: Theme.palette.error
-                    text: root.ready ? root.backend.contactsError : ""
+                    text: root.bookPageError
+                }
+
+                // Empty: the Keycard-style centred block, with its own small Add button. While the
+                // addresses are locked there is nothing to add to, so that case keeps its one line.
+                ColumnLayout {
+                    objectName: "bookEmptyState"
+                    visible: root.contacts.length === 0 && !(root.ready && root.backend.contactsLocked)
+                    Layout.fillWidth: true
+                    Layout.topMargin: Theme.spacing.xxlarge
+                    spacing: Theme.spacing.small
+                    LogosText {
+                        Layout.fillWidth: true
+                        horizontalAlignment: Text.AlignHCenter
+                        text: "No saved addresses"
+                        font.pixelSize: Theme.typography.subtitleText
+                        font.weight: Theme.typography.weightBold
+                    }
+                    LogosText {
+                        Layout.fillWidth: true
+                        horizontalAlignment: Text.AlignHCenter
+                        wrapMode: Text.WordWrap
+                        textFormat: Text.PlainText
+                        color: Theme.palette.textSecondary
+                        text: "Save addresses you send to, with a name to find them by."
+                    }
+                    LogosButton {
+                        objectName: "bookAddEmpty"
+                        Layout.alignment: Qt.AlignHCenter
+                        Layout.topMargin: Theme.spacing.small
+                        variant: LogosButton.Variant.Primary
+                        text: "Add address"
+                        enabled: root.ready
+                        onClicked: bookAddDialog.open()
+                    }
                 }
 
                 LogosText {
                     objectName: "bookEmpty"
                     Layout.fillWidth: true
-                    visible: root.contacts.length === 0
+                    visible: root.contacts.length === 0 && root.ready && root.backend.contactsLocked
                     textFormat: Text.PlainText
                     color: Theme.palette.textSecondary
                     text: root.ready && root.backend.contactsLocked
@@ -3918,7 +4058,8 @@ Item {
                                     ToolTip.text: "Forget"
                                     ToolTip.visible: hovered
                                     ToolTip.delay: 400
-                                    onClicked: root.backend.forgetContact(bookRow.contact.address)
+                                    // An action on the page: its answer shows on the page's line.
+                                    onClicked: { root.contactsErrorSeen = ""; root.backend.forgetContact(bookRow.contact.address) }
                                 }
                             }
 
@@ -4008,11 +4149,17 @@ Item {
         rows: root.transferRows(sq, "sendReview", root.networkLabel())
         callList: root.transferCalls(sq)
         nameOf: root.namedAddr
-        error: root.ready ? root.backend.sendError : ""
+        // Its own refusal, read as it answers (onSendErrorChanged); never the live sendError.
+        property string shownError: ""
+        error: shownError
+        onOpened: shownError = ""
+        onClosed: shownError = ""
         confirmText: "Confirm send"
         busy: root.sendSubmitting
         confirmEnabled: root.ready && !root.sendPending && sendForm.q.ok === true
         onConfirmed: {
+            shownError = ""
+            root.sendSubmittedFrom = "send"
             root.sendSubmitting = true
             root.backend.submitSend(sendForm.formRequest)
         }
@@ -4024,6 +4171,7 @@ Item {
     // The same transfer, pinned to the nonce holding the queue up, at fees a node takes as its
     // replacement. Confirm goes out through submitSend, like any send.
     Kit.TxReviewDialog {
+        id: resendReviewDialog
         objectName: "resendReviewDialog"
         title: "Resend with current fees"
         prefix: "resendReview"
@@ -4035,11 +4183,16 @@ Item {
         rows: root.transferRows(rq, "resendReview", root.networkNameFor(rq.chainId))
         callList: root.transferCalls(rq)
         nameOf: root.namedAddr
-        error: root.ready ? root.backend.sendError : ""
+        property string shownError: ""
+        error: shownError
+        onOpened: shownError = ""
+        onClosed: shownError = ""
         confirmText: "Resend"
         busy: root.sendSubmitting
         confirmEnabled: root.ready && !root.sendPending
         onConfirmed: {
+            shownError = ""
+            root.sendSubmittedFrom = "resend"
             root.sendSubmitting = true
             root.resendSubmitted = true
             root.backend.submitSend(JSON.stringify(root.resendReview.request))
